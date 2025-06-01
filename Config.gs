@@ -1,12 +1,8 @@
 // File: Config.gs
 
-
-
 /** @constant {object} SCRIPT_PROPERTIES Access to script properties for secure storage. */
 
 const SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
-
-
 
 // --- Box API General ---
 /** @constant {string} BOX_API_BASE_URL Base URL for the Box API. */
