@@ -1,247 +1,181 @@
 /**
- * @file Service.gs
- * @description This file defines the known OAuth2 service providers and their specific URL configurations
- * for use with the cGoa library. It follows the patterns established by Bruce McPherson.
- * To add a new service, extend the 'service.pockage' object with the provider's details.
+ * @file TestBox.gs
+ * @description Simple test functions for BoxOAuth.gs using cGoa.
  */
 
-var Service = (function (service) {
-  'use strict';
+// --- Configuration for Testing ---
+// Ensure these Script Property names match what's in your BoxOAuth.gs
+const TEST_BOX_CLIENT_ID_PROPERTY = 'BOX_CLIENT_ID';
+const TEST_BOX_CLIENT_SECRET_PROPERTY = 'BOX_CLIENT_SECRET';
 
-  // --- Private Helper Functions ---
-  // These helpers are scoped to this Service module, similar to cGoa's internal utilities.
+/**
+ * SETUP STEP 1: Run this function once to ensure your Box Client ID and Secret
+ * are stored in Script Properties.
+ *
+ * REPLACE 'YOUR_BOX_CLIENT_ID' and 'YOUR_BOX_CLIENT_SECRET' with your actual credentials.
+ */
+// In TestBox.gs
 
-  /**
-   * Checks if an item is undefined.
-   * @param {*} item The item to check.
-   * @return {boolean} True if the item is undefined, false otherwise.
-   * @private
-   */
-  const isUndefined_ = (item) => typeof item === typeof undefined;
+/**
+ * SETUP STEP 1: Run this function once to ensure your Box Client ID and Secret
+ * are stored in Script Properties.
+ *
+ * REPLACE 'YOUR_BOX_CLIENT_ID' and 'YOUR_BOX_CLIENT_SECRET' with your actual credentials.
+ */
+function setupBoxCredentialsForTest() {
+  const scriptProperties = PropertiesService.getScriptProperties();
+  
+  const clientId = 'YOUR_BOX_CLIENT_ID'; // <--- REPLACE THIS
+  const clientSecret = 'YOUR_BOX_CLIENT_SECRET'; // <--- REPLACE THIS
 
-  /**
-   * Checks if an item is null.
-   * @param {*} item The item to check.
-   * @return {boolean} True if the item is null, false otherwise.
-   * @private
-   */
-  const isNull_ = (item) => item === null;
+  if (clientId === 'YOUR_BOX_CLIENT_ID' || clientSecret === 'YOUR_BOX_CLIENT_SECRET') {
+    Logger.log('ERROR: Please replace placeholder credentials in setupBoxCredentialsForTest() before running.');
+    // Since it's a standalone script, an error in the logs is the main feedback here.
+    // You could throw an error to halt execution if desired:
+    // throw new Error('Placeholder credentials not replaced in setupBoxCredentialsForTest.');
+    return;
+  }
+  
+  scriptProperties.setProperty(TEST_BOX_CLIENT_ID_PROPERTY, clientId);
+  scriptProperties.setProperty(TEST_BOX_CLIENT_SECRET_PROPERTY, clientSecret);
+  
+  Logger.log('Box Client ID and Secret have been set in Script Properties.');
+  Logger.log('Property "' + TEST_BOX_CLIENT_ID_PROPERTY + '" set.');
+  Logger.log('Property "' + TEST_BOX_CLIENT_SECRET_PROPERTY + '" set.');
+  Logger.log('You can now proceed with testing.');
+}
+/**
+ * TEST STEP 1: Get and log the Box Authorization URL.
+ * Copy the URL from the logs, paste it into your browser, and authorize the application.
+ * You will be redirected to a URL ending in /usercallback. This is expected.
+ */
+function test_1_ShowBoxAuthorizationUrl() {
+  Logger.log('Attempting to get Box Authorization URL...');
+  try {
+    // This function is defined in your BoxOAuth.gs
+    BoxOAuth.showAuthorizationUrl(); 
+    Logger.log('Check the logs above for the Authorization URL. Open it in a browser to authorize.');
+    Logger.log('After authorizing, you will be redirected. Then run test_2_TestBoxConnection().');
+  } catch (e) {
+    Logger.log('Error in test_1_ShowBoxAuthorizationUrl: ' + e.toString());
+    Logger.log('Stack: ' + e.stack);
+  }
+}
 
-  /**
-   * Checks if an item is null or undefined.
-   * @param {*} item The item to check.
-   * @return {boolean} True if the item is null or undefined, false otherwise.
-   * @private
-   */
-  const isNullOrUndefined_ = (item) => isNull_(item) || isUndefined_(item);
-
-  /**
-   * Ensures an item is an array. If not, wraps it in an array.
-   * Handles null or undefined by returning an empty array.
-   * @param {*} item The item to arrayify.
-   * @return {Array} The item as an array.
-   * @private
-   */
-  const arrify_ = (item) => Array.isArray(item) ? item : (isNullOrUndefined_(item) ? [] : [item]);
-
-  /**
-   * URL-encodes a string.
-   * @param {string} str The string to encode.
-   * @return {string} The URL-encoded string.
-   * @private
-   */
-  const encodeURIComponent_ = (str) => encodeURIComponent(str);
-
-  /**
-   * Converts an object or array of objects into a URL query string.
-   * @param {Object|Array<Object>} params The parameters to convert.
-   * @return {string} The URL query string (e.g., "?key1=value1&key2=value2").
-   * @private
-   */
-  const objectToQueryString_ = (params) => {
-    const paramArray = arrify_(params);
-    const queryParams = paramArray.reduce((p, c) => {
-      Object.keys(c).forEach(k => p.push([k, encodeURIComponent_(c[k])].join('=')));
-      return p;
-    }, []);
-    return queryParams.length ? `?${queryParams.join('&')}` : '';
-  };
-
-  // --- Public Service Definitions ---
-
-  /**
-   * @property {Object} pockage - Defines configurations for various OAuth2 service providers.
-   * Each key is a service name (e.g., "google", "twitter", "box"), and its value is an object
-   * containing URLs and settings for that service.
-   *
-   * Required properties for each service:
-   * - authUrl {string}: The authorization endpoint URL.
-   * - tokenUrl {string}: The token endpoint URL.
-   *
-   * Optional properties:
-   * - refreshUrl {string}: The URL to refresh an access token. Defaults to tokenUrl if not provided by cGoa.
-   * - basic {boolean}: True if client credentials for token requests should be sent via HTTP Basic Auth.
-   * False or omitted if sent in request body. (Default: false)
-   * - accountType {string}: Specifies the type of account (e.g., "serviceaccount", "firebase", "credential").
-   * Used by cGoa for special handling. (Default: standard web flow)
-   * - checkUrl {string}: URL to validate an access token (e.g., Google's tokeninfo endpoint).
-   * - defaultDuration {number}: Default token expiry in seconds if not provided by the service.
-   * - customizeOptions {Object}: Functions to customize parts of the OAuth flow for specific services.
-   * - scopes {function(Array<string>): Object|Array<string>}: Modifies scopes. Can return an array or an object {online:[], offline:[]}.
-   * - codeVerify {function(string, Object): string}: Modifies auth URL for PKCE or similar.
-   * - token {function(Object, Object, Object): Object}: Modifies token request options.
-   * - duration {string}: Used by some services (e.g., Reddit's 'permanent') for refresh token requests.
-   * - accept {string}: Value for the 'Accept' header in token requests (e.g., "application/json").
-   */
-  service.pockage = {
-    // --- Box Configuration ---
-    "box": {
-      authUrl: "https://account.box.com/api/oauth2/authorize",
-      tokenUrl: "https://api.box.com/oauth2/token",
-      refreshUrl: "https://api.box.com/oauth2/token", // Box uses the same URL for refresh
-      basic: false, // Box expects client_id & client_secret in the POST body for token requests
-      // No specific accountType needed for standard web server flow.
-      // No standard checkUrl like Google's tokeninfo; token validation is usually by using it.
-      // customizeOptions might be needed if Box has very specific requirements not covered by standard OAuth2.
-      // For now, a basic setup is provided.
-    },
-
-    // --- Other Services (from your original Service.txt) ---
-    "twitterAppOnly": {
-      tokenUrl: "https://api.twitter.com/oauth2/token",
-      basic: true,
-      accountType: "credential",
-    },
-    "twitter": {
-      authUrl: "https://twitter.com/i/oauth2/authorize",
-      tokenUrl: "https://api.twitter.com/2/oauth2/token",
-      refreshUrl: "https://api.twitter.com/2/oauth2/token",
-      basic: true,
-      customizeOptions: {
-        codeVerify: (url, pockage) => {
-          // Helper to add query param if URL doesn't have one, or append if it does
-          const qiffyUrl_ = (u) => u.includes('?') ? '&' : '?';
-          return `${url}${qiffyUrl_(url)}code_challenge=${pockage.id}&code_challenge_method=plain`;
-        },
-        scopes: (scopes) => {
-          const offline = 'offline.access';
-          const online = scopes.filter(f => f !== offline);
-          return {
-            offline: online.concat([offline]),
-            online
-          };
-        },
-        token: (options = {}, pockage) => {
-          const { payload = {} } = options || {};
-          const newOptions = {
-            ...options,
-            contentType: 'application/x-www-form-urlencoded',
-            payload: {
-              ...payload,
-              code_verifier: pockage.id,
-              client_id: pockage.clientId // Twitter needs client_id in body even with Basic Auth for some flows
-            }
-          };
-          return newOptions;
-        }
+/**
+ * TEST STEP 2: Test the connection to Box.
+ * Run this AFTER you have successfully authorized via the URL from test_1.
+ */
+function test_2_TestBoxConnection() {
+  Logger.log('Attempting to test Box connection...');
+  try {
+    // This function is defined in your BoxOAuth.gs
+    const result = BoxOAuth.testConnection(); 
+    
+    if (result) {
+      Logger.log('Test Connection Result:');
+      Logger.log('Success: ' + result.success);
+      if (result.userInfo) {
+        Logger.log('User Name: ' + result.userInfo.name);
+        Logger.log('User Login: ' + result.userInfo.login);
       }
-    },
-    "google_service": {
-      authUrl: "https://www.googleapis.com/oauth2/v3/token", // Note: This is token URL, typical for service accounts
-      tokenUrl: "https://www.googleapis.com/oauth2/v3/token",
-      defaultDuration: 3600, // Service account tokens are typically short-lived (1 hour)
-      accountType: 'serviceaccount',
-      checkUrl: "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token="
-    },
-    "google": {
-      authUrl: "https://accounts.google.com/o/oauth2/auth",
-      tokenUrl: "https://accounts.google.com/o/oauth2/token", // v4 is common: "https://oauth2.googleapis.com/token"
-      refreshUrl: "https://accounts.google.com/o/oauth2/token", // v4 is common: "https://oauth2.googleapis.com/token"
-      checkUrl: "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=" // v3 is also common: "https://www.googleapis.com/oauth2/v3/tokeninfo"
-    },
-    "linkedin": {
-      authUrl: "https://www.linkedin.com/oauth/v2/authorization",
-      tokenUrl: "https://www.linkedin.com/oauth/v2/accessToken",
-      refreshUrl: "https://www.linkedin.com/oauth/v2/accessToken"
-    },
-    "soundcloud": {
-      authUrl: "https://soundcloud.com/connect",
-      tokenUrl: "https://api.soundcloud.com/oauth2/token",
-      refreshUrl: "https://api.soundcloud.com/oauth2/token"
-    },
-    "podio": {
-      authUrl: "https://podio.com/oauth/authorize",
-      tokenUrl: "https://podio.com/oauth/token",
-      refreshUrl: "https://podio.com/oauth/token"
-    },
-    "shoeboxed": {
-      authUrl: "https://id.shoeboxed.com/oauth/authorize",
-      tokenUrl: "https://id.shoeboxed.com/oauth/token",
-      refreshUrl: "https://id.shoeboxed.com/oauth/token"
-    },
-    "github": {
-      authUrl: "https://github.com/login/oauth/authorize",
-      tokenUrl: "https://github.com/login/oauth/access_token",
-      refreshUrl: "https://github.com/login/oauth/access_token",
-      accept: "application/json" // GitHub token endpoint returns form-encoded by default
-    },
-    "reddit": {
-      authUrl: "https://ssl.reddit.com/api/v1/authorize",
-      tokenUrl: "https://ssl.reddit.com/api/v1/access_token",
-      refreshUrl: "https://ssl.reddit.com/api/v1/access_token",
-      basic: true,
-      duration: 'permanent' // Reddit specific parameter for long-lived refresh tokens
-    },
-    "asana": {
-      authUrl: "https://app.asana.com/-/oauth_authorize",
-      tokenUrl: "https://app.asana.com/-/oauth_token",
-      refreshUrl: "https://app.asana.com/-/oauth_token",
-    },
-    "live": { // Microsoft Live / Outlook
-      authUrl: "https://login.live.com/oauth20_authorize.srf",
-      tokenUrl: "https://login.live.com/oauth20_token.srf",
-      refreshUrl: "https://login.live.com/oauth20_token.srf",
-    },
-    "paypal_sandbox": {
-      authUrl: "https://api.sandbox.paypal.com/v1/oauth2/token", // PayPal uses client_credentials, direct token URL
-      tokenUrl: "https://api.sandbox.paypal.com/v1/oauth2/token",
-      refreshUrl: "https://api.sandbox.paypal.com/v1/oauth2/token", // Not typical for client_credentials
-      basic: true,
-      accountType: "credential",
-      accept: "application/json"
-    },
-    "paypal_live": {
-      authUrl: "https://api.paypal.com/v1/oauth2/token", // PayPal uses client_credentials, direct token URL
-      tokenUrl: "https://api.paypal.com/v1/oauth2/token",
-      refreshUrl: "https://api.paypal.com/v1/oauth2/token", // Not typical for client_credentials
-      basic: true,
-      accountType: "credential",
-      accept: "application/json"
-    },
-    "classy": {
-      authUrl: "https://api.classy.org/oauth2/auth", // Often client_credentials for server-to-server
-      tokenUrl: "https://api.classy.org/oauth2/auth",
-      refreshUrl: "https://api.classy.org/oauth2/auth",
-      accountType: "credential" // Assuming client_credentials flow
-    },
-    "quickbooks": {
-      authUrl: "https://appcenter.intuit.com/connect/oauth2",
-      tokenUrl: "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
-      refreshUrl: "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
-    },
-    "firebase": { // This is a placeholder for cGoa's JWT generation for Firebase, not standard OAuth2
-      accountType: 'firebase'
-    },
-    "vimeo": {
-      authUrl: "https://api.vimeo.com/oauth/authorize",
-      tokenUrl: "https://api.vimeo.com/oauth/access_token",
-      refreshUrl: "https://api.vimeo.com/oauth/access_token"
-      // Vimeo often requires specific 'Accept' headers for API calls,
-      // but token endpoint itself is usually standard.
+      if (result.error) {
+        Logger.log('Error: ' + result.error);
+      }
+    } else {
+      Logger.log('BoxOAuth.testConnection() did not return a result.');
     }
-    // Add other services here following the same pattern
-  };
+  } catch (e) {
+    Logger.log('Error in test_2_TestBoxConnection: ' + e.toString());
+    Logger.log('Stack: ' + e.stack);
+  }
+}
 
-  return service;
+/**
+ * OPTIONAL: Get an Access Token.
+ * Run this after successful authorization.
+ */
+function test_GetBoxAccessToken() {
+  Logger.log('Attempting to get Box Access Token...');
+  try {
+    // This function is defined in your BoxOAuth.gs
+    const token = BoxOAuth.getValidAccessToken(); 
+    if (token) {
+      Logger.log('Access Token: ' + token);
+    } else {
+      Logger.log('Failed to get access token. Ensure you have authorized.');
+    }
+  } catch (e) {
+    Logger.log('Error in test_GetBoxAccessToken: ' + e.toString());
+    Logger.log('Stack: ' + e.stack);
+  }
+}
 
-})(Service || {});
+/**
+ * OPTIONAL: Clear stored Box authorization.
+ * Useful if you want to re-authorize or test the flow from scratch.
+ */
+function test_ClearBoxAuthorization() {
+  Logger.log('Attempting to clear Box authorization...');
+  try {
+    // This function is defined in your BoxOAuth.gs
+    BoxOAuth.clearAuthorization(); 
+    Logger.log('Box authorization should be cleared. Run test_1_ShowBoxAuthorizationUrl() to re-authorize.');
+  } catch (e) {
+    Logger.log('Error in test_ClearBoxAuthorization: ' + e.toString());
+    Logger.log('Stack: ' + e.stack);
+  }
+}
+
+/**
+ * OPTIONAL: Check the status of the BoxOAuth service.
+ */
+function test_GetBoxStatus() {
+  Logger.log('Getting BoxOAuth status...');
+  try {
+    const status = BoxOAuth.getStatus();
+    Logger.log('Status: \n' + JSON.stringify(status, null, 2));
+  } catch (e) {
+    Logger.log('Error in test_GetBoxStatus: ' + e.toString());
+    Logger.log('Stack: ' + e.stack);
+  }
+}
+
+/**
+ * This is the global callback function cGoa will look for.
+ * Ensure your BoxOAuth.gs also calls this from its global authCallback.
+ * Or, if BoxOAuth.gs has its own global authCallback, ensure it's correctly
+ * invoking BoxOAuth.handleAuthCallback(request).
+ * The version in your BoxOAuth.gs should be sufficient.
+ */
+// function authCallback(request) {
+//   Logger.log('Global authCallback in TestBox.gs received request.');
+//   return BoxOAuth.handleAuthCallback(request); // Delegate to your BoxOAuth module
+// }
+
+/**
+ * Creates a custom menu in the Google Sheet/Doc/Slide to run tests easily.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi() // Or DocumentApp or SlidesApp
+      .createMenu('Box OAuth Tests')
+      .addItem('SETUP: Store Credentials', 'setupBoxCredentialsForTest')
+      .addSeparator()
+      .addItem('Test 1: Show Auth URL', 'test_1_ShowBoxAuthorizationUrl')
+      .addItem('Test 2: Test Connection', 'test_2_TestBoxConnection')
+      .addSeparator()
+      .addItem('Get Access Token', 'test_GetBoxAccessToken')
+      .addItem('Clear Authorization', 'test_ClearBoxAuthorization')
+      .addItem('Get Status', 'test_GetBoxStatus')
+      .addToUi();
+}
+
+function debugLibraries() {
+  Logger.log('typeof cGoa: ' + typeof cGoa);
+  Logger.log('typeof cUseful: ' + typeof cUseful);
+  
+  if (typeof cGoa === 'object') {
+    Logger.log('cGoa properties: ' + Object.keys(cGoa));
+    Logger.log('typeof cGoa.GoaApp: ' + typeof cGoa.GoaApp);
+  }
+}
