@@ -47,7 +47,7 @@ const MAX_TEXT_EXTRACTION_LENGTH = 500;
 const DEFAULT_PROCESSING_FOLDER_ID = '0';
 
 /** @constant {string} ACTIVE_TEST_FOLDER_ID Specific Box folder ID used for testing and examples. */
-const ACTIVE_TEST_FOLDER_ID = '323509823918';
+const ACTIVE_TEST_FOLDER_ID = '187704768929';
 
 // --- Processing Stages ---
 /** @constant {string} PROCESSING_STAGE_UNPROCESSED Marker for unprocessed files. */
