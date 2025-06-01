@@ -527,32 +527,3 @@ var BoxFileOperations = (function() {
   // Return the public interface
   return ns;
 })();
-
-// Legacy function wrappers for backward compatibility
-function isImageFile(filename) {
-  return BoxFileOperations.isImageFile(filename);
-}
-
-function findAllImageFiles(folderId, accessToken, allImages) {
-  return BoxFileOperations.findAllImageFiles(folderId, accessToken, allImages);
-}
-
-function hasExistingMetadata(fileId, accessToken, templateKey) {
-  return BoxFileOperations.hasExistingMetadata(fileId, accessToken, templateKey);
-}
-
-function getCurrentMetadata(fileId, accessToken, templateKey) {
-  return BoxFileOperations.getCurrentMetadata(fileId, accessToken, templateKey);
-}
-
-function applyMetadataToFileFixed(fileId, metadata, accessToken, templateKey) {
-  return BoxFileOperations.applyMetadata(fileId, metadata, accessToken, templateKey);
-}
-
-function updateMetadataOnFileFixed(fileId, metadata, accessToken, templateKey) {
-  return BoxFileOperations.updateMetadata(fileId, metadata, accessToken, templateKey);
-}
-
-function attachTemplateToAllImages(accessToken) {
-  return BoxFileOperations.attachTemplateToAllImages(accessToken);
-}

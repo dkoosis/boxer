@@ -456,20 +456,3 @@ var MetadataExtraction = (function() {
   // Return public interface
   return ns;
 })();
-
-// Legacy function wrappers for backward compatibility
-function calculateAspectRatio(width, height) {
-  return MetadataExtraction.MathUtils_.calculateAspectRatio(width, height);
-}
-
-function extractComprehensiveMetadata(fileDetails) {
-  return MetadataExtraction.extractComprehensiveMetadata(fileDetails);
-}
-
-function processSingleImageBasic(fileEntry, accessToken) {
-  return MetadataExtraction.processSingleImageBasic(fileEntry, accessToken);
-}
-
-function processImagesInFoldersBasic(folderIdsToProcess, accessToken) {
-  return MetadataExtraction.processImagesInFoldersBasic(folderIdsToProcess, accessToken);
-}
