@@ -1,84 +1,256 @@
-# Simple Box Authentication Setup for Trigger Scripts
+# Box Image Metadata Processing System
 
-## One-Time Setup Process
+A comprehensive Google Apps Script system for extracting, analyzing, and managing metadata for images stored in Box. Uses **Bruce McPherson's excellent cGoa and cUseful libraries** for robust OAuth2 authentication and utility functions.
 
-### Step 1: Verify Your Existing Setup
-Your credentials are already in Script Properties, so you're good there.
+## Features
 
-### Step 2: Initialize Package
-Run this once in Apps Script:
+- **Comprehensive Metadata Extraction**: Basic file info, EXIF data, AI-powered analysis
+- **Google Vision API Integration**: Object detection, label recognition, OCR, color analysis
+- **Robust Authentication**: Uses Bruce McPherson's cGoa library for OAuth2
+- **Automated Processing**: Scheduled triggers for continuous processing
+- **Content Analysis**: Smart categorization based on folder paths and AI insights
+- **Enterprise Metadata Templates**: Structured metadata storage in Box
+- **Rate Limiting**: Built-in delays and exponential backoff using cUseful
+
+## File Structure
+
+```
+├── Config.gs                    # Configuration constants
+├── BoxAuth.gs                   # Authentication using cGoa
+├── Service.gs                   # OAuth service definitions
+├── BoxMetadataTemplates.gs      # Metadata template management
+├── BoxFileOperations.gs         # File operations with cUseful utilities
+├── MetadataExtraction.gs        # Basic metadata extraction
+├── VisionExif.gs                # EXIF and Vision API functions
+├── MainScript.gs                # Main orchestrator and enhanced processing
+├── EnhancedUtilities.gs         # Additional utilities following Bruce's patterns
+├── BoxTests.gs                  # Comprehensive test functions
+└── README.md                    # This file
+```
+
+## Setup Guide
+
+### Step 1: Add Required Libraries
+
+In Apps Script, go to **Libraries** and add these by Bruce McPherson:
+
+| Library | ID | Identifier | Description |
+|---------|----|-----------| ----------- |
+| **cGoa** | `1v_l4xN3ICa0lAW315NQEzAHPSoNiFdWHsMEwj2qA5t9cgZ5VWci2Qxv2` | `cGoa` | OAuth2 authentication |
+| **cUseful** | `1EbLSESpiGkI3PYmJqWh3-rmLkYKAtCNPi1L2YCtMgo2Ut8xMThfJ41Ex` | `cUseful` | Utility functions |
+
+> **Note**: cUseful is a dependency of cGoa, so adding cGoa should automatically include it.
+
+### Step 2: Configure Script Properties
+
+In **Project Settings > Script Properties**, add:
+
+| Property | Value | Description |
+|----------|-------|-------------|
+| `OAUTH_CLIENT_ID` | Your Box OAuth Client ID | From Box Developer Console |
+| `OAUTH_CLIENT_SECRET` | Your Box OAuth Client Secret | From Box Developer Console |
+| `VISION_API_KEY` | Your Google Cloud Vision API Key | Optional, for AI features |
+
+### Step 3: Box Developer Console Setup
+
+1. Create a Custom App in [Box Developer Console](https://developer.box.com/)
+2. Set **Redirect URI** to: `https://script.google.com/macros/s/YOUR_SCRIPT_ID/usercallback`
+3. Enable scopes: **Read and write all files and folders**, **Manage enterprise properties**
+4. Get Client ID and Secret for Script Properties
+
+### Step 4: Initialize Authentication
+
+Run this **once** to complete OAuth2 setup:
+
 ```javascript
 initializeBoxAuth()
 ```
 
-This will:
-- ✅ Create the cGoa package using your existing credentials
-- ✅ Check if auth is already complete
-- ✅ Give you next steps if auth is needed
+This will show you instructions to:
+1. Deploy as web app (temporarily)
+2. Visit the web app URL to authorize
+3. Complete Box OAuth consent
+4. Undeploy web app (optional)
 
-### Step 3: Complete OAuth (One-Time Only)
+### Step 5: Verify Setup
 
-**IF** `initializeBoxAuth()` shows you need authorization:
-
-1. **Deploy as Web App** (temporarily):
-   - Go to Deploy → New deployment
-   - Type: Web app
-   - Execute as: Me  
-   - Who has access: Anyone
-   - Click Deploy
-   - Copy the web app URL
-
-2. **Complete Authorization**:
-   - Visit the web app URL in your browser
-   - Click through the Box consent process
-   - You'll see "Authorization Complete!"
-
-3. **Clean Up** (optional):
-   - Go back to Apps Script
-   - You can undeploy the web app now
-   - The authorization is permanently saved in Script Properties
-
-### Step 4: Verify Setup
-Run this to confirm everything works:
 ```javascript
-testBoxAccess()
+testBoxGoaSetup()  // Comprehensive authentication test
+testCompleteSetup() // Full system test
 ```
 
-### Step 5: Use in Your Trigger Scripts
-Your existing code will now work:
+## Basic Usage
+
+### Manual Processing
+
 ```javascript
-function yourTriggerFunction() {
-  const accessToken = getValidAccessToken(); // Now works!
-  
-  // Your existing Box API calls...
-  const template = getOrCreateImageTemplate(accessToken);
-  // etc.
-}
+// Basic metadata extraction
+processBoxImages()
+
+// Enhanced processing with EXIF and Vision API
+processBoxImagesEnhanced()
+
+// Process specific folder
+MetadataExtraction.processImagesInFoldersBasic(['folder_id'], getValidAccessToken())
 ```
 
-## Why This Works
+### Automated Processing
 
-- **cGoa stores tokens in Script Properties** (where your credentials are)
-- **Tokens automatically refresh** when they expire
-- **No web app needed** for ongoing operations
-- **Your trigger scripts run independently**
+```javascript
+// Set up hourly automated processing
+createScheduledTrigger()
+
+// Complete system setup (templates, automation, initial processing)
+setupComplete()
+```
+
+### Monitoring and Reports
+
+```javascript
+// Basic processing statistics
+getImageProcessingSummary()
+
+// Enhanced/AI processing statistics
+getEnhancedProcessingSummary()
+
+// Test folder specific summary
+showTestFolderSummary()
+```
+
+## Advanced Features
+
+### Vision API Integration
+
+```javascript
+// Test Vision API setup
+verifyVisionApiSetup()
+testVisionApiIntegration()
+
+// Troubleshoot Vision API issues
+troubleshootVisionApiError()
+```
+
+### Template Management
+
+```javascript
+// Get or create metadata template
+const template = getOrCreateImageTemplate(getValidAccessToken())
+
+// List all templates
+listExistingTemplates(getValidAccessToken())
+
+// Attach template to all images
+BoxFileOperations.attachTemplateToAllImages(getValidAccessToken())
+```
+
+### File Operations
+
+```javascript
+// Find all images
+const images = BoxFileOperations.findAllImageFiles('folder_id', getValidAccessToken())
+
+// Check/get metadata
+const metadata = BoxFileOperations.getCurrentMetadata('file_id', getValidAccessToken())
+
+// Apply metadata with create/update logic
+BoxFileOperations.applyMetadata('file_id', metadataObject, getValidAccessToken())
+```
+
+## Configuration
+
+### Processing Folders
+
+Update in `Config.gs`:
+
+```javascript
+const ACTIVE_TEST_FOLDER_ID = 'your_folder_id';  // For testing
+const DEFAULT_PROCESSING_FOLDER_ID = '0';        // Root folder or specific ID
+```
+
+### Rate Limiting
+
+Adjust delays in `Config.gs`:
+
+```javascript
+const ENHANCED_PROCESSING_BATCH_SIZE = 5;         // Files per batch
+const ENHANCED_PROCESSING_FILE_DELAY_MS = 2000;   // Delay between files
+const ENHANCED_PROCESSING_BATCH_DELAY_MS = 5000;  // Delay between batches
+```
+
+### Content Analysis Rules
+
+Customize content categorization in `MetadataExtraction.gs`:
+
+```javascript
+// Add custom content type rules in ContentAnalyzer_.analyzeContent()
+var contentRules = [
+  {
+    test: function() { return lowerPath.includes('your_keyword'); },
+    apply: function() { analysis.contentType = 'your_type'; }
+  }
+  // Add more rules...
+];
+```
+
+## Metadata Template Fields
+
+The system creates a comprehensive metadata template with these categories:
+
+- **Core File Info**: filename, path, size, format
+- **Technical Specs**: dimensions, aspect ratio, megapixels
+- **Camera/EXIF**: camera model, date taken, photographer
+- **Content**: type, subject, location, department
+- **Project Info**: project name, client, event details
+- **AI Analysis**: detected objects, scene description, extracted text, colors
+- **Business**: usage rights, quality rating, importance level
+- **Processing**: stage tracking, version, review flags
+- **Notes**: additional comments
 
 ## Troubleshooting
 
-If `getValidAccessToken()` throws an error:
-1. Run `getAuthStatus()` to see what's missing
-2. Run `initializeBoxAuth()` to see setup steps
-3. Check that your Script Properties have the OAuth credentials
+### Authentication Issues
 
-## Box Developer Console Setup
+```javascript
+// Check auth status
+getAuthStatus()
+diagnoseBoxAuth()
 
-You still need to configure your Box app with the redirect URI:
-- **Redirect URI**: `https://script.google.com/macros/s/YOUR_SCRIPT_ID/usercallback`
-- Replace `YOUR_SCRIPT_ID` with your actual script ID from the web app URL
+// Reset and re-authorize
+resetBoxAuth()
+initializeBoxAuth()
+```
 
-## Summary
+### Vision API Issues
 
-✅ **Your approach is correct** - standalone trigger script  
-✅ **No hardcoded credentials** - uses your existing Script Properties  
-✅ **Web app only for initial OAuth** - then undeploy if you want  
-✅ **Trigger scripts work independently** after setup
+```javascript
+// Verify setup
+verifyVisionApiSetup()
+
+// Get troubleshooting guide
+troubleshootVisionApiError()
+
+// Check quota status
+checkVisionApiQuota()
+```
+
+### Processing Issues
+
+```javascript
+// Test single image processing
+testSingleImageProcessing()
+
+// Test basic workflow
+testBasicProcessingWorkflow()
+
+// Test enhanced features
+testEnhancedProcessingFeatures()
+```
+
+## Credits
+
+This system is built using **Bruce McPherson's excellent libraries**:
+
+- **[cGoa](https://github.com/brucemcpherson/cGoa)** - Robust OAuth2 authentication for Google Apps Script
+- **[cUseful](https://github.com/brucemcpherson/cUseful)** - Essential utility functions including exponential backoff
+
+Bruce McPherson's libraries provide the foundation for reliable, production-ready Google Apps Script applications. Learn more at [h

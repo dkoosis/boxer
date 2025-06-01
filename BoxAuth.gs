@@ -1,12 +1,13 @@
 // File: BoxAuth.gs
-// Corrected Box Authentication using cGoa with existing Script Properties
+// Box Authentication using Bruce McPherson's cGoa library
+// Depends on: Config.gs, cGoa library (by Bruce McPherson)
 
 /**
- * Creates and stores the Box package for cGoa using existing credentials
- * Uses your existing Script Properties setup - no hardcoding needed
+ * Creates and stores the Box package for cGoa using existing credentials from Script Properties.
+ * Uses Bruce McPherson's cGoa library for robust OAuth2 handling.
+ * @returns {object} The created Box package configuration
  */
 function createBoxPackage() {
-  // Use your existing credential access logic
   const clientId = SCRIPT_PROPERTIES.getProperty(OAUTH_CLIENT_ID_PROPERTY);
   const clientSecret = SCRIPT_PROPERTIES.getProperty(OAUTH_CLIENT_SECRET_PROPERTY);
   
@@ -15,22 +16,19 @@ function createBoxPackage() {
                    OAUTH_CLIENT_ID_PROPERTY + ' and ' + OAUTH_CLIENT_SECRET_PROPERTY);
   }
   
-  // Following Goa documentation pattern for custom services
   const boxPackage = {
     clientId: clientId,
     clientSecret: clientSecret,
     scopes: ["root_readwrite", "manage_enterprise_properties"],
-    service: 'custom', // Must be 'custom' for non-built-in services
+    service: 'custom',
     packageName: 'boxService',
-    // serviceParameters required for custom services
     serviceParameters: {
       authUrl: "https://account.box.com/api/oauth2/authorize",
-      tokenUrl: "https://api.box.com/oauth2/token", 
+      tokenUrl: "https://api.box.com/oauth2/token",
       refreshUrl: "https://api.box.com/oauth2/token"
     }
   };
   
-  // Store the package using the property store
   cGoa.GoaApp.setPackage(SCRIPT_PROPERTIES, boxPackage);
   Logger.log('✅ Box package created using existing Script Properties');
   
@@ -38,12 +36,12 @@ function createBoxPackage() {
 }
 
 /**
- * Initialize Box package if it doesn't exist
- * Call this once to set up the cGoa package with your existing credentials
+ * Initialize Box package if it doesn't exist.
+ * Call this once to set up the cGoa package with your existing credentials.
+ * @returns {boolean} True if successful, false otherwise
  */
 function initializeBoxPackage() {
   try {
-    // Try to get existing package
     const existingPackage = cGoa.GoaApp.getPackage(SCRIPT_PROPERTIES, 'boxService');
     
     if (!existingPackage) {
@@ -62,29 +60,32 @@ function initializeBoxPackage() {
 }
 
 /**
- * Get a cGoa instance for Box
+ * Get a cGoa instance for Box operations.
+ * @param {object} e Event parameter (can be undefined for server-side calls)
+ * @returns {object} cGoa instance for Box
  */
 function getBoxGoa(e) {
-  // Ensure package exists before creating Goa instance
   initializeBoxPackage();
   
   return cGoa.make(
-    'boxService',           // packageName 
-    SCRIPT_PROPERTIES,      // propertyStore
-    e                       // event parameter (can be undefined for server-side calls)
+    'boxService',           
+    SCRIPT_PROPERTIES,      
+    e                       
   );
 }
 
 /**
- * Get a valid access token for Box API calls
- * This is what your existing code should call
+ * Get a valid access token for Box API calls.
+ * This is the main function your processing scripts should use.
+ * @returns {string} Valid Box access token
+ * @throws {Error} If no token available or OAuth not complete
  */
 function getValidAccessToken() {
   try {
     const goa = getBoxGoa();
     
     if (!goa.hasToken()) {
-      throw new Error('No Box token available. You need to complete OAuth2 authorization first. See initializeBoxAuth()');
+      throw new Error('No Box token available. Complete OAuth2 authorization first. Run initializeBoxAuth() for setup instructions.');
     }
     
     return goa.getToken();
@@ -95,8 +96,8 @@ function getValidAccessToken() {
 }
 
 /**
- * Check if Box authentication is ready for your trigger scripts
- * Call this to verify auth status without triggering OAuth flow
+ * Check if Box authentication is ready for automated scripts.
+ * @returns {boolean} True if token available, false otherwise
  */
 function isBoxAuthReady() {
   try {
@@ -109,23 +110,20 @@ function isBoxAuthReady() {
 }
 
 /**
- * ONE-TIME SETUP: Initialize Box authentication
- * You need to run this ONCE to complete the OAuth2 flow
+ * ONE-TIME SETUP: Initialize Box authentication.
+ * Run this once to complete the OAuth2 flow, then you can undeploy the web app.
  */
 function initializeBoxAuth() {
   Logger.log('=== Box Authentication Initialization ===');
   
   try {
-    // Step 1: Initialize package
     if (!initializeBoxPackage()) {
       return;
     }
     
-    // Step 2: Check if already authorized
     if (isBoxAuthReady()) {
       Logger.log('✅ Box authentication already complete!');
       
-      // Test the connection
       const testResult = testBoxAccess();
       if (testResult.success) {
         Logger.log('✅ Box API access confirmed');
@@ -135,21 +133,19 @@ function initializeBoxAuth() {
       return;
     }
     
-    // Step 3: Need authorization - show instructions
     Logger.log('❌ Box authorization required');
     Logger.log('');
     Logger.log('📋 TO COMPLETE SETUP:');
-    Logger.log('1. Deploy this script as a web app (just for initial auth):');
+    Logger.log('1. Deploy this script as a web app (temporarily):');
     Logger.log('   - Go to Deploy → New deployment');
     Logger.log('   - Type: Web app');
     Logger.log('   - Execute as: Me');
     Logger.log('   - Who has access: Anyone');
     Logger.log('   - Click Deploy');
     Logger.log('');
-    Logger.log('2. Copy the web app URL and visit it in your browser');
-    Logger.log('3. Complete the Box authorization process');
-    Logger.log('4. Once authorized, you can undeploy the web app if desired');
-    Logger.log('5. Your trigger scripts will then work automatically');
+    Logger.log('2. Visit the web app URL and complete Box authorization');
+    Logger.log('3. Once authorized, you can undeploy the web app');
+    Logger.log('4. Your trigger scripts will then work automatically');
     
     const scriptId = ScriptApp.getScriptId();
     const webAppUrl = `https://script.google.com/macros/s/${scriptId}/exec`;
@@ -162,31 +158,29 @@ function initializeBoxAuth() {
 }
 
 /**
- * OAuth callback handler - ONLY needed for initial setup
- * This is the doGet function that handles the OAuth redirect
+ * OAuth callback handler for initial setup.
+ * This handles the OAuth redirect when you visit the web app URL.
+ * @param {object} e Event object from web app request
+ * @returns {HtmlOutput} HTML response for the user
  */
 function doGet(e) {
   try {
     const goa = getBoxGoa(e);
     
-    // Check if consent is needed
     if (goa.needsConsent()) {
       Logger.log('🔐 User consent needed - showing consent screen');
       return goa.getConsent();
     }
     
-    // Get a token
     const token = goa.getToken();
     
-    // Check if we have a token
     if (!goa.hasToken()) {
-      throw new Error('Something went wrong with OAuth - no token received');
+      throw new Error('OAuth flow completed but no token received');
     }
     
-    // Success response
     Logger.log('✅ Box authorization successful!');
     return HtmlService.createHtmlOutput(`
-      <div style="font-family: Arial, sans-serif; padding: 20px;">
+      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px;">
         <h2>✅ Box Authorization Complete!</h2>
         <p>Your Apps Script now has access to Box.</p>
         <p><strong>Setup Complete!</strong> You can now:</p>
@@ -197,6 +191,8 @@ function doGet(e) {
           <li>Your trigger scripts will now work automatically</li>
         </ul>
         <p><em>Token preview: ${token.substring(0, 20)}...</em></p>
+        <hr>
+        <small>Powered by <a href="https://github.com/brucemcpherson" target="_blank">Bruce McPherson's cGoa library</a></small>
       </div>
     `);
     
@@ -213,7 +209,8 @@ function doGet(e) {
 }
 
 /**
- * Test Box API connection
+ * Test Box API connection with current token.
+ * @returns {object} Test result with success status and user info
  */
 function testBoxAccess() {
   try {
@@ -242,7 +239,8 @@ function testBoxAccess() {
 }
 
 /**
- * Get authorization status for debugging
+ * Get detailed authorization status for debugging.
+ * @returns {object} Status object with auth details
  */
 function getAuthStatus() {
   try {

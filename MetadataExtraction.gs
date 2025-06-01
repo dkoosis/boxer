@@ -1,22 +1,20 @@
-// File: MetadataExtraction.gs (Refactored with Bruce McPherson's patterns)
-// Depends on: Config.gs, BoxFileOperations.gs, cUseful library
-// Following Bruce McPherson's organizational patterns with proper error handling
+// File: MetadataExtraction.gs
+// Metadata extraction using Bruce McPherson's organizational patterns
+// Uses cUseful library by Bruce McPherson for robust operations
+// Depends on: Config.gs, BoxFileOperations.gs
 
 /**
- * MetadataExtraction namespace following Bruce's patterns
- * Provides robust metadata extraction with utility functions from cUseful
+ * MetadataExtraction namespace following Bruce McPherson's patterns.
+ * Provides robust metadata extraction with utility functions from cUseful.
  */
 var MetadataExtraction = (function() {
   'use strict';
   
-  // Private namespace
   var ns = {};
-  
-  // Initialize cUseful utilities once
   var utils_ = null;
   
   /**
-   * Initialize utilities following Bruce's dependency-free pattern
+   * Initialize utilities following Bruce's dependency-free pattern.
    * @returns {object} cUseful utilities object
    * @private
    */
@@ -34,12 +32,12 @@ var MetadataExtraction = (function() {
   }
   
   /**
-   * Mathematical utilities using Bruce's approach
+   * Mathematical utilities using Bruce's approach.
    * @private
    */
   var MathUtils_ = {
     /**
-     * Calculates GCD using Bruce's functional style
+     * Calculates GCD using Bruce's functional style.
      * @param {number} a First number
      * @param {number} b Second number
      * @returns {number} Greatest common divisor
@@ -49,7 +47,7 @@ var MetadataExtraction = (function() {
     },
     
     /**
-     * Calculates aspect ratio
+     * Calculates aspect ratio.
      * @param {number} width Image width
      * @param {number} height Image height
      * @returns {string|null} Aspect ratio as string or null
@@ -64,12 +62,12 @@ var MetadataExtraction = (function() {
   };
   
   /**
-   * Content analysis utilities using Bruce's patterns
+   * Content analysis utilities using Bruce's patterns.
    * @private
    */
   var ContentAnalyzer_ = {
     /**
-     * Maps location keywords to enum values
+     * Maps location keywords to enum values.
      * @private
      */
     locationKeywordMap_: {
@@ -90,7 +88,7 @@ var MetadataExtraction = (function() {
     },
     
     /**
-     * Analyzes content type based on path and filename
+     * Analyzes content type based on path and filename.
      * @param {string} folderPath Folder path
      * @param {string} filename Filename
      * @returns {object} Analysis results
@@ -231,7 +229,7 @@ var MetadataExtraction = (function() {
   };
   
   /**
-   * Extracts comprehensive metadata from file details
+   * Extracts comprehensive metadata from file details.
    * @param {object} fileDetails File details from Box API
    * @returns {object} Extracted metadata
    */
@@ -328,7 +326,7 @@ var MetadataExtraction = (function() {
   };
   
   /**
-   * Processes a single image with basic metadata extraction
+   * Processes a single image with basic metadata extraction.
    * @param {object} fileEntry File entry from Box API
    * @param {string} accessToken Valid Box access token
    */
@@ -376,7 +374,7 @@ var MetadataExtraction = (function() {
       var fileDetails = JSON.parse(response.getContentText());
       var metadataToApply = ns.extractComprehensiveMetadata(fileDetails);
       
-      // Apply metadata using the new namespace
+      // Apply metadata using the namespace
       var success = BoxFileOperations.applyMetadata(fileEntry.id, metadataToApply, accessToken);
       
       if (success) {
@@ -393,7 +391,7 @@ var MetadataExtraction = (function() {
   };
   
   /**
-   * Processes images in folders with proper batching and delays
+   * Processes images in folders with proper batching and delays.
    * @param {string[]} folderIdsToProcess Array of folder IDs
    * @param {string} accessToken Valid Box access token
    */

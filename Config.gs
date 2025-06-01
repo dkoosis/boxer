@@ -1,39 +1,25 @@
 // File: Config.gs
+// Configuration constants for Box Image Metadata Processing System
+// Uses cGoa and cUseful libraries by Bruce McPherson
 
 /** @constant {object} SCRIPT_PROPERTIES Access to script properties for secure storage. */
-
 const SCRIPT_PROPERTIES = PropertiesService.getScriptProperties();
 
-// --- Box API General ---
+// --- Box API Configuration ---
 /** @constant {string} BOX_API_BASE_URL Base URL for the Box API. */
 const BOX_API_BASE_URL = 'https://api.box.com/2.0';
 
-/** @constant {number} DEFAULT_API_ITEM_LIMIT Default limit for paginated Box API calls (e.g., listing folder items). */
+/** @constant {number} DEFAULT_API_ITEM_LIMIT Default limit for paginated Box API calls. */
 const DEFAULT_API_ITEM_LIMIT = 1000;
 
-// --- Box OAuth 2.0 ---
+// --- Box OAuth 2.0 Credentials (used by cGoa) ---
 /** @constant {string} OAUTH_CLIENT_ID_PROPERTY Key for storing Box OAuth Client ID in Script Properties. */
 const OAUTH_CLIENT_ID_PROPERTY = 'OAUTH_CLIENT_ID';
 
 /** @constant {string} OAUTH_CLIENT_SECRET_PROPERTY Key for storing Box OAuth Client Secret in Script Properties. */
 const OAUTH_CLIENT_SECRET_PROPERTY = 'OAUTH_CLIENT_SECRET';
 
-/** @constant {string} BOX_ACCESS_TOKEN_PROPERTY Key for storing Box Access Token in Script Properties. */
-const BOX_ACCESS_TOKEN_PROPERTY = 'BOX_ACCESS_TOKEN';
-
-/** @constant {string} BOX_REFRESH_TOKEN_PROPERTY Key for storing Box Refresh Token in Script Properties. */
-const BOX_REFRESH_TOKEN_PROPERTY = 'BOX_REFRESH_TOKEN';
-
-/** @constant {string} BOX_OAUTH_AUTH_URL Box authorization endpoint. */
-const BOX_OAUTH_AUTH_URL = 'https://account.box.com/api/oauth2/authorize';
-
-/** @constant {string} BOX_OAUTH_TOKEN_URL Box token exchange endpoint. */
-const BOX_OAUTH_TOKEN_URL = 'https://api.box.com/oauth2/token';
-
-/** @constant {string} APPS_SCRIPT_REDIRECT_URI The specific redirect URI for your Apps Script project. */
-const APPS_SCRIPT_REDIRECT_URI = `https://script.google.com/macros/d/${ScriptApp.getScriptId()}/usercallback`;
-
-// --- Box Metadata Template ---
+// --- Box Metadata Template Configuration ---
 /** @constant {string} BOX_METADATA_TEMPLATE_KEY The unique key for the Box metadata template. */
 const BOX_METADATA_TEMPLATE_KEY = 'comprehensiveImageMetadata';
 
@@ -43,7 +29,7 @@ const BOX_METADATA_SCOPE = 'enterprise';
 /** @constant {string} BOX_METADATA_TEMPLATE_DISPLAY_NAME Display name for the Box metadata template. */
 const BOX_METADATA_TEMPLATE_DISPLAY_NAME = 'Comprehensive Image Metadata';
 
-// --- Google Cloud Vision API ---
+// --- Google Cloud Vision API Configuration ---
 /** @constant {string} VISION_API_ENDPOINT URL for Google Cloud Vision API. */
 const VISION_API_ENDPOINT = 'https://vision.googleapis.com/v1/images:annotate';
 
@@ -51,19 +37,19 @@ const VISION_API_ENDPOINT = 'https://vision.googleapis.com/v1/images:annotate';
 const VISION_API_KEY_PROPERTY = 'VISION_API_KEY';
 
 /** @constant {number} MAX_VISION_API_FILE_SIZE_BYTES Vision API image size limit (20MB). */
-const MAX_VISION_API_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB
+const MAX_VISION_API_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
 /** @constant {number} MAX_TEXT_EXTRACTION_LENGTH Max characters for extracted text to store from Vision API. */
 const MAX_TEXT_EXTRACTION_LENGTH = 500;
 
-// --- Script Processing Configuration ---
-/** @constant {string} DEFAULT_PROCESSING_FOLDER_ID Box folder ID for root or default processing (e.g., '0' for root). */
+// --- Processing Folder Configuration ---
+/** @constant {string} DEFAULT_PROCESSING_FOLDER_ID Box folder ID for root processing ('0' for root). */
 const DEFAULT_PROCESSING_FOLDER_ID = '0';
 
-/** @constant {string} ACTIVE_TEST_FOLDER_ID Specific Box folder ID used in many test/processing functions. */
-const ACTIVE_TEST_FOLDER_ID = '323509823918'; // As used in your examples
+/** @constant {string} ACTIVE_TEST_FOLDER_ID Specific Box folder ID used for testing and examples. */
+const ACTIVE_TEST_FOLDER_ID = '323509823918';
 
-// --- Processing Stages & Versions ---
+// --- Processing Stages ---
 /** @constant {string} PROCESSING_STAGE_UNPROCESSED Marker for unprocessed files. */
 const PROCESSING_STAGE_UNPROCESSED = 'unprocessed';
 
@@ -77,11 +63,12 @@ const PROCESSING_STAGE_EXIF = 'exif_extracted';
 const PROCESSING_STAGE_AI = 'ai_analyzed';
 
 /** @constant {string} PROCESSING_STAGE_REVIEW Marker for human review needed. */
-const PROCESSING_STAGE_REVIEW = 'human_reviewed'; // Example, expand if used
+const PROCESSING_STAGE_REVIEW = 'human_reviewed';
 
 /** @constant {string} PROCESSING_STAGE_COMPLETE Marker for completed processing. */
 const PROCESSING_STAGE_COMPLETE = 'complete';
 
+// --- Processing Version Tags ---
 /** @constant {string} PROCESSING_VERSION_BASIC Version tag for basic metadata extraction. */
 const PROCESSING_VERSION_BASIC = 'v1.0';
 
@@ -91,29 +78,28 @@ const PROCESSING_VERSION_ENHANCED = 'v2.0';
 /** @constant {string} PROCESSING_VERSION_EXIF_ONLY Version tag for EXIF-only enhanced processing. */
 const PROCESSING_VERSION_EXIF_ONLY = 'v2.0-exif';
 
-// --- Batch Processing & Delay Configurations ---
-
+// --- Batch Processing & Rate Limiting Configuration ---
 /** @constant {number} METADATA_ATTACHMENT_BATCH_SIZE Number of files to process in a batch for template attachment. */
 const METADATA_ATTACHMENT_BATCH_SIZE = 50;
 
-/** @constant {number} METADATA_ATTACHMENT_FILE_DELAY_MS Delay in milliseconds between individual file operations within a template attachment batch. */
-const METADATA_ATTACHMENT_FILE_DELAY_MS = 100; // ms
+/** @constant {number} METADATA_ATTACHMENT_FILE_DELAY_MS Delay between individual template attachment operations. */
+const METADATA_ATTACHMENT_FILE_DELAY_MS = 100;
 
-/** @constant {number} METADATA_ATTACHMENT_BATCH_DELAY_MS Delay in milliseconds between batches of template attachments. */
-const METADATA_ATTACHMENT_BATCH_DELAY_MS = 2000; // ms
+/** @constant {number} METADATA_ATTACHMENT_BATCH_DELAY_MS Delay between batches of template attachments. */
+const METADATA_ATTACHMENT_BATCH_DELAY_MS = 2000;
 
-/** @constant {number} IMAGE_PROCESSING_FILE_DELAY_MS Delay in ms after processing a small number of images in basic loops. */
-const IMAGE_PROCESSING_FILE_DELAY_MS = 1000; // ms (used after every 10 files in processImagesInFoldersBasic)
+/** @constant {number} IMAGE_PROCESSING_FILE_DELAY_MS Delay after processing small batches in basic loops. */
+const IMAGE_PROCESSING_FILE_DELAY_MS = 1000;
 
-/** @constant {number} ENHANCED_PROCESSING_BATCH_SIZE Number of files to process in a batch for enhanced (Vision API) processing. */
+/** @constant {number} ENHANCED_PROCESSING_BATCH_SIZE Number of files to process in enhanced (Vision API) batches. */
 const ENHANCED_PROCESSING_BATCH_SIZE = 5;
 
-/** @constant {number} ENHANCED_PROCESSING_FILE_DELAY_MS Delay in milliseconds between individual file operations (e.g., Vision API calls) within an enhanced processing batch. */
-const ENHANCED_PROCESSING_FILE_DELAY_MS = 2000; // ms
+/** @constant {number} ENHANCED_PROCESSING_FILE_DELAY_MS Delay between individual Vision API calls. */
+const ENHANCED_PROCESSING_FILE_DELAY_MS = 2000;
 
-/** @constant {number} ENHANCED_PROCESSING_BATCH_DELAY_MS Delay in milliseconds between batches of enhanced processing. */
-const ENHANCED_PROCESSING_BATCH_DELAY_MS = 5000; // ms
+/** @constant {number} ENHANCED_PROCESSING_BATCH_DELAY_MS Delay between enhanced processing batches. */
+const ENHANCED_PROCESSING_BATCH_DELAY_MS = 5000;
 
-// --- File Types ---
-/** @constant {string[]} IMAGE_EXTENSIONS List of common image file extensions. Case-insensitive matching is typically applied. */
+// --- File Type Configuration ---
+/** @constant {string[]} IMAGE_EXTENSIONS List of supported image file extensions. */
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic', '.heif'];

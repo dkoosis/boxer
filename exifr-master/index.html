@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<!-- Google Analytics -->
+	<script async src="//www.googletagmanager.com/gtag/js?id=UA-34562823-2"></script>
+	<script>
+		window.dataLayer = window.dataLayer || []
+		function gtag(){dataLayer.push(arguments)}
+		gtag('js', new Date())
+		gtag('config', 'UA-34562823-2')
+	</script>
+	<!-- App -->
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1"/>
+	<title>Exifr</title>
+	<link rel="stylesheet" type="text/css" href="./homepage/app.css">
+</head>
+<body>
+
+	<header>
+		<h1>Exifr</h1>
+		<div class="description">
+			<p>The fastest and most versatile JavaScript EXIF reading library.</p>
+			<p>Check out the <a href="https://github.com/MikeKovarik/exifr">repo</a> or <a href="https://www.npmjs.com/package/exifr">npm</a> for docs and more information.</p>
+		</div>
+		<div class="badges">
+			<a href="https://travis-ci.org/MikeKovarik/exifr"><img src="https://travis-ci.org/MikeKovarik/exifr.svg?branch=master"></a>
+			<a href="https://coveralls.io/github/MikeKovarik/exifr"><img src="https://coveralls.io/repos/github/MikeKovarik/exifr/badge.svg"></a>
+			<!--
+			<a class="github-button" href="https://github.com/sponsors/MikeKovarik" data-icon="octicon-heart" data-size="large" aria-label="Sponsor @MikeKovarik on GitHub">Sponsor</a>
+			-->
+			<a class="github-button" href="https://github.com/MikeKovarik/exifr/issues" data-icon="octicon-issue-opened" data-size="large" aria-label="Issue MikeKovarik/exifr on GitHub">Issue</a>
+			<a class="github-button" href="https://github.com/MikeKovarik/exifr" data-icon="octicon-star" data-size="large" data-show-count="true" aria-label="Star MikeKovarik/exifr on GitHub">Star</a>
+			<a class="github-button" href="https://github.com/MikeKovarik/exifr/fork" data-icon="octicon-repo-forked" data-size="large" aria-label="Fork MikeKovarik/exifr on GitHub">Fork</a>
+		</div>
+	</header>
+
+
+	<div id="grid" class="nowrap ${rawFullscreen === false ? 'raw-side' : rawFullscreen ? 'raw-fullscreen' : ''}">
+
+		<h2 id="input-head">Input</h2>
+
+		<h2 id="output-head">
+			Output
+			<span class="${color}">${status}</span>
+		</h2>
+
+		<div id="input">
+
+			<h3>File</h3>
+			<div id="dropzone">
+				<input id="picker" type="file" multiple change.trigger="onPick($event)">
+				<div if.bind="browserCompatibleFile" class="input-notice">
+					Click to open filepicker
+					<br>
+					or
+					<br>
+					drop your file here
+				</div>
+				<div if.bind="!browserCompatibleFile">
+					WARNING
+					<br>
+					Browsers cannot display
+					<br>
+					tif and heic images
+				</div>
+				<img if.bind="imageUrl && browserCompatibleFile" src.bind="imageUrl">
+			</div>
+
+			<h3>
+				Options
+				<span click.trigger="toggleAllOptions()">Toggle all</span>
+			</h3>
+			<form id="options">
+				<div>{</div>
+				<div muted>&nbsp;&nbsp;// <i>APP segments</i></div>
+				<div>&nbsp;&nbsp;tiff:      <input type="checkbox" checked.bind="options.ifd0 || options.exif || options.gps || options.interop || options.ifd1 || options.makerNote || options.userComment" disabled change.trigger="parseFile()">,</div>
+				<div muted>&nbsp;&nbsp;<span>│</span>&nbsp;// <i>TIFF blocks</i></div>
+				<!-- TODO: disable or uncheck all of these blocks on unselecting tiff -->
+				<div>&nbsp;&nbsp;<span muted>├─</span>ifd0:    <input type="checkbox" checked.bind="options.ifd0" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;<span muted>├─</span>exif:    <input type="checkbox" checked.bind="options.exif" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;<span muted>├─</span>gps:     <input type="checkbox" checked.bind="options.gps" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;<span muted>├─</span>interop: <input type="checkbox" checked.bind="options.interop" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;<span muted>├─</span>ifd1:    <input type="checkbox" checked.bind="options.ifd1" change.trigger="parseFile()">,</div>
+				<div muted>&nbsp;&nbsp;<span>│</span>&nbsp;// <i>other data</i></div>
+				<div>&nbsp;&nbsp;<span muted>├─</span>makerNote:   <input type="checkbox" checked.bind="options.makerNote" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;<span muted>└─</span>userComment: <input type="checkbox" checked.bind="options.userComment" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;xmp:       <input type="checkbox" checked.bind="options.xmp" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;icc:       <input type="checkbox" checked.bind="options.icc" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;iptc:      <input type="checkbox" checked.bind="options.iptc" change.trigger="parseFile()">,</div>
+				<div muted>&nbsp;&nbsp;// <i>JPEG only</i></div>
+				<div>&nbsp;&nbsp;jfif:      <input type="checkbox" checked.bind="options.jfif" change.trigger="parseFile()">,</div>
+				<div muted>&nbsp;&nbsp;// <i>PNG only</i></div>
+				<div>&nbsp;&nbsp;ihdr:      <input type="checkbox" checked.bind="options.ihdr" change.trigger="parseFile()">,</div>
+				<div muted>&nbsp;&nbsp;// <i>output styles</i></div>
+				<div title="combine all segments and blocks into single output object">&nbsp;&nbsp;mergeOutput: <input type="checkbox" checked.bind="options.mergeOutput" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;sanitize:        <input type="checkbox" checked.bind="options.sanitize" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;reviveValues:    <input type="checkbox" checked.bind="options.reviveValues" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;translateKeys:   <input type="checkbox" checked.bind="options.translateKeys" change.trigger="parseFile()">,</div>
+				<div>&nbsp;&nbsp;translateValues: <input type="checkbox" checked.bind="options.translateValues" change.trigger="parseFile()">,</div>
+				<div muted>&nbsp;&nbsp;// <i>for XMP Extended</i></div>
+				<div>&nbsp;&nbsp;multiSegment:    <input type="checkbox" checked.bind="options.multiSegment" change.trigger="parseFile()">,</div>
+				<!--
+				<div muted>&nbsp;&nbsp;// skip or only pick tags</div>
+				<div>&nbsp;&nbsp;pick: [<input type="text" name="pick">],</div>
+				<div>&nbsp;&nbsp;skip: [<input type="text" name="skip">],</div>
+				-->
+				<div>}</div>
+			</form>
+
+		</div>
+
+		<div id="thumb">
+			<h3>Embedded thumbnail</h3>
+			<img if.bind="thumbUrl" src.bind="thumbUrl">
+			<span if.bind="thumbUrl === undefined" class="small">
+				File doesn't contain thumbnail
+			</span>
+		</div>
+
+		<segment-box options.bind="options" output.bind="output" key="exif" title="EXIF"></segment-box>
+		<segment-box options.bind="options" output.bind="output" key="ifd1" title="Thumbnail (IFD1)" alias="ifd1"></segment-box>
+		<segment-box options.bind="options" output.bind="output" key="ifd0" title="Image (IFD0)" alias="ifd0"></segment-box>
+		<segment-box options.bind="options" output.bind="output" key="gps"  title="GPS"></segment-box>
+		<!--
+		<segment-box options.bind="options" output.bind="output" key="interop"></segment-box>
+		-->
+		<segment-box options.bind="options" output.bind="output" key="iptc" title="IPTC"></segment-box>
+		<segment-box options.bind="options" output.bind="output" key="xmp"  title="XMP"></segment-box>
+		<segment-box options.bind="options" output.bind="output" key="icc"  title="ICC"></segment-box>
+		<segment-box options.bind="options" output.bind="output" key="jfif" title="JFIF (JPEG only)"></segment-box>
+		<segment-box options.bind="options" output.bind="output" key="ihdr" title="IHDR (PNG only)"></segment-box>
+		<segment-box options.bind="options" output.bind="output" key="makerNote" display="buffer"></segment-box>
+		<segment-box options.bind="options" output.bind="output" key="userComment" display="buffer"></segment-box>
+
+		<div id="raw" class="wrap">
+			<template if.bind="rawOutput.errors && rawOutput.errors.length > 0">
+				<h3 class="red">${rawOutput.errors.length === 1 ? 'Error' : 'Errors'}</h3>
+				<p class="red" repeat.for="error of rawOutput.errors">${error}</p>
+			</template>
+			<h3>
+				Raw output
+				<span click.trigger="rawFullscreen = !rawFullscreen">Toggle fullscreen</span>
+			</h3>
+			<pre>${rawOutput | json}</pre>
+		</div>
+
+	</div>
+
+
+	<h2>Examples</h2>
+	<p>You can find more examples <a href="https://github.com/MikeKovarik/exifr/tree/master/examples">here</a> in the <a href="https://github.com/MikeKovarik/exifr">GitHub repo</a>.</p>
+	<li><a href="./benchmark/gps-dnd.html">DND multiple photos, display their GPS on a map and measure time and RAM usage</a></li>
+	<li>Parsing XMP and extracting depth-map and <a href="./examples/depth-map-extraction.html">displaying it in a browser</a> or <a href="./examples/depth-map-extraction.js">saving it to disk with Node 'fs'</a></li>
+	<li>Extracting thumbnail and <a href="./examples/thumbnail.html">displaying it in a browser</a> or <a href="./examples/thumbnail.js">saving it to disk with Node 'fs'</a></li>
+	<li>Parsing in <a href="./examples/worker.html">web worker</a></li>
+	<li>Import format: <a href="./examples/fs.cjs">CommonJS</a> or <a href="./examples/esm.mjs">ES Modules</a></li>
+	<li>Filters & perf improvements: <a href="./examples/gps.js">Parsing as little tags to get GPS fast</a></li>
+	<li><a href="./examples/fs.cjs">Extract the full TIFF Segment</a> vs <a href="./examples/gps.js">just one block</a></li>
+	<li><a href="./benchmark/formats-reading.html">Speed comparison of various input formats</a></li>
+	<li><a href="./examples/base64.mjs">Using Base64 string as an input</a></a></li>
+	<li><a href="./examples/legacy.html">IE11 Support</a></li>
+	<li><a href="./examples/custom-build.mjs">Customization: importing file readers, segment parsers and dictionaries</a></li>
+
+	<h2>License</h2>
+	<p>MIT, Mike Kovařík</p>
+
+	<script async defer src="https://buttons.github.io/buttons.js"></script>
+	<script src="./node_modules/aurelia-script/dist/aurelia.umd.js"></script>
+	<script type="module" src="./homepage/app.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, minimum-scale=1.0, initial-scale=1"/>
+	<title>Exifr legacy bundle tester</title>
+	<link rel="stylesheet" type="text/css" href="../homepage/app.css">
+	<style>
+		h3, h4 {
+			margin-top: 16px;
+			margin-bottom: 4px;
+		}
+		#reload {
+			position: absolute;
+			right: 10px;
+			top: 10px;
+		}
+		a {
+			text-decoration: underline;
+			cursor: pointer;
+		}
+	</style>
+</head>
+<body>
+
+	<p>View this page in IE10 or IE11 to test compatibility of <code>full.legacy.umd.js</code> bundle</p>
+	<a id="reload" class="pointer">force reload</a>
+
+	<p>Exifr is built using the latest standards and web platform features. We use Babel to transpile the new syntax down to ES5 and Rollup to bundle all ESM files into single UMD bundle, compatible with older browsers.</p>
+
+	<h3>Polyfills</h3>
+	<p><strong>Since v4.1.0</strong> there are multiple shims baked into the <code>legacy</code> bundle. <strong>You are now required to only use <code>Promise</code> Polyfill.</strong></p>
+
+	<h3>Demos to try: (click on)</h3>
+	<ul>
+		<li id="demo1" class="pointer"><a>Parse TIFF (EXIF)</a></li>
+		<li id="demo2" class="pointer"><a>Extract depth map from XMP Extended</a></li>
+		<li id="demo3" class="pointer"><a>Parse ICC color profile</a></li>
+	</ul>
+
+	<h3>Output:</h3>
+	<pre id="output" style="font-size: 13px;"></pre>
+	<p>Or drag and drop your photo into this window.</p>
+
+	<script>
+		// important: dont use let - older browsers (samsung tizen tvs use arcane chromium)
+		var $output = document.querySelector('#output')
+		var $reload = document.querySelector('#reload')
+
+		window.onerror = function(message, source, lone, col, error) {
+			console.log('ONERROR')
+			var lines = [
+				'**************** ERROR ****************',
+				'message: ' + message,
+				'source:  ' + source,
+				'lone:    ' + lone,
+				'col:     ' + col,
+			]
+			if (error) {
+				lines.push('description: ' + error.description)
+				lines.push('message:     ' + error.message)
+				lines.push('name:        ' + error.name)
+				lines.push('number:      ' + error.number)
+				lines.push(error.stack)
+			}
+			printOutput(lines)
+		}
+
+		function printOutput(lines) {
+			$output.innerHTML += '\n' + lines.join('\n') + '\n\n'
+		}
+	
+		// way to force-reload on phones where you can't do ctr+shift+r.
+		$reload.addEventListener('click', function() {window.location.reload(true)})
+	</script>
+
+	<!-- Promise polyfill -->
+	<script src="https://cdn.jsdelivr.net/npm/promise-polyfill@8.1.3/dist/polyfill.min.js"></script>
+	<!-- exifr -->
+	<script src="../dist/full.legacy.umd.js"></script>
+	<script>
+
+		function printExif(output) {
+			$output.innerHTML += '\n' + JSON.stringify(output, null, 4)
+		}
+
+		function catchErrors(err) {
+			console.log('UNCAUGHT')
+			console.log(err)
+			printOutput([
+				'**************** UNCAUGHT ****************',
+				err.message,
+				err.stack,
+			])
+		}
+
+		// first demo
+		function parseFile(file, options) {
+			exifr.parse(file, options)
+				.then(printExif)
+				.catch(catchErrors)
+		}
+
+		// second demo
+		function extractDepthMap(file, options) {
+			var img = document.createElement('img')
+			exifr.parse(file, options)
+				.then(function(output) {
+					$output.innerHTML = ''
+					var mime = output.GDepth.Mime
+					var base64 = output.GDepth.Data
+					img.width = 400
+					img.src = 'data:' + mime + ';base64,' + base64
+					$output.appendChild(img)
+				})
+				.catch(catchErrors)
+		}
+
+		document.getElementById('demo1').addEventListener('click', runDemo1)
+		document.getElementById('demo2').addEventListener('click', runDemo2)
+		document.getElementById('demo3').addEventListener('click', runDemo3)
+
+		function runDemo1(clear) {
+			if (clear) $output.innerHTML = 'parsing file'
+			parseFile('../test/fixtures/IMG_20180725_163423-tiny.jpg')
+		}
+
+		function runDemo2(clear) {
+			if (clear) $output.innerHTML = 'extracting depth map'
+			extractDepthMap('../test/fixtures/xmp depth map.jpg', {xmp: true, mergeOutput: false, multiSegment: true})
+		}
+
+		function runDemo3(clear) {
+			if (clear) $output.innerHTML = 'parsing file'
+			parseFile('../test/fixtures/IMG_20180725_163423-tiny.jpg', {tiff: false, icc: true, multiSegment: true})
+		}
+
+		// load demo file first
+		runDemo1(false)
+
+		var dropzone = document.body
+		function prevent(e) {
+			e.preventDefault()
+		}
+		dropzone.addEventListener('dragenter', prevent)
+		dropzone.addEventListener('dragover', prevent)
+		dropzone.addEventListener('drop', function(e) {
+			e.preventDefault()
+			parseFile(e.dataTransfer.files[0])
+		})
+
+	</script>
+
+</body>
+</html>

@@ -1,21 +1,21 @@
-// File: EnhancedUtilities.gs (New file with Bruce McPherson's patterns)
-// Depends on: cUseful library
-// Contains utilities that could potentially contribute back to Bruce's libraries
+// File: EnhancedUtilities.gs
+// Enhanced utilities following Bruce McPherson's patterns and principles
+// Uses cUseful library by Bruce McPherson
+// Contains utilities that could potentially contribute back to Bruce's ecosystem
 
 /**
- * Enhanced utilities following Bruce McPherson's patterns
- * Contains functions that might be useful additions to cUseful or standalone utilities
+ * Enhanced utilities following Bruce McPherson's organizational patterns.
+ * Provides specialized functions for Box operations and metadata processing.
+ * These utilities could potentially be contributed to Bruce's library ecosystem.
  */
 var EnhancedUtils = (function() {
   'use strict';
   
   var ns = {};
-  
-  // Initialize cUseful once
   var cUseful_ = null;
   
   /**
-   * Get cUseful utilities following Bruce's pattern
+   * Get cUseful utilities following Bruce's pattern.
    * @returns {object} cUseful utilities
    * @private
    */
@@ -24,21 +24,21 @@ var EnhancedUtils = (function() {
       try {
         cUseful_ = cUseful;
       } catch (e) {
-        throw new Error('cUseful library is required: ' + e.toString());
+        throw new Error('cUseful library by Bruce McPherson is required: ' + e.toString());
       }
     }
     return cUseful_;
   }
   
   /**
-   * Box API specific utilities
-   * These could potentially be contributed to Bruce's ecosystem as a "BoxUtils" library
+   * Box API specific utilities.
+   * These could potentially be contributed to Bruce's ecosystem as a "BoxUtils" library.
    */
   ns.BoxUtils = (function() {
     var boxNs = {};
     
     /**
-     * Enhanced file type detection with MIME type validation
+     * Enhanced file type detection with MIME type validation.
      * @param {string} filename The filename to check
      * @param {string} mimeType Optional MIME type for validation
      * @returns {object} Detection result with type and confidence
@@ -108,7 +108,7 @@ var EnhancedUtils = (function() {
     };
     
     /**
-     * Extracts dimensions from filename patterns
+     * Extracts dimensions from filename patterns.
      * @param {string} filename The filename to analyze
      * @returns {object|null} Dimensions object or null
      */
@@ -148,7 +148,7 @@ var EnhancedUtils = (function() {
     };
     
     /**
-     * Builds a robust Box API URL with parameter validation
+     * Builds a robust Box API URL with parameter validation.
      * @param {string} baseUrl Base Box API URL
      * @param {string} endpoint API endpoint
      * @param {object} params Query parameters
@@ -183,13 +183,13 @@ var EnhancedUtils = (function() {
   })();
   
   /**
-   * Enhanced math utilities that could extend cUseful
+   * Enhanced math utilities that could extend cUseful.
    */
   ns.MathUtils = (function() {
     var mathNs = {};
     
     /**
-     * Enhanced GCD calculation with input validation
+     * Enhanced GCD calculation with input validation.
      * @param {number} a First number
      * @param {number} b Second number
      * @returns {number} Greatest common divisor
@@ -206,7 +206,7 @@ var EnhancedUtils = (function() {
     };
     
     /**
-     * Calculate aspect ratio with various output formats
+     * Calculate aspect ratio with various output formats.
      * @param {number} width Width value
      * @param {number} height Height value
      * @param {string} format Output format: 'ratio', 'decimal', 'percentage'
@@ -234,7 +234,7 @@ var EnhancedUtils = (function() {
     };
     
     /**
-     * Round to specified decimal places (more robust than native rounding)
+     * Round to specified decimal places (more robust than native rounding).
      * @param {number} value Value to round
      * @param {number} places Decimal places
      * @returns {number} Rounded value
@@ -252,13 +252,13 @@ var EnhancedUtils = (function() {
   })();
   
   /**
-   * String utilities that could extend cUseful
+   * String utilities that could extend cUseful.
    */
   ns.StringUtils = (function() {
     var stringNs = {};
     
     /**
-     * Clean filename for analysis (remove common noise)
+     * Clean filename for analysis (remove common noise).
      * @param {string} filename Original filename
      * @param {object} options Cleaning options
      * @returns {string} Cleaned filename
@@ -302,7 +302,7 @@ var EnhancedUtils = (function() {
     };
     
     /**
-     * Extract keywords from text with filtering
+     * Extract keywords from text with filtering.
      * @param {string} text Input text
      * @param {object} options Extraction options
      * @returns {string[]} Array of keywords
@@ -348,13 +348,13 @@ var EnhancedUtils = (function() {
   })();
   
   /**
-   * Date utilities with enhanced formatting
+   * Date utilities with enhanced formatting.
    */
   ns.DateUtils = (function() {
     var dateNs = {};
     
     /**
-     * Format date for Box API (ISO 8601)
+     * Format date for Box API (ISO 8601).
      * @param {Date|string} date Date to format
      * @returns {string} ISO formatted date string
      */
@@ -375,7 +375,7 @@ var EnhancedUtils = (function() {
     };
     
     /**
-     * Parse various date formats commonly found in EXIF/metadata
+     * Parse various date formats commonly found in EXIF/metadata.
      * @param {string} dateString Date string to parse
      * @returns {Date|null} Parsed date or null
      */
@@ -415,13 +415,13 @@ var EnhancedUtils = (function() {
   })();
   
   /**
-   * Validation utilities
+   * Validation utilities.
    */
   ns.ValidationUtils = (function() {
     var validationNs = {};
     
     /**
-     * Validate Box file ID format
+     * Validate Box file ID format.
      * @param {string} fileId File ID to validate
      * @returns {boolean} True if valid format
      */
@@ -433,7 +433,7 @@ var EnhancedUtils = (function() {
     };
     
     /**
-     * Validate Box access token format
+     * Validate Box access token format.
      * @param {string} token Token to validate
      * @returns {boolean} True if appears to be valid format
      */
@@ -444,7 +444,7 @@ var EnhancedUtils = (function() {
     };
     
     /**
-     * Validate image dimensions
+     * Validate image dimensions.
      * @param {number} width Width value
      * @param {number} height Height value
      * @returns {object} Validation result
@@ -486,18 +486,21 @@ var EnhancedUtils = (function() {
   return ns;
 })();
 
-// Example of how to create a library info function following Bruce's pattern
+/**
+ * Library info function following Bruce McPherson's pattern.
+ * @returns {object} Library information and dependencies
+ */
 function getLibraryInfo() {
   return {
     info: {
       name: 'EnhancedUtils',
       version: '1.0.0',
-      description: 'Enhanced utilities following Bruce McPherson patterns',
-      author: 'Your Name',
-      dependencies: ['cUseful']
+      description: 'Enhanced utilities following Bruce McPherson patterns for Box operations',
+      author: 'Box Image Metadata System',
+      dependencies: ['cUseful by Bruce McPherson']
     },
     dependencies: [
-      // Would reference cUseful.getLibraryInfo() if this were a published library
+      'cUseful library by Bruce McPherson provides the foundational utility functions'
     ]
   };
 }

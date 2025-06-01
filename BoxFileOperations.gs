@@ -1,29 +1,28 @@
-// File: BoxFileOperations.gs (Refactored with Bruce McPherson's patterns)
-// Depends on: Config.gs, BoxOAuth.gs, BoxMetadataTemplates.gs, cUseful library
-// Following Bruce McPherson's organizational and error handling patterns
+// File: BoxFileOperations.gs
+// Box file operations with robust error handling using Bruce McPherson's patterns
+// Uses cUseful library by Bruce McPherson for exponential backoff and utilities
+// Depends on: Config.gs, BoxAuth.gs, BoxMetadataTemplates.gs
 
 /**
- * BoxFileOperations namespace following Bruce's patterns
- * Provides robust file operations with exponential backoff and proper error handling
+ * BoxFileOperations namespace following Bruce McPherson's organizational patterns.
+ * Provides robust file operations with exponential backoff and proper error handling.
  */
 var BoxFileOperations = (function() {
   'use strict';
   
-  // Private namespace
   var ns = {};
-  
-  // Initialize cUseful utilities (Bruce's dependency-free pattern)
   var utils_ = null;
   
   /**
-   * Initialize the utilities (call this once at the start of any function using cUseful)
-   * Following Bruce's pattern for dependency-free libraries
+   * Initialize cUseful utilities following Bruce's dependency-free pattern.
+   * @returns {object} cUseful utilities
+   * @private
    */
   function initUtils_() {
     if (!utils_) {
       try {
         utils_ = cUseful;
-        Logger.log('BoxFileOperations: cUseful library initialized successfully');
+        Logger.log('BoxFileOperations: cUseful library initialized');
       } catch (e) {
         Logger.log('ERROR: BoxFileOperations - cUseful library not available: ' + e.toString());
         throw new Error('cUseful library is required but not available');
@@ -33,7 +32,7 @@ var BoxFileOperations = (function() {
   }
   
   /**
-   * Makes API calls with Bruce's exponential backoff pattern
+   * Makes API calls with Bruce McPherson's exponential backoff pattern.
    * @param {function} apiCall Function that makes the API call
    * @param {string} context Description for logging
    * @returns {object} API response or throws error
@@ -63,9 +62,9 @@ var BoxFileOperations = (function() {
   }
   
   /**
-   * Checks if a filename represents an image file
+   * Checks if a filename represents an image file.
    * @param {string} filename The filename to check
-   * @returns {boolean} True if it's a recognized image extension
+   * @returns {boolean} True if recognized image extension
    */
   ns.isImageFile = function(filename) {
     if (!filename || typeof filename !== 'string') return false;
@@ -76,9 +75,9 @@ var BoxFileOperations = (function() {
   };
   
   /**
-   * Recursively finds all image files with robust error handling
-   * @param {string} folderId The Box folder ID to start scanning from
-   * @param {string} accessToken A valid Box access token
+   * Recursively finds all image files with robust error handling.
+   * @param {string} folderId Box folder ID to start scanning from
+   * @param {string} accessToken Valid Box access token
    * @param {object[]} allImages Accumulator array for recursion
    * @returns {object[]} Array of image file objects
    */
@@ -151,10 +150,10 @@ var BoxFileOperations = (function() {
   };
   
   /**
-   * Checks if a file has existing metadata with robust error handling
-   * @param {string} fileId The Box file ID
+   * Checks if a file has existing metadata with robust error handling.
+   * @param {string} fileId Box file ID
    * @param {string} accessToken Valid Box access token
-   * @param {string} templateKey The metadata template key
+   * @param {string} templateKey Metadata template key
    * @returns {boolean} True if metadata exists
    */
   ns.hasExistingMetadata = function(fileId, accessToken, templateKey) {
@@ -187,11 +186,11 @@ var BoxFileOperations = (function() {
   };
   
   /**
-   * Gets current metadata with robust error handling
-   * @param {string} fileId The Box file ID
+   * Gets current metadata with robust error handling.
+   * @param {string} fileId Box file ID
    * @param {string} accessToken Valid Box access token
-   * @param {string} templateKey The metadata template key
-   * @returns {object|null} The metadata object or null
+   * @param {string} templateKey Metadata template key
+   * @returns {object|null} Metadata object or null
    */
   ns.getCurrentMetadata = function(fileId, accessToken, templateKey) {
     templateKey = templateKey || BOX_METADATA_TEMPLATE_KEY;
@@ -233,11 +232,11 @@ var BoxFileOperations = (function() {
   };
   
   /**
-   * Applies metadata with create/update logic and robust error handling
-   * @param {string} fileId The Box file ID
-   * @param {object} metadata The metadata to apply
+   * Applies metadata with create/update logic and robust error handling.
+   * @param {string} fileId Box file ID
+   * @param {object} metadata Metadata to apply
    * @param {string} accessToken Valid Box access token
-   * @param {string} templateKey The metadata template key
+   * @param {string} templateKey Metadata template key
    * @returns {boolean} Success status
    */
   ns.applyMetadata = function(fileId, metadata, accessToken, templateKey) {
@@ -289,11 +288,11 @@ var BoxFileOperations = (function() {
   };
   
   /**
-   * Updates metadata using JSON Patch operations with robust error handling
-   * @param {string} fileId The Box file ID
-   * @param {object} metadataToUpdate The metadata updates
+   * Updates metadata using JSON Patch operations with robust error handling.
+   * @param {string} fileId Box file ID
+   * @param {object} metadataToUpdate Metadata updates
    * @param {string} accessToken Valid Box access token
-   * @param {string} templateKey The metadata template key
+   * @param {string} templateKey Metadata template key
    * @returns {boolean} Success status
    */
   ns.updateMetadata = function(fileId, metadataToUpdate, accessToken, templateKey) {
@@ -374,7 +373,7 @@ var BoxFileOperations = (function() {
   };
   
   /**
-   * Attaches template to single image with robust retry logic
+   * Attaches template to single image with robust retry logic.
    * @param {object} imageFile Image file object with id and name
    * @param {string} accessToken Valid Box access token
    * @returns {string} Status: 'attached', 'skipped', or 'error'
@@ -435,7 +434,7 @@ var BoxFileOperations = (function() {
   };
   
   /**
-   * Processes template attachment in batches with proper delays
+   * Processes template attachment in batches with proper delays.
    * @param {string} accessToken Valid Box access token
    */
   ns.attachTemplateToAllImages = function(accessToken) {
@@ -449,7 +448,7 @@ var BoxFileOperations = (function() {
     
     try {
       // Get template first
-      var template = getOrCreateImageTemplate(accessToken); // From BoxMetadataTemplates.gs
+      var template = getOrCreateImageTemplate(accessToken);
       if (!template) {
         throw new Error('Could not create or find template');
       }
