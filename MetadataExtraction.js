@@ -302,9 +302,9 @@ var MetadataExtraction = (function() {
         manualKeywords: contentAnalysis.keywords,
         usageRights: contentAnalysis.usageRights,
         importance: contentAnalysis.importance,
-        processingStage: PROCESSING_STAGE_BASIC,
+        processingStage: Config.PROCESSING_STAGE_BASIC,
         lastProcessedDate: new Date().toISOString(),
-        processingVersion: PROCESSING_VERSION_BASIC,
+        processingVersion: Config.PROCESSING_VERSION_BASIC,
         needsReview: contentAnalysis.needsReview || 'no'
       };
       
@@ -341,14 +341,14 @@ var MetadataExtraction = (function() {
       // Check current metadata state
       var currentMetadata = BoxFileOperations.getCurrentMetadata(fileEntry.id, accessToken);
       var currentStage = currentMetadata ? currentMetadata.processingStage : 
-                        PROCESSING_STAGE_UNPROCESSED;
+                        Config.PROCESSING_STAGE_UNPROCESSED;
       
       // Skip if already processed
       var skipStages = [
-        PROCESSING_STAGE_COMPLETE,
-        PROCESSING_STAGE_AI,
-        PROCESSING_STAGE_EXIF,
-        PROCESSING_STAGE_BASIC
+        Config.PROCESSING_STAGE_COMPLETE,
+        Config.PROCESSING_STAGE_AI,
+        Config.PROCESSING_STAGE_EXIF,
+        Config.PROCESSING_STAGE_BASIC
       ];
       
       if (skipStages.indexOf(currentStage) !== -1) {
@@ -356,7 +356,7 @@ var MetadataExtraction = (function() {
       }
       
       // Fetch full file details with robust error handling
-      var fileDetailsUrl = BOX_API_BASE_URL + '/files/' + fileEntry.id + 
+      var fileDetailsUrl = Config.BOX_API_BASE_URL + '/files/' + fileEntry.id + 
                           '?fields=id,name,size,path_collection,created_at,parent';
       
       var response = utils.rateLimitExpBackoff(function() {
@@ -411,8 +411,8 @@ var MetadataExtraction = (function() {
       Logger.log('MetadataExtraction: Processing folder ID: ' + folderId);
       
       try {
-        var listUrl = BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
-                     DEFAULT_API_ITEM_LIMIT + '&fields=id,name,type';
+        var listUrl = Config.BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
+                     Config.DEFAULT_API_ITEM_LIMIT + '&fields=id,name,type';
         
         var response = utils.rateLimitExpBackoff(function() {
           return UrlFetchApp.fetch(listUrl, {
@@ -438,9 +438,9 @@ var MetadataExtraction = (function() {
           
           // Add delay every 10 files
           if ((index + 1) % 10 === 0 && imageFileEntries.length > (index + 1)) {
-            Logger.log('Pausing ' + (IMAGE_PROCESSING_FILE_DELAY_MS / 1000) + 
+            Logger.log('Pausing ' + (Config.IMAGE_PROCESSING_FILE_DELAY_MS / 1000) + 
                       's after processing 10 images...');
-            Utilities.sleep(IMAGE_PROCESSING_FILE_DELAY_MS);
+            Utilities.sleep(Config.IMAGE_PROCESSING_FILE_DELAY_MS);
           }
         });
         
@@ -449,6 +449,142 @@ var MetadataExtraction = (function() {
                   ': ' + error.toString());
       }
     });
+  };
+  
+  /**
+   * Extracts enhanced metadata combining basic info, EXIF, and Vision API analysis.
+   * @param {object} fileDetails Full file details from Box API
+   * @param {string} accessToken Valid Box access token
+   * @returns {object} Enhanced metadata object
+   */
+  ns.extractEnhancedMetadata = function(fileDetails, accessToken) {
+    // Start with basic metadata
+    var basicMetadata = ns.extractComprehensiveMetadata(fileDetails);
+    var combinedMetadata = JSON.parse(JSON.stringify(basicMetadata)); // Deep copy
+
+    // Extract EXIF data
+    var exifData = extractExifData(fileDetails.id, accessToken);
+    if (exifData && exifData.hasExif) {
+      if (exifData.cameraModel) combinedMetadata.cameraModel = exifData.cameraModel;
+      if (exifData.dateTaken) combinedMetadata.dateTaken = exifData.dateTaken;
+      combinedMetadata.processingStage = Config.PROCESSING_STAGE_EXIF;
+    }
+    
+    // Analyze with Vision API
+    var visionAnalysis = analyzeImageWithVisionImproved(fileDetails.id, accessToken);
+    
+    if (visionAnalysis && !visionAnalysis.error) {
+      combinedMetadata.aiDetectedObjects = visionAnalysis.objects ? 
+        visionAnalysis.objects.map(function(obj) { return obj.name + ' (' + obj.confidence + ')'; }).join('; ') : '';
+      combinedMetadata.aiSceneDescription = visionAnalysis.sceneDescription || '';
+      combinedMetadata.extractedText = visionAnalysis.text ? 
+        visionAnalysis.text.replace(/\n/g, ' ').substring(0, Config.MAX_TEXT_EXTRACTION_LENGTH) : '';
+      combinedMetadata.dominantColors = visionAnalysis.dominantColors ? 
+        visionAnalysis.dominantColors.map(function(c) { return c.rgb + ' (' + c.score + ', ' + c.pixelFraction + ')'; }).join('; ') : '';
+      combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
+      combinedMetadata.processingStage = Config.PROCESSING_STAGE_AI;
+      
+      // Apply AI-driven content enhancements
+      var aiEnhancements = ns.enhanceContentAnalysisWithAI(combinedMetadata, visionAnalysis, fileDetails.name, combinedMetadata.folderPath);
+      Object.keys(aiEnhancements).forEach(function(key) {
+        combinedMetadata[key] = aiEnhancements[key];
+      });
+      
+    } else if (visionAnalysis && visionAnalysis.error) {
+      Logger.log('Vision API error for ' + fileDetails.name + ': ' + (visionAnalysis.message || visionAnalysis.error));
+      combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
+        'Vision API Error: ' + (visionAnalysis.message || visionAnalysis.error);
+    }
+
+    // Finalize processing metadata
+    combinedMetadata.lastProcessedDate = new Date().toISOString();
+    combinedMetadata.processingVersion = Config.PROCESSING_VERSION_ENHANCED;
+    
+    return combinedMetadata;
+  };
+  
+  /**
+   * Enhances metadata with AI-driven insights from Vision API.
+   * @param {object} basicMetadata Base metadata object
+   * @param {object} visionAnalysis Vision API analysis results
+   * @param {string} filename Original filename for context
+   * @param {string} folderPath Folder path for context
+   * @returns {object} Enhanced metadata fields
+   */
+  ns.enhanceContentAnalysisWithAI = function(basicMetadata, visionAnalysis, filename, folderPath) {
+    var enhancements = {};
+    
+    if (!visionAnalysis || visionAnalysis.error) {
+      return enhancements;
+    }
+
+    // Enhanced content type detection using AI labels
+    if (visionAnalysis.labels && visionAnalysis.labels.length > 0) {
+      var labelsLower = visionAnalysis.labels.map(function(l) { return l.description.toLowerCase(); });
+      
+      if (labelsLower.some(function(l) { return ['sculpture', 'art', 'statue', 'artwork', 'installation', 'painting', 'drawing'].indexOf(l) !== -1; })) {
+        enhancements.contentType = 'artwork';
+        if (basicMetadata.importance !== 'critical') enhancements.importance = 'high';
+      } else if (labelsLower.some(function(l) { return ['person', 'people', 'human face', 'portrait', 'crowd', 'man', 'woman', 'child'].indexOf(l) !== -1; })) {
+        enhancements.contentType = 'team_portrait';
+        enhancements.needsReview = 'yes';
+      } else if (labelsLower.some(function(l) { return ['tool', 'machine', 'equipment', 'vehicle', 'engine', 'machinery'].indexOf(l) !== -1; })) {
+        enhancements.contentType = 'equipment';
+        if (!basicMetadata.department || basicMetadata.department === 'general') enhancements.department = 'operations';
+      } else if (labelsLower.some(function(l) { return ['building', 'room', 'interior', 'architecture', 'house', 'office building', 'factory'].indexOf(l) !== -1; })) {
+        enhancements.contentType = basicMetadata.contentType === 'facility_exterior' ? 'facility_exterior' : 'facility_interior';
+      }
+    }
+    
+    // Enhanced subject identification
+    if (visionAnalysis.objects && visionAnalysis.objects.length > 0) {
+      var primaryObject = visionAnalysis.objects.sort(function(a,b) { return b.confidence - a.confidence; })[0];
+      if (primaryObject && primaryObject.name) {
+        enhancements.subject = primaryObject.name;
+      }
+    } else if (visionAnalysis.labels && visionAnalysis.labels.length > 0 && !enhancements.subject) {
+      enhancements.subject = visionAnalysis.labels[0].description;
+    }
+    
+    // Enhanced keywords with AI data
+    var aiKeywordsList = [];
+    if (visionAnalysis.labels) {
+      visionAnalysis.labels.slice(0, 10).forEach(function(l) { 
+        aiKeywordsList.push(l.description.toLowerCase()); 
+      });
+    }
+    if (visionAnalysis.objects) {
+      visionAnalysis.objects.slice(0, 5).forEach(function(o) { 
+        aiKeywordsList.push(o.name.toLowerCase()); 
+      });
+    }
+    
+    if (aiKeywordsList.length > 0) {
+      var existingKeywords = basicMetadata.manualKeywords ? basicMetadata.manualKeywords.split(',').map(function(k) { return k.trim(); }) : [];
+      var combinedKeywords = [];
+      var seen = {};
+      
+      existingKeywords.concat(aiKeywordsList).forEach(function(keyword) {
+        if (!seen[keyword]) {
+          seen[keyword] = true;
+          combinedKeywords.push(keyword);
+        }
+      });
+      
+      enhancements.manualKeywords = combinedKeywords.join(', ');
+    }
+    
+    // Detect text-heavy images
+    if (visionAnalysis.text && visionAnalysis.text.length > 50) {
+      if (basicMetadata.contentType === 'other' || basicMetadata.contentType === 'unknown') {
+        enhancements.contentType = 'documentation';
+      }
+      if (basicMetadata.importance !== 'critical' && basicMetadata.importance !== 'high') {
+        enhancements.importance = 'medium';
+      }
+    }
+    
+    return enhancements;
   };
   
   // Return public interface

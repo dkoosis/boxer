@@ -68,10 +68,7 @@ var BoxFileOperations = (function() {
    */
   ns.isImageFile = function(filename) {
     if (!filename || typeof filename !== 'string') return false;
-    var lowerFilename = filename.toLowerCase();
-    return IMAGE_EXTENSIONS.some(function(ext) { 
-      return lowerFilename.endsWith(ext); 
-    });
+    return Config.isImageFile(filename);
   };
   
   /**
@@ -82,7 +79,7 @@ var BoxFileOperations = (function() {
    * @returns {object[]} Array of image file objects
    */
   ns.findAllImageFiles = function(folderId, accessToken, allImages) {
-    folderId = folderId || DEFAULT_PROCESSING_FOLDER_ID;
+    folderId = folderId || Config.DEFAULT_PROCESSING_FOLDER_ID;
     allImages = allImages || [];
     
     if (!accessToken) {
@@ -93,8 +90,8 @@ var BoxFileOperations = (function() {
     
     try {
       var fieldsToFetch = 'id,name,type,size,path_collection,created_at,modified_at,parent';
-      var url = BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
-                DEFAULT_API_ITEM_LIMIT + '&fields=' + fieldsToFetch;
+      var url = Config.BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
+                Config.DEFAULT_API_ITEM_LIMIT + '&fields=' + fieldsToFetch;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -157,7 +154,7 @@ var BoxFileOperations = (function() {
    * @returns {boolean} True if metadata exists
    */
   ns.hasExistingMetadata = function(fileId, accessToken, templateKey) {
-    templateKey = templateKey || BOX_METADATA_TEMPLATE_KEY;
+    templateKey = templateKey || Config.BOX_METADATA_TEMPLATE_KEY;
     
     if (!accessToken || !fileId) {
       Logger.log('BoxFileOperations.hasExistingMetadata: fileId and accessToken required');
@@ -165,8 +162,8 @@ var BoxFileOperations = (function() {
     }
     
     try {
-      var url = BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.BOX_METADATA_SCOPE + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -193,7 +190,7 @@ var BoxFileOperations = (function() {
    * @returns {object|null} Metadata object or null
    */
   ns.getCurrentMetadata = function(fileId, accessToken, templateKey) {
-    templateKey = templateKey || BOX_METADATA_TEMPLATE_KEY;
+    templateKey = templateKey || Config.BOX_METADATA_TEMPLATE_KEY;
     
     if (!accessToken || !fileId) {
       Logger.log('BoxFileOperations.getCurrentMetadata: fileId and accessToken required');
@@ -201,8 +198,8 @@ var BoxFileOperations = (function() {
     }
     
     try {
-      var url = BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.BOX_METADATA_SCOPE + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -240,7 +237,7 @@ var BoxFileOperations = (function() {
    * @returns {boolean} Success status
    */
   ns.applyMetadata = function(fileId, metadata, accessToken, templateKey) {
-    templateKey = templateKey || BOX_METADATA_TEMPLATE_KEY;
+    templateKey = templateKey || Config.BOX_METADATA_TEMPLATE_KEY;
     
     if (!accessToken || !fileId || !metadata) {
       Logger.log('BoxFileOperations.applyMetadata: all parameters required');
@@ -250,8 +247,8 @@ var BoxFileOperations = (function() {
     var utils = initUtils_();
     
     try {
-      var url = BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.BOX_METADATA_SCOPE + '/' + templateKey;
       
       // Try POST first (create)
       var response = makeRobustApiCall_(function() {
@@ -296,7 +293,7 @@ var BoxFileOperations = (function() {
    * @returns {boolean} Success status
    */
   ns.updateMetadata = function(fileId, metadataToUpdate, accessToken, templateKey) {
-    templateKey = templateKey || BOX_METADATA_TEMPLATE_KEY;
+    templateKey = templateKey || Config.BOX_METADATA_TEMPLATE_KEY;
     
     if (!accessToken || !fileId || !metadataToUpdate) {
       Logger.log('BoxFileOperations.updateMetadata: all parameters required');
@@ -339,8 +336,8 @@ var BoxFileOperations = (function() {
         return true; // No changes needed
       }
       
-      var url = BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.BOX_METADATA_SCOPE + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -385,17 +382,17 @@ var BoxFileOperations = (function() {
     }
     
     try {
-      if (ns.hasExistingMetadata(imageFile.id, accessToken, BOX_METADATA_TEMPLATE_KEY)) {
+      if (ns.hasExistingMetadata(imageFile.id, accessToken, Config.BOX_METADATA_TEMPLATE_KEY)) {
         return 'skipped';
       }
       
       var emptyMetadata = {
-        processingStage: PROCESSING_STAGE_UNPROCESSED,
+        processingStage: Config.PROCESSING_STAGE_UNPROCESSED,
         lastProcessedDate: new Date().toISOString()
       };
       
-      var url = BOX_API_BASE_URL + '/files/' + imageFile.id + '/metadata/' + 
-                BOX_METADATA_SCOPE + '/' + BOX_METADATA_TEMPLATE_KEY;
+      var url = Config.BOX_API_BASE_URL + '/files/' + imageFile.id + '/metadata/' + 
+                Config.BOX_METADATA_SCOPE + '/' + Config.BOX_METADATA_TEMPLATE_KEY;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -455,7 +452,7 @@ var BoxFileOperations = (function() {
       
       Logger.log('✅ Using template: ' + template.displayName);
       
-      var allImages = ns.findAllImageFiles(DEFAULT_PROCESSING_FOLDER_ID, accessToken);
+      var allImages = ns.findAllImageFiles(Config.DEFAULT_PROCESSING_FOLDER_ID, accessToken);
       Logger.log('📊 Found ' + allImages.length + ' image files total');
       
       if (allImages.length === 0) {
@@ -466,10 +463,10 @@ var BoxFileOperations = (function() {
       var stats = { processed: 0, attached: 0, skipped: 0, errors: 0 };
       
       // Process in batches
-      for (var i = 0; i < allImages.length; i += METADATA_ATTACHMENT_BATCH_SIZE) {
-        var batch = allImages.slice(i, i + METADATA_ATTACHMENT_BATCH_SIZE);
-        var batchNum = Math.floor(i / METADATA_ATTACHMENT_BATCH_SIZE) + 1;
-        var totalBatches = Math.ceil(allImages.length / METADATA_ATTACHMENT_BATCH_SIZE);
+      for (var i = 0; i < allImages.length; i += Config.METADATA_ATTACHMENT_BATCH_SIZE) {
+        var batch = allImages.slice(i, i + Config.METADATA_ATTACHMENT_BATCH_SIZE);
+        var batchNum = Math.floor(i / Config.METADATA_ATTACHMENT_BATCH_SIZE) + 1;
+        var totalBatches = Math.ceil(allImages.length / Config.METADATA_ATTACHMENT_BATCH_SIZE);
         
         Logger.log('Processing batch ' + batchNum + ' of ' + totalBatches + 
                   ' (' + batch.length + ' files)');
@@ -491,7 +488,7 @@ var BoxFileOperations = (function() {
             
             // Delay between files
             if (indexInBatch > 0 && (indexInBatch + 1) % 5 === 0) {
-              Utilities.sleep(METADATA_ATTACHMENT_FILE_DELAY_MS);
+              Utilities.sleep(Config.METADATA_ATTACHMENT_FILE_DELAY_MS);
             }
             
           } catch (error) {
@@ -503,10 +500,10 @@ var BoxFileOperations = (function() {
         });
         
         // Delay between batches
-        if (i + METADATA_ATTACHMENT_BATCH_SIZE < allImages.length) {
-          Logger.log('Pausing ' + (METADATA_ATTACHMENT_BATCH_DELAY_MS / 1000) + 
+        if (i + Config.METADATA_ATTACHMENT_BATCH_SIZE < allImages.length) {
+          Logger.log('Pausing ' + (Config.METADATA_ATTACHMENT_BATCH_DELAY_MS / 1000) + 
                     's between batches...');
-          Utilities.sleep(METADATA_ATTACHMENT_BATCH_DELAY_MS);
+          Utilities.sleep(Config.METADATA_ATTACHMENT_BATCH_DELAY_MS);
         }
       }
       

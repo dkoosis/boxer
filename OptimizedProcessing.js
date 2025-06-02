@@ -291,8 +291,8 @@ var OptimizedProcessing = (function() {
    */
   ns.quickMetadataCheck = function(fileId, accessToken) {
     try {
-      var url = BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                BOX_METADATA_SCOPE + '/' + BOX_METADATA_TEMPLATE_KEY;
+      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.BOX_METADATA_SCOPE + '/' + Config.BOX_METADATA_TEMPLATE_KEY;
       
       var response = UrlFetchApp.fetch(url, {
         method: 'HEAD', // Just check existence, don't download content
@@ -317,7 +317,7 @@ var OptimizedProcessing = (function() {
       }
       
       // Get full file details for metadata extraction
-      var fileDetailsUrl = BOX_API_BASE_URL + '/files/' + file.id + 
+      var fileDetailsUrl = Config.BOX_API_BASE_URL + '/files/' + file.id + 
                           '?fields=id,name,size,path_collection,created_at,parent';
       var response = UrlFetchApp.fetch(fileDetailsUrl, {
         headers: { 'Authorization': 'Bearer ' + accessToken },
@@ -328,8 +328,8 @@ var OptimizedProcessing = (function() {
         var fileDetails = JSON.parse(response.getContentText());
         var metadata = MetadataExtraction.extractComprehensiveMetadata(fileDetails);
         
-        // Apply metadata using the fixed function
-        var success = applyMetadataToFileFixed(file.id, metadata, accessToken);
+        // Apply metadata using the BoxFileOperations namespace
+        var success = BoxFileOperations.applyMetadata(file.id, metadata, accessToken);
         
         if (success) {
           Logger.log("✅ Processed: " + file.name);
@@ -354,7 +354,7 @@ var OptimizedProcessing = (function() {
     limit = limit || 50;
     
     try {
-      var searchUrl = BOX_API_BASE_URL + '/search?query=' + encodeURIComponent(query) + 
+      var searchUrl = Config.BOX_API_BASE_URL + '/search?query=' + encodeURIComponent(query) + 
                      '&limit=' + limit + '&fields=id,name,type,size,created_at,modified_at,parent';
       
       var response = UrlFetchApp.fetch(searchUrl, {
@@ -380,12 +380,12 @@ var OptimizedProcessing = (function() {
   // Checkpoint and Statistics Management
   
   ns.getProcessingCheckpoint = function() {
-    var checkpointStr = SCRIPT_PROPERTIES.getProperty(CHECKPOINT_PROPERTY);
+    var checkpointStr = Config.SCRIPT_PROPERTIES.getProperty(CHECKPOINT_PROPERTY);
     return checkpointStr ? JSON.parse(checkpointStr) : { folderIndex: 0, fileIndex: 0 };
   };
   
   ns.saveProcessingCheckpoint = function(checkpoint) {
-    SCRIPT_PROPERTIES.setProperty(CHECKPOINT_PROPERTY, JSON.stringify(checkpoint));
+    Config.SCRIPT_PROPERTIES.setProperty(CHECKPOINT_PROPERTY, JSON.stringify(checkpoint));
   };
   
   ns.getLastCheckpoint = function() {
@@ -400,7 +400,7 @@ var OptimizedProcessing = (function() {
   };
   
   ns.saveProcessingStats = function(stats) {
-    var existing = SCRIPT_PROPERTIES.getProperty(STATS_PROPERTY);
+    var existing = Config.SCRIPT_PROPERTIES.getProperty(STATS_PROPERTY);
     var allStats = existing ? JSON.parse(existing) : [];
     allStats.push(stats);
     
@@ -409,7 +409,7 @@ var OptimizedProcessing = (function() {
       allStats = allStats.slice(-10);
     }
     
-    SCRIPT_PROPERTIES.setProperty(STATS_PROPERTY, JSON.stringify(allStats));
+    Config.SCRIPT_PROPERTIES.setProperty(STATS_PROPERTY, JSON.stringify(allStats));
   };
   
   // Utility date functions
@@ -427,11 +427,11 @@ var OptimizedProcessing = (function() {
   
   ns.getFoldersToProcess = function() {
     // Define specific folders to process, or discover them dynamically
-    return [ACTIVE_TEST_FOLDER_ID]; // Start with test folder
+    return [Config.ACTIVE_TEST_FOLDER_ID]; // Start with test folder
   };
   
   ns.getImageFilesInFolder = function(folderId, accessToken) {
-    return SimpleBoxOperations.findAllImageFiles(folderId, accessToken);
+    return BoxFileOperations.findAllImageFiles(folderId, accessToken);
   };
   
   return ns;
@@ -462,7 +462,7 @@ function processBoxImagesOptimized() {
 function showOptimizedProcessingStats() {
   Logger.log("=== Optimized Processing Statistics ===\\n");
   
-  var statsStr = SCRIPT_PROPERTIES.getProperty('PROCESSING_STATS');
+  var statsStr = Config.SCRIPT_PROPERTIES.getProperty('PROCESSING_STATS');
   if (!statsStr) {
     Logger.log("No processing statistics available yet");
     return;
@@ -506,7 +506,7 @@ function recommendProcessingStrategy() {
     Logger.log("🔍 Analyzing your Box account...");
     
     // Get user info
-    const userResponse = UrlFetchApp.fetch(BOX_API_BASE_URL + '/users/me', {
+    const userResponse = UrlFetchApp.fetch(Config.BOX_API_BASE_URL + '/users/me', {
       headers: { 'Authorization': 'Bearer ' + accessToken },
       muteHttpExceptions: true
     });
@@ -531,7 +531,7 @@ function recommendProcessingStrategy() {
     
     for (const search of searches) {
       try {
-        const searchUrl = `${BOX_API_BASE_URL}/search?query=${encodeURIComponent(search.query)}&limit=100`;
+        const searchUrl = `${Config.BOX_API_BASE_URL}/search?query=${encodeURIComponent(search.query)}&limit=100`;
         const searchResponse = UrlFetchApp.fetch(searchUrl, {
           headers: { 'Authorization': 'Bearer ' + accessToken },
           muteHttpExceptions: true
@@ -708,7 +708,7 @@ function testOptimizedApproach() {
   
   try {
     // Search for a few image files
-    const searchUrl = `${BOX_API_BASE_URL}/search?query=type:file .jpg&limit=5&fields=id,name,size`;
+    const searchUrl = `${Config.BOX_API_BASE_URL}/search?query=type:file .jpg&limit=5&fields=id,name,size`;
     const response = UrlFetchApp.fetch(searchUrl, {
       headers: { 'Authorization': 'Bearer ' + accessToken },
       muteHttpExceptions: true

@@ -3,17 +3,57 @@
 // Depends on: Config.gs, cGoa library (by Bruce McPherson)
 
 /**
+ * Service provider configurations for cGoa library.
+ * Based on Bruce McPherson's Service definition patterns.
+ */
+var Service = (function (service) {
+  'use strict';
+
+  const isUndefined_ = (item) => typeof item === typeof undefined;
+  const isNull_ = (item) => item === null;
+  const isNullOrUndefined_ = (item) => isNull_(item) || isUndefined_(item);
+  const arrify_ = (item) => Array.isArray(item) ? item : (isNullOrUndefined_(item) ? [] : [item]);
+  const encodeURIComponent_ = (str) => encodeURIComponent(str);
+
+  const objectToQueryString_ = (params) => {
+    const paramArray = arrify_(params);
+    const queryParams = paramArray.reduce((p, c) => {
+      Object.keys(c).forEach(k => p.push([k, encodeURIComponent_(c[k])].join('=')));
+      return p;
+    }, []);
+    return queryParams.length ? `?${queryParams.join('&')}` : '';
+  };
+
+  service.pockage = {
+    "box": {
+      authUrl: "https://account.box.com/api/oauth2/authorize",
+      tokenUrl: "https://api.box.com/oauth2/token",
+      refreshUrl: "https://api.box.com/oauth2/token",
+      basic: false
+    },
+    "google": {
+      authUrl: "https://accounts.google.com/o/oauth2/auth",
+      tokenUrl: "https://accounts.google.com/o/oauth2/token",
+      refreshUrl: "https://accounts.google.com/o/oauth2/token",
+      checkUrl: "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token="
+    }
+  };
+
+  return service;
+})(Service || {});
+
+/**
  * Creates and stores the Box package for cGoa using existing credentials from Script Properties.
  * Uses Bruce McPherson's cGoa library for robust OAuth2 handling.
  * @returns {object} The created Box package configuration
  */
 function createBoxPackage() {
-  const clientId = SCRIPT_PROPERTIES.getProperty(OAUTH_CLIENT_ID_PROPERTY);
-  const clientSecret = SCRIPT_PROPERTIES.getProperty(OAUTH_CLIENT_SECRET_PROPERTY);
+  const clientId = Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_ID_PROPERTY);
+  const clientSecret = Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_SECRET_PROPERTY);
   
   if (!clientId || !clientSecret) {
     throw new Error('Box credentials not found in Script Properties. Please set ' + 
-                   OAUTH_CLIENT_ID_PROPERTY + ' and ' + OAUTH_CLIENT_SECRET_PROPERTY);
+                   Config.OAUTH_CLIENT_ID_PROPERTY + ' and ' + Config.OAUTH_CLIENT_SECRET_PROPERTY);
   }
   
   const boxPackage = {
@@ -29,7 +69,7 @@ function createBoxPackage() {
     }
   };
   
-  cGoa.GoaApp.setPackage(SCRIPT_PROPERTIES, boxPackage);
+  cGoa.GoaApp.setPackage(Config.SCRIPT_PROPERTIES, boxPackage);
   Logger.log('✅ Box package created using existing Script Properties');
   
   return boxPackage;
@@ -42,7 +82,7 @@ function createBoxPackage() {
  */
 function initializeBoxPackage() {
   try {
-    const existingPackage = cGoa.GoaApp.getPackage(SCRIPT_PROPERTIES, 'boxService');
+    const existingPackage = cGoa.GoaApp.getPackage(Config.SCRIPT_PROPERTIES, 'boxService');
     
     if (!existingPackage) {
       Logger.log('No existing Box package found, creating new one...');
@@ -69,7 +109,7 @@ function getBoxGoa(e) {
   
   return cGoa.make(
     'boxService',           
-    SCRIPT_PROPERTIES,      
+    Config.SCRIPT_PROPERTIES,      
     e                       
   );
 }
@@ -216,7 +256,7 @@ function testBoxAccess() {
   try {
     const token = getValidAccessToken();
     
-    const response = UrlFetchApp.fetch(BOX_API_BASE_URL + '/users/me', {
+    const response = UrlFetchApp.fetch(Config.BOX_API_BASE_URL + '/users/me', {
       headers: { 'Authorization': 'Bearer ' + token },
       muteHttpExceptions: true
     });
@@ -251,8 +291,8 @@ function getAuthStatus() {
       hasToken: goa.hasToken(),
       needsConsent: goa.needsConsent(),
       packageExists: !!packageInfo,
-      credentialsSet: !!(SCRIPT_PROPERTIES.getProperty(OAUTH_CLIENT_ID_PROPERTY) && 
-                        SCRIPT_PROPERTIES.getProperty(OAUTH_CLIENT_SECRET_PROPERTY))
+      credentialsSet: !!(Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_ID_PROPERTY) && 
+                        Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_SECRET_PROPERTY))
     };
   } catch (error) {
     return {
@@ -260,8 +300,8 @@ function getAuthStatus() {
       hasToken: false,
       needsConsent: true,
       packageExists: false,
-      credentialsSet: !!(SCRIPT_PROPERTIES.getProperty(OAUTH_CLIENT_ID_PROPERTY) && 
-                        SCRIPT_PROPERTIES.getProperty(OAUTH_CLIENT_SECRET_PROPERTY))
+      credentialsSet: !!(Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_ID_PROPERTY) && 
+                        Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_SECRET_PROPERTY))
     };
   }
 }

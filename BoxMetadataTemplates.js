@@ -14,12 +14,12 @@ function createOptimalImageMetadataTemplate(accessToken) {
     return null;
   }
   
-  Logger.log(`Creating metadata template: ${BOX_METADATA_TEMPLATE_KEY}, Scope: ${BOX_METADATA_SCOPE}`);
+  Logger.log(`Creating metadata template: ${Config.BOX_METADATA_TEMPLATE_KEY}, Scope: ${Config.BOX_METADATA_SCOPE}`);
   
   const templateData = {
-    scope: BOX_METADATA_SCOPE,
-    templateKey: BOX_METADATA_TEMPLATE_KEY,
-    displayName: BOX_METADATA_TEMPLATE_DISPLAY_NAME,
+    scope: Config.BOX_METADATA_SCOPE,
+    templateKey: Config.BOX_METADATA_TEMPLATE_KEY,
+    displayName: Config.BOX_METADATA_TEMPLATE_DISPLAY_NAME,
     fields: [
       // === CORE FILE INFORMATION ===
       { key: 'originalFilename', displayName: 'Original Filename', type: 'string', description: 'Original file name before processing' },
@@ -128,12 +128,12 @@ function createOptimalImageMetadataTemplate(accessToken) {
       // === PROCESSING METADATA ===
       { key: 'processingStage', displayName: 'Processing Stage', type: 'enum', description: 'Current processing status',
         options: [
-          { key: PROCESSING_STAGE_UNPROCESSED, displayName: 'Unprocessed' },
-          { key: PROCESSING_STAGE_BASIC, displayName: 'Basic Info Extracted' },
-          { key: PROCESSING_STAGE_EXIF, displayName: 'EXIF Extracted' },
-          { key: PROCESSING_STAGE_AI, displayName: 'AI Analyzed' },
-          { key: PROCESSING_STAGE_REVIEW, displayName: 'Human Reviewed' },
-          { key: PROCESSING_STAGE_COMPLETE, displayName: 'Complete' }
+          { key: Config.PROCESSING_STAGE_UNPROCESSED, displayName: 'Unprocessed' },
+          { key: Config.PROCESSING_STAGE_BASIC, displayName: 'Basic Info Extracted' },
+          { key: Config.PROCESSING_STAGE_EXIF, displayName: 'EXIF Extracted' },
+          { key: Config.PROCESSING_STAGE_AI, displayName: 'AI Analyzed' },
+          { key: Config.PROCESSING_STAGE_REVIEW, displayName: 'Human Reviewed' },
+          { key: Config.PROCESSING_STAGE_COMPLETE, displayName: 'Complete' }
         ]},
       { key: 'aiConfidenceScore', displayName: 'AI Confidence Score', type: 'float', description: 'AI analysis confidence (0.0-1.0)' },
       { key: 'lastProcessedDate', displayName: 'Last Processed', type: 'date', description: 'When metadata was last updated' },
@@ -150,7 +150,7 @@ function createOptimalImageMetadataTemplate(accessToken) {
     ]
   };
 
-  const url = `${BOX_API_BASE_URL}/metadata_templates/schema`;
+  const url = `${Config.BOX_API_BASE_URL}/metadata_templates/schema`;
   const options = {
     method: 'POST',
     headers: {
@@ -194,9 +194,9 @@ function listExistingTemplates(accessToken) {
     return [];
   }
   
-  Logger.log(`Listing existing templates in scope: ${BOX_METADATA_SCOPE}`);
+  Logger.log(`Listing existing templates in scope: ${Config.BOX_METADATA_SCOPE}`);
   
-  const url = `${BOX_API_BASE_URL}/metadata_templates/${BOX_METADATA_SCOPE}`;
+  const url = `${Config.BOX_API_BASE_URL}/metadata_templates/${Config.BOX_METADATA_SCOPE}`;
   const options = {
     headers: { 'Authorization': `Bearer ${accessToken}` },
     muteHttpExceptions: true
@@ -209,7 +209,7 @@ function listExistingTemplates(accessToken) {
 
     if (responseCode === 200) {
       const templates = JSON.parse(responseText);
-      Logger.log(`Found ${templates.entries.length} template(s) in scope '${BOX_METADATA_SCOPE}'`);
+      Logger.log(`Found ${templates.entries.length} template(s) in scope '${Config.BOX_METADATA_SCOPE}'`);
       templates.entries.forEach(template => {
         Logger.log(`  - ${template.displayName} (Key: ${template.templateKey}, Fields: ${template.fields ? template.fields.length : 'N/A'})`);
       });
@@ -236,7 +236,7 @@ function checkTemplateExists(templateKey, accessToken) {
     return null;
   }
   
-  const url = `${BOX_API_BASE_URL}/metadata_templates/${BOX_METADATA_SCOPE}/${templateKey}/schema`;
+  const url = `${Config.BOX_API_BASE_URL}/metadata_templates/${Config.BOX_METADATA_SCOPE}/${templateKey}/schema`;
   const options = {
     method: 'GET',
     headers: { 'Authorization': `Bearer ${accessToken}` },
@@ -276,18 +276,18 @@ function getOrCreateImageTemplate(accessToken) {
     return null;
   }
   
-  Logger.log(`Ensuring metadata template '${BOX_METADATA_TEMPLATE_KEY}' exists`);
-  let template = checkTemplateExists(BOX_METADATA_TEMPLATE_KEY, accessToken);
+  Logger.log(`Ensuring metadata template '${Config.BOX_METADATA_TEMPLATE_KEY}' exists`);
+  let template = checkTemplateExists(Config.BOX_METADATA_TEMPLATE_KEY, accessToken);
   
   if (!template) {
-    Logger.log(`Template '${BOX_METADATA_TEMPLATE_KEY}' not found, creating`);
+    Logger.log(`Template '${Config.BOX_METADATA_TEMPLATE_KEY}' not found, creating`);
     template = createOptimalImageMetadataTemplate(accessToken);
   }
   
   if (template) {
     Logger.log(`Using template: ${template.displayName} (Key: ${template.templateKey})`);
   } else {
-    Logger.log(`ERROR: Failed to get or create template '${BOX_METADATA_TEMPLATE_KEY}'. Check admin permissions.`);
+    Logger.log(`ERROR: Failed to get or create template '${Config.BOX_METADATA_TEMPLATE_KEY}'. Check admin permissions.`);
   }
   
   return template;

@@ -61,7 +61,7 @@ function extractBasicExifData(fileId, accessToken) {
   }
   
   try {
-    const downloadUrl = `${BOX_API_BASE_URL}/files/${fileId}/content`;
+    const downloadUrl = `${Config.BOX_API_BASE_URL}/files/${fileId}/content`;
     const response = UrlFetchApp.fetch(downloadUrl, {
       headers: { 'Authorization': `Bearer ${accessToken}` },
       muteHttpExceptions: true
@@ -136,9 +136,9 @@ function convertBasicExifToBoxFormat(basicExif) {
     boxMetadata.notes = 'Camera settings: ' + technicalDetails.join(', ');
   }
   
-  boxMetadata.processingStage = PROCESSING_STAGE_EXIF;
+  boxMetadata.processingStage = Config.PROCESSING_STAGE_EXIF;
   boxMetadata.lastProcessedDate = new Date().toISOString();
-  boxMetadata.processingVersion = PROCESSING_VERSION_BASIC;
+  boxMetadata.processingVersion = Config.PROCESSING_VERSION_BASIC;
   
   return boxMetadata;
 }
@@ -257,9 +257,9 @@ function extractExifData(fileId, accessToken) {
  * @throws {Error} If API key not found
  */
 function getVisionApiKey() {
-  const apiKey = SCRIPT_PROPERTIES.getProperty(VISION_API_KEY_PROPERTY);
+  const apiKey = Config.SCRIPT_PROPERTIES.getProperty(Config.VISION_API_KEY_PROPERTY);
   if (!apiKey) {
-    const errMsg = `${VISION_API_KEY_PROPERTY} not found in Script Properties. Please add it.`;
+    const errMsg = `${Config.VISION_API_KEY_PROPERTY} not found in Script Properties. Please add it.`;
     Logger.log(`ERROR: ${errMsg}`);
     throw new Error(errMsg);
   }
@@ -518,7 +518,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
     // Use cUseful for robust download with retry
     var utils = cUseful;
     
-    const downloadUrl = `${BOX_API_BASE_URL}/files/${fileId}/content`;
+    const downloadUrl = `${Config.BOX_API_BASE_URL}/files/${fileId}/content`;
     const downloadResponse = utils.rateLimitExpBackoff(function() {
       return UrlFetchApp.fetch(downloadUrl, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
@@ -536,7 +536,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
     const imageBytes = imageBlob.getBytes();
     const imageSize = imageBytes.length;
     
-    if (imageSize > MAX_VISION_API_FILE_SIZE_BYTES) {
+    if (imageSize > Config.MAX_VISION_API_FILE_SIZE_BYTES) {
       const sizeMB = Math.round(imageSize / (1024 * 1024) * 10) / 10;
       Logger.log(`Image ${fileId} too large for Vision API (${sizeMB}MB)`);
       return { error: 'FILE_TOO_LARGE', sizeMB: sizeMB, message: `File size ${sizeMB}MB exceeds Vision API limit.` };
@@ -573,7 +573,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
     
     // Use retry logic for Vision API call
     const visionResponse = utils.rateLimitExpBackoff(function() {
-      return UrlFetchApp.fetch(`${VISION_API_ENDPOINT}?key=${visionApiKey}`, visionApiOptions);
+      return UrlFetchApp.fetch(`${Config.VISION_API_ENDPOINT}?key=${visionApiKey}`, visionApiOptions);
     });
     
     const visionResponseCode = visionResponse.getResponseCode();
@@ -646,7 +646,7 @@ function testComprehensiveMetadataExtraction(testFileId) {
   try {
     // Find a test file if not specified
     if (!testFileId) {
-      const testImages = BoxFileOperations.findAllImageFiles(ACTIVE_TEST_FOLDER_ID, accessToken);
+      const testImages = BoxFileOperations.findAllImageFiles(Config.ACTIVE_TEST_FOLDER_ID, accessToken);
       if (testImages.length === 0) {
         Logger.log("❌ No test images found");
         return;
@@ -751,7 +751,7 @@ function verifyVisionApiSetup() {
   try {
     Logger.log("1. Checking API key presence...");
     const apiKey = getVisionApiKey();
-    Logger.log(`✅ API key found (${VISION_API_KEY_PROPERTY}). Length: ${apiKey.length}`);
+    Logger.log(`✅ API key found (${Config.VISION_API_KEY_PROPERTY}). Length: ${apiKey.length}`);
     
     if (!apiKey.startsWith('AIza') || apiKey.length !== 39) {
       Logger.log(`⚠️ API key format might be incorrect. Expected 39 chars starting with 'AIza'`);
@@ -774,7 +774,7 @@ function verifyVisionApiSetup() {
       payload: JSON.stringify(testPayload),
       muteHttpExceptions: true
     };
-    const testResponse = UrlFetchApp.fetch(`${VISION_API_ENDPOINT}?key=${apiKey}`, testOptions);
+    const testResponse = UrlFetchApp.fetch(`${Config.VISION_API_ENDPOINT}?key=${apiKey}`, testOptions);
     const testResponseCode = testResponse.getResponseCode();
     
     if (testResponseCode === 400) {
@@ -800,7 +800,7 @@ function verifyVisionApiSetup() {
     };
     const imageTestOptions = { ...testOptions, payload: JSON.stringify(imageTestPayload) };
     
-    const imageTestResponse = UrlFetchApp.fetch(`${VISION_API_ENDPOINT}?key=${apiKey}`, imageTestOptions);
+    const imageTestResponse = UrlFetchApp.fetch(`${Config.VISION_API_ENDPOINT}?key=${apiKey}`, imageTestOptions);
     const imageTestResponseCode = imageTestResponse.getResponseCode();
     
     if (imageTestResponseCode === 200) {
