@@ -3,75 +3,54 @@
 // Depends on: Config.gs, cGoa library (by Bruce McPherson)
 
 /**
- * Service provider configurations for cGoa library.
- * Based on Bruce McPherson's Service definition patterns.
+ * Creates and stores the Box package for cGoa using existing credentials from Script Properties.
+ * Uses Bruce McPherson's cGoa library for robust OAuth2 handling.
+ * @returns {object} The created Box package configuration
  */
-var Service = (function (service) {
-  'use strict';
-
-  const isUndefined_ = (item) => typeof item === typeof undefined;
-  const isNull_ = (item) => item === null;
-  const isNullOrUndefined_ = (item) => isNull_(item) || isUndefined_(item);
-  const arrify_ = (item) => Array.isArray(item) ? item : (isNullOrUndefined_(item) ? [] : [item]);
-  const encodeURIComponent_ = (str) => encodeURIComponent(str);
-
-  const objectToQueryString_ = (params) => {
-    const paramArray = arrify_(params);
-    const queryParams = paramArray.reduce((p, c) => {
-      Object.keys(c).forEach(k => p.push([k, encodeURIComponent_(c[k])].join('=')));
-      return p;
-    }, []);
-    return queryParams.length ? `?${queryParams.join('&')}` : '';
-  };
-
-  service.pockage = {
-    "box": {
-      authUrl: "https://account.box.com/api/oauth2/authorize",
-      tokenUrl: "https://api.box.com/oauth2/token",
-      refreshUrl: "https://api.box.com/oauth2/token",
-      basic: false
-    },
-    "google": {
-      authUrl: "https://accounts.google.com/o/oauth2/auth",
-      tokenUrl: "https://accounts.google.com/o/oauth2/token",
-      refreshUrl: "https://accounts.google.com/o/oauth2/token",
-      checkUrl: "https://www.googleapis.com/oauth2/v1/tokeninfo?access_token="
-    }
-  };
-
-  return service;
-})(Service || {});
+// In BoxAuth.js
 
 /**
  * Creates and stores the Box package for cGoa using existing credentials from Script Properties.
+ * It now sources its service endpoint URLs from the global OAuthServices.pockage.
  * Uses Bruce McPherson's cGoa library for robust OAuth2 handling.
  * @returns {object} The created Box package configuration
  */
 function createBoxPackage() {
   const clientId = Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_ID_PROPERTY);
   const clientSecret = Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_SECRET_PROPERTY);
-  
+
   if (!clientId || !clientSecret) {
-    throw new Error('Box credentials not found in Script Properties. Please set ' + 
+    throw new Error('Box credentials not found in Script Properties. Please set ' +
                    Config.OAUTH_CLIENT_ID_PROPERTY + ' and ' + Config.OAUTH_CLIENT_SECRET_PROPERTY);
   }
-  
+
+  // Ensure OAuthServices.pockage and its 'box' definition are available
+  if (typeof OAuthServices === 'undefined' || !OAuthServices.pockage || !OAuthServices.pockage.box) {
+    throw new Error('OAuthServices.pockage.box definition is not available. Ensure OAuthServices.js is loaded before BoxAuth.js and defines the "box" service.');
+  }
+  const boxServiceEndpoints = OAuthServices.pockage.box;
+
   const boxPackage = {
     clientId: clientId,
     clientSecret: clientSecret,
     scopes: ["root_readwrite", "manage_enterprise_properties"],
-    service: 'custom',
+    service: 'custom', // We keep 'custom' because we are providing all params to cGoa.
+                       // cGoa uses these directly when service is 'custom'.
     packageName: 'boxService',
-    serviceParameters: {
-      authUrl: "https://account.box.com/api/oauth2/authorize",
-      tokenUrl: "https://api.box.com/oauth2/token",
-      refreshUrl: "https://api.box.com/oauth2/token"
+    serviceParameters: { // These URLs are now sourced from OAuthServices.js
+      authUrl: boxServiceEndpoints.authUrl,
+      tokenUrl: boxServiceEndpoints.tokenUrl,
+      refreshUrl: boxServiceEndpoints.refreshUrl
+      // If OAuthServices.pockage.box also defined 'basic' or other params cGoa respects
+      // under serviceParameters for a 'custom' type, you could add them here too.
+      // For instance, if 'basic' was relevant:
+      // basic: boxServiceEndpoints.basic
     }
   };
-  
+
   cGoa.GoaApp.setPackage(Config.SCRIPT_PROPERTIES, boxPackage);
-  Logger.log('✅ Box package created using existing Script Properties');
-  
+  Logger.log('✅ Box package created using credentials from Script Properties and service URLs from OAuthServices.js');
+
   return boxPackage;
 }
 

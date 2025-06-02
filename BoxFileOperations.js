@@ -93,7 +93,6 @@ var BoxFileOperations = (function() {
       var url = Config.BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
                 Config.DEFAULT_API_ITEM_LIMIT + '&fields=' + fieldsToFetch;
                 
-      Logger.log('Applying metadata: ' + JSON.stringify(metadata, null, 2));  
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
           headers: { 'Authorization': 'Bearer ' + accessToken },
@@ -246,7 +245,8 @@ var BoxFileOperations = (function() {
     }
     
     var utils = initUtils_();
-    
+    //Logger.log('BoxFileOperations.applyMetadata: Attempting to apply to fileId: ' + fileId + '. Metadata PAYLOAD to be sent: ' + JSON.stringify(metadata, null, 2));
+
     try {
       var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
                 Config.BOX_METADATA_SCOPE + '/' + templateKey;

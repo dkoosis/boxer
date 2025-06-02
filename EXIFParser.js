@@ -1,6 +1,5 @@
-// File: EnhancedExifParser.gs
+// File: ExifParser.gs
 // Robust metadata extraction from multiple image formats
-// Uses cUseful library by Bruce McPherson for robust operations
 // Depends on: Config.gs, BoxAuth.gs
 
 /**
@@ -626,81 +625,95 @@ var EnhancedExifParser = (function() {
    * @param {object} metadata Organized metadata
    * @returns {object} Box-compatible metadata
    */
-  function convertToBoxFormat_(metadata) {
-    var boxMetadata = {
-      processingStage: Config.PROCESSING_STAGE_EXIF,
-      lastProcessedDate: new Date().toISOString(),
-      processingVersion: Config.PROCESSING_VERSION_ENHANCED
-    };
-    
-    try {
-      // Camera and technical info
-      if (metadata.camera.make || metadata.camera.model) {
-        boxMetadata.cameraModel = [metadata.camera.make, metadata.camera.model].filter(Boolean).join(' ');
-      }
-      
-      // Image dimensions
-      if (metadata.image.imagewidth && metadata.image.imagelength) {
-        boxMetadata.imageWidth = metadata.image.imagewidth;
-        boxMetadata.imageHeight = metadata.image.imagelength;
-        boxMetadata.aspectRatio = metadata.image.aspectRatio;
-        boxMetadata.megapixels = metadata.image.megapixels;
-      } else if (metadata.fileInfo.width && metadata.fileInfo.height) {
-        boxMetadata.imageWidth = metadata.fileInfo.width;
-        boxMetadata.imageHeight = metadata.fileInfo.height;
-        boxMetadata.aspectRatio = calculateAspectRatio_(metadata.fileInfo.width, metadata.fileInfo.height);
-        boxMetadata.megapixels = Math.round(metadata.fileInfo.width * metadata.fileInfo.height / 1000000 * 10) / 10;
-      }
-      
-      // Date taken
-      if (metadata.datetime.datetimeoriginal) {
-        boxMetadata.dateTaken = metadata.datetime.datetimeoriginal;
-      } else if (metadata.datetime.datetime) {
-        boxMetadata.dateTaken = metadata.datetime.datetime;
-      }
-      
-      // Camera settings summary
-      var settings = [];
-      if (metadata.settings.fnumber) settings.push('f/' + metadata.settings.fnumber);
-      if (metadata.settings.exposuretime) {
-        var et = metadata.settings.exposuretime;
-        settings.push((et > 0.25 ? et + 's' : '1/' + Math.round(1/et) + 's'));
-      }
-      if (metadata.settings.isospeedratings) settings.push('ISO ' + metadata.settings.isospeedratings);
-      if (metadata.settings.focallength) settings.push(metadata.settings.focallength + 'mm');
-      
-      if (settings.length > 0) {
-        boxMetadata.cameraSettings = settings.join(', ');
-      }
-      
-      // GPS coordinates
-      if (metadata.location.latitude && metadata.location.longitude) {
-        boxMetadata.gpsLatitude = metadata.location.latitude;
-        boxMetadata.gpsLongitude = metadata.location.longitude;
-      }
-      
-      // File format
-      if (metadata.fileInfo.format) {
-        boxMetadata.fileFormat = metadata.fileInfo.format;
-      }
-      
-      // Technical notes
-      var notes = [];
-      if (metadata.image.orientationDesc) notes.push('Orientation: ' + metadata.image.orientationDesc);
-      if (metadata.settings.exposureprogramdesc) notes.push('Mode: ' + metadata.settings.exposureprogramdesc);
-      if (metadata.settings.whitebalancedesc) notes.push('WB: ' + metadata.settings.whitebalancedesc);
-      
-      if (notes.length > 0) {
-        boxMetadata.technicalNotes = notes.join('; ');
-      }
-      
-    } catch (error) {
-      Logger.log('Error converting to Box format: ' + error.toString());
+// In EnhancedExifParser.js
+
+function convertToBoxFormat_(metadata) { // metadata is the object from organizeMetadata_ or extractOtherFormatMetadata_
+  var boxMetadata = {
+    // Initialize with defaults, but consider what's appropriate if no EXIF found
+    processingStage: metadata.hasExif ? Config.PROCESSING_STAGE_EXIF : Config.PROCESSING_STAGE_BASIC,
+    lastProcessedDate: new Date().toISOString(),
+    processingVersion: metadata.hasExif ? Config.PROCESSING_VERSION_ENHANCED : Config.PROCESSING_VERSION_BASIC 
+  };
+
+  try {
+    // Camera and technical info
+    if (metadata.camera && (metadata.camera.make || metadata.camera.model)) {
+      boxMetadata.cameraModel = [metadata.camera.make, metadata.camera.model].filter(Boolean).join(' ');
     }
+
+    // Image dimensions
+    if (metadata.image && metadata.image.imagewidth && metadata.image.imagelength) {
+      boxMetadata.imageWidth = metadata.image.imagewidth;
+      boxMetadata.imageHeight = metadata.image.imagelength;
+      if (metadata.image.aspectRatio) boxMetadata.aspectRatio = metadata.image.aspectRatio;
+      if (metadata.image.megapixels) boxMetadata.megapixels = metadata.image.megapixels;
+    } else if (metadata.fileInfo && metadata.fileInfo.width && metadata.fileInfo.height) {
+      // Fallback to basicInfo if available (e.g., from PNG header parsing in extractBasicFileInfo_)
+      boxMetadata.imageWidth = metadata.fileInfo.width;
+      boxMetadata.imageHeight = metadata.fileInfo.height;
+      // Ensure calculateAspectRatio_ is accessible here or defined in this file if used
+      // For simplicity, you might skip aspect/megapixels if not from EXIF image object
+    }
+
+    // Date taken
+    if (metadata.datetime && metadata.datetime.datetimeoriginal) {
+      boxMetadata.dateTaken = metadata.datetime.datetimeoriginal;
+    } else if (metadata.datetime && metadata.datetime.datetime) {
+      boxMetadata.dateTaken = metadata.datetime.datetime;
+    }
+
+    // Camera settings summary
+    if (metadata.settings) {
+        var settings = [];
+        if (metadata.settings.fnumber) settings.push('f/' + metadata.settings.fnumber);
+        if (metadata.settings.exposuretime) {
+            var et = metadata.settings.exposuretime;
+            settings.push((et > 0.25 ? et + 's' : '1/' + Math.round(1/et) + 's'));
+        }
+        if (metadata.settings.isospeedratings) settings.push('ISO ' + metadata.settings.isospeedratings);
+        if (metadata.settings.focallength) settings.push(metadata.settings.focallength + 'mm');
+        
+        if (settings.length > 0) {
+            boxMetadata.cameraSettings = settings.join(', ');
+        }
+    }
+
+    // GPS coordinates
+    if (metadata.location && metadata.location.latitude && metadata.location.longitude) {
+      boxMetadata.gpsLatitude = metadata.location.latitude;
+      boxMetadata.gpsLongitude = metadata.location.longitude;
+    }
+
+    // File format
+    if (metadata.fileInfo && metadata.fileInfo.format) {
+      boxMetadata.fileFormat = metadata.fileInfo.format;
+    }
+    // else if (metadata.fileInfo && metadata.fileInfo.filename) { // Redundant if basicInfo.format is always set
+    //     const parts = metadata.fileInfo.filename.split('.');
+    //     if (parts.length > 1) {
+    //         boxMetadata.fileFormat = parts.pop().toUpperCase();
+    //     }
+    // }
+
+    // Technical notes
+    var notes = [];
+    if (metadata.image && metadata.image.orientationDesc) notes.push('Orientation: ' + metadata.image.orientationDesc);
+    if (metadata.settings && metadata.settings.exposureprogramdesc) notes.push('Mode: ' + metadata.settings.exposureprogramdesc);
+    if (metadata.settings && metadata.settings.whitebalancedesc) notes.push('WB: ' + metadata.settings.whitebalancedesc);
     
-    return boxMetadata;
+    if (notes.length > 0) {
+      boxMetadata.technicalNotes = notes.join('; ');
+    }
+
+  } catch (error) {
+    // Log the error but avoid crashing the main flow if metadata is partially processed.
+    // The calling function should decide how to handle this.
+    Logger.log('Error during convertToBoxFormat_: ' + error.toString() + ' - Metadata from parser: ' + JSON.stringify(metadata));
+    // Consider adding a specific error field to boxMetadata if needed.
   }
-  
+
+  return boxMetadata;
+}  
   /**
    * Main extraction function - comprehensive metadata extraction from image files
    * @param {string} fileId Box file ID
