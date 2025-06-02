@@ -254,3 +254,278 @@ This system is built using **Bruce McPherson's excellent libraries**:
 - **[cUseful](https://github.com/brucemcpherson/cUseful)** - Essential utility functions including exponential backoff
 
 Bruce McPherson's libraries provide the foundation for reliable, production-ready Google Apps Script applications. Learn more at [h
+
+# 🐕 Boxer - Your Faithful Box.com Image Metadata Companion
+
+*Meet Boxer: The goodest boy who never tires of fetching, organizing, and cataloging your image files!*
+
+A Google Apps Script that automatically adds comprehensive metadata to image files stored in Box.com. Like a well-trained boxer dog, this script is loyal, energetic, and never gets tired of doing the same job over and over again with enthusiasm.
+
+## 🎾 What Makes Boxer Special?
+
+Boxer is a hardworking pup that periodically patrols your Box storage and enriches image files with:
+- **📏 Technical metadata** (dimensions, file format, camera info from EXIF) - *Boxer's got a keen eye for details!*
+- **🧠 AI-generated content analysis** (objects, scene description, text extraction) - *Smart doggy with special vision goggles!*
+- **🏷️ Smart categorization** (content type, location, department) - *Boxer knows where everything belongs!*
+- **🔍 Searchable keywords** derived from filenames and folder paths - *Like a bloodhound for your files!*
+
+*Why "Boxer"? Because this script is loyal, energetic, intelligent, and great with kids (and adults). Plus, it works with Box! 📦🐕*
+
+## 🦴 What Boxer Needs to Get Started
+
+### Required Accounts & Services
+- **Box.com account** with admin/enterprise metadata permissions *(Boxer needs access to the whole yard!)*
+- **Google Cloud Platform account** with Vision API enabled *(Boxer's special vision goggles - optional but recommended)*
+- **Google Apps Script** access *(Boxer's training ground)*
+
+### Required Libraries *(Boxer's favorite toys)*
+Add these libraries to your Google Apps Script project:
+- **cGoa** by Bruce McPherson: `1v_l3DWh-gSWJQF2KcyKAhPr71jNS0JOhL4kKJ-PCtb9zIZFKbEjYRNWu` *(Authentication training collar)*
+- **cUseful** by Bruce McPherson: `1EbLSESpiGkI3PYmJqWh3-rmLkYKAtCNPi1L2YCtMgo2Ut8xMThfJ41Ex` *(Utility toolkit)*
+
+## 🎓 Training Your Boxer (Setup Instructions)
+
+### 1. Create Boxer's Box App *(Getting a dog license)*
+1. Go to [Box Developer Console](https://developer.box.com/)
+2. Create new Custom App with OAuth 2.0 *(Boxer's ID tags)*
+3. Set these scopes *(What Boxer is allowed to do)*:
+   - Read and write all files and folders *(Full yard access)*
+   - Manage enterprise properties *(Organize the toys)*
+4. Note your Client ID and Client Secret *(Boxer's credentials)*
+
+### 2. Get Boxer's Special Vision Goggles *(Optional but Recommended)*
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Enable Vision API *(Install Boxer's AI goggles)*
+3. Create API key *(Goggles activation code)*
+4. Note your API key *(Keep it safe!)*
+
+### 3. Set Up Boxer's Training Ground *(Configure Apps Script)*
+
+#### Set Script Properties *(Boxer's personal info)*
+In Apps Script: Project Settings → Script Properties, add:
+- `OAUTH_CLIENT_ID`: Your Box app Client ID *(Boxer's name tag)*
+- `OAUTH_CLIENT_SECRET`: Your Box app Client Secret *(Boxer's secret)*  
+- `VISION_API_KEY`: Your Google Cloud Vision API key *(Goggles code - optional)*
+
+#### Add Boxer's Training Files *(Required Scripts)*
+Copy all the provided `.js` files into your Apps Script project:
+- `Config.js` *(Boxer's rule book)*
+- `BoxAuth.js` *(Authentication trainer)*
+- `BoxMetadataTemplates.js` *(Template trainer)*
+- `BoxFileOperations.js` *(File fetch trainer)*
+- `MetadataExtraction.js` *(Sniffing skills trainer)*
+- `VisionEXIF.js` *(Vision goggles trainer)*
+- `EnhancedEXIFParser.js` *(Advanced sniffing trainer)*
+- `MainScript.js` *(Master trainer)*
+- `OptimizedProcessing.js` *(Efficiency trainer)*
+- `BoxTests.js` *(Trick tester)*
+- `Service.js` *(Service trainer)*
+- `EnhancedUtilities.js` *(Utility belt)*
+
+### 4. Boxer's First Day Training *(Initial Setup & Testing)*
+
+#### Complete Authentication *(Teaching Boxer to shake hands with Box)*
+```javascript
+// Run this once to set up Box authentication
+initializeBoxAuth(); // Boxer learns to say "hello" to Box
+```
+This will provide a web app URL. Visit it to complete OAuth authorization *(like introducing Boxer to the neighbors)*.
+
+#### Test Boxer's Skills *(Making sure he's a good boy)*
+```javascript
+// Verify everything is working
+testBoxGoaSetup(); // Basic obedience test
+
+// Check file access
+diagnoseFolderAccess(); // Can Boxer reach all his toys?
+
+// Get overview of your images  
+listAllImageFileStatus(); // Boxer's inventory of the yard
+
+// Test processing on 3 files
+testProcessThreeFiles(); // Boxer shows off his best tricks! 🎪
+```
+
+#### Complete Boxer's Training *(Full system setup)*
+```javascript
+// Run full setup (creates templates, attaches to files, sets up triggers)
+setupComplete(); // Boxer graduates from puppy school! 🎓
+```
+
+### 5. Set Up Boxer's Daily Routine *(Automation)*
+
+Create a time-based trigger for automatic processing:
+
+```javascript
+// Set up optimized processing trigger
+setupOptimizedProcessing(); // Boxer learns his daily schedule
+```
+
+**🏆 Recommended trigger function**: `processBoxImagesOptimized`
+
+This function makes Boxer the smartest pup because he:
+- Only processes files that need processing *(doesn't re-fetch the same stick)*
+- Respects execution time limits *(knows when it's nap time)*
+- Uses efficient search instead of scanning all folders *(smart sniffing strategy)*
+- Saves progress between runs *(remembers where he buried his bones)*
+
+## 🎾 How to Work with Boxer (Usage)
+
+### Manual Training Commands *(When you want to play with Boxer)*
+
+#### Basic Training *(Good boy basics)*
+```javascript
+processBoxImages(); // Boxer does basic fetch
+```
+
+#### Advanced Training *(Show off time)*  
+```javascript
+processBoxImagesEnhanced(); // Boxer uses his special goggles and super sniffing
+```
+
+#### Smart Training *(Boxer's PhD performance - Recommended)*
+```javascript
+processBoxImagesOptimized(); // Boxer uses all his intelligence efficiently
+```
+
+### Checking on Boxer *(Monitoring Functions)*
+
+#### See How Boxer's Doing *(Status reports)*
+```javascript
+listAllImageFileStatus(); // Boxer's comprehensive report card 🐕📊
+```
+
+#### View Boxer's Progress *(Statistics)*
+```javascript
+showOptimizedProcessingStats(); // Boxer's work history
+getImageProcessingSummary(); // Quick summary of Boxer's achievements
+```
+
+#### Test Boxer's Specific Skills *(Feature testing)*
+```javascript
+testProcessThreeFiles(); // Watch Boxer perform his best tricks! 🎪
+testVisionApiIntegration(); // Test Boxer's special goggles
+testBasicProcessingWorkflow(); // Basic obedience check
+```
+
+### Boxer's Advanced Training *(Configuration Functions)*
+
+#### Get Boxer's Professional Opinion *(Processing recommendations)*
+```javascript
+recommendProcessingStrategy(); // Boxer analyzes your yard and suggests the best approach
+```
+
+#### Start Fresh *(Reset if needed)*
+```javascript
+resetBoxAuth(); // Send Boxer back to puppy school for re-training
+```
+
+## 🏠 How Boxer Organizes Your Yard (File Organization)
+
+### Boxer's Territory Rules *(Folder Structure)*
+Boxer analyzes folder paths to automatically categorize content:
+- `logo/` or `brand/` → Marketing Material *(Boxer's fancy collar)*
+- `team/` or `staff/` → Team Portrait *(Pack photos)*
+- `fabrication/` → Fabrication Process *(Where the magic happens)*
+- `artwork/` → Artwork *(Pretty things Boxer admires)*
+
+### Boxer's Filing System *(Metadata Template)*
+Creates a comprehensive Box metadata template with fields for:
+- **📄 File Info**: Original filename, path, size, format *(Boxer's inventory)*
+- **🔧 Technical**: Dimensions, aspect ratio, camera info *(Technical specs)*
+- **🎯 Content**: Type, subject, location, department *(What Boxer found)*
+- **🤖 AI Analysis**: Detected objects, scene description, text *(Boxer's smart observations)*
+- **💼 Business**: Usage rights, quality rating, importance *(Important stuff)*
+- **📋 Processing**: Stage, version, review status *(Boxer's work log)*
+
+## 🚨 When Boxer Needs Help (Troubleshooting)
+
+### Authentication Issues *(Boxer can't get into the yard)*
+```javascript
+diagnoseBoxAuth(); // Check Boxer's credentials
+testBoxAccess(); // Test if Boxer can say "hello" to Box
+```
+
+### Processing Issues *(Boxer is confused)*
+```javascript
+diagnoseFolderAccess(); // Check if Boxer can reach all areas
+testComprehensiveMetadataExtraction(); // Test Boxer's sniffing abilities
+```
+
+### Vision API Issues *(Boxer's goggles are foggy)*  
+```javascript
+verifyVisionApiSetup(); // Clean Boxer's special goggles
+```
+
+## ⚙️ Boxer's Training Settings (Configuration Options)
+
+### Processing Settings *(How Boxer works)*
+Edit `Config.js` to customize:
+- `ACTIVE_TEST_FOLDER_ID`: Boxer's favorite playground *(default: test folder)*
+- `MAX_VISION_API_FILE_SIZE_BYTES`: How big toys Boxer can handle with goggles
+- `PROCESSING_BATCH_SIZE`: How many toys Boxer carries at once
+- Rate limiting delays *(Boxer's rest time)*
+
+### Content Categorization *(Teaching Boxer new tricks)*
+Modify `MetadataExtraction.js` to customize:
+- Content type rules *(What different things look like)*
+- Location keywords mapping *(Where things belong)*
+- Department assignments *(Who owns what)*
+
+## 🎖️ Best Practices (Training Your Boxer Right)
+
+### For Small Collections (<100 images) *(Boxer's cozy apartment)*
+- Use `processBoxImagesEnhanced()` *(Boxer can handle everything easily)*
+- Run every 6 hours *(Regular walks)*
+
+### For Medium Collections (100-1000 images) *(Boxer's suburban house)*  
+- Use `processBoxImagesOptimized()` *(Smart Boxer strategy)*
+- Run every 2 hours *(Frequent yard patrols)*
+
+### For Large Collections (1000+ images) *(Boxer's mansion with huge yard)*
+- Use `processBoxImagesOptimized()` *(Essential smart strategy)*
+- Run hourly *(Boxer is always on duty)*
+- Monitor with `showOptimizedProcessingStats()` *(Check on Boxer regularly)*
+
+### Performance Tips *(Keeping Boxer healthy and happy)*
+- Vision API has daily quotas - monitor usage *(Don't overwork Boxer's special goggles)*
+- Large files (>20MB) are skipped for AI analysis *(Some toys are too big for the goggles)*
+- Processing stages track completion to avoid reprocessing *(Boxer remembers what he's already done)*
+
+## 📅 Scheduled Trigger Recommendation (Boxer's Daily Schedule)
+
+**🏆 Use this function for your scheduled trigger**: `processBoxImagesOptimized`
+
+This function makes Boxer the smartest pup because he automatically adapts his strategy based on:
+- Time since last patrol *(How long since Boxer's last walk)*
+- Account size and activity *(Size of the yard and how busy it is)*
+- Processing history *(What Boxer learned from previous rounds)*
+
+Set trigger frequency based on your yard size:
+- **Small**: Every 6 hours *(Relaxed suburban dog)*
+- **Medium**: Every 2 hours *(Active neighborhood watch dog)*
+- **Large**: Every hour *(Professional guard dog)*
+
+## 🐕‍🦺 Support (When You Need to Call the Vet)
+
+This script uses Bruce McPherson's excellent cGoa and cUseful libraries for robust OAuth and utility functions *(Boxer's professional training tools)*. 
+
+When Boxer needs help:
+1. Check the Apps Script logs *(Boxer's diary)*
+2. Run diagnostic functions *(Boxer's health checkup)*
+3. Verify Box app permissions *(Make sure Boxer can access his territory)*
+4. Confirm API keys are correct *(Check Boxer's ID tags)*
+
+*Remember: Boxer is a good dog who wants to help! If he's not performing well, it's usually because he needs clearer instructions or his tools need adjustment.* 🐕❤️
+
+## 📜 License
+
+This is a utility script for personal/organizational use. Uses open-source libraries by Bruce McPherson. 
+
+*Built with ❤️ and lots of virtual dog treats.* 🦴
+
+---
+
+*🐕 "A dog is the only thing on earth that loves you more than he loves himself." - Josh Billings*
+
+*Boxer loves organizing your files almost as much as he loves you!* 📦🐕💕
