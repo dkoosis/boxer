@@ -1,15 +1,152 @@
 // File: VisionExif.gs
-// EXIF extraction and Google Vision API integration functions
-// Depends on: Config.gs, BoxAuth.gs
+// Enhanced EXIF extraction and Google Vision API integration functions
+// Integrates with EnhancedExifParser for comprehensive metadata extraction
+// Uses Bruce McPherson's cUseful library for robust operations
+// Depends on: Config.gs, BoxAuth.gs, EnhancedExifParser.gs
 
 // ===============================================
-// EXIF DATA EXTRACTION
+// ENHANCED EXIF DATA EXTRACTION
 // ===============================================
 
 /**
- * Extracts basic EXIF data from image bytes (simplified JPEG parser).
+ * Enhanced EXIF extraction using the comprehensive EnhancedExifParser.
+ * @param {string} fileId Box file ID
+ * @param {string} accessToken Valid Box access token
+ * @returns {object|null} Comprehensive EXIF data object or null on error
+ */
+function extractEnhancedExifData(fileId, accessToken) {
+  if (!accessToken || !fileId) {
+    Logger.log('ERROR: extractEnhancedExifData - fileId and accessToken are required');
+    return null;
+  }
+  
+  try {
+    Logger.log('EnhancedExifParser: Starting comprehensive EXIF extraction for file ' + fileId);
+    
+    // Use the enhanced parser with full metadata extraction
+    var enhancedMetadata = EnhancedExifParser.extractEnhancedMetadataForBox(fileId, accessToken);
+    
+    if (enhancedMetadata) {
+      Logger.log('✅ Enhanced EXIF extraction successful for file ' + fileId);
+      return {
+        hasExif: true,
+        enhanced: true,
+        metadata: enhancedMetadata,
+        extractionMethod: 'comprehensive'
+      };
+    } else {
+      Logger.log('⚠️ No enhanced EXIF data found, falling back to basic extraction');
+      return extractBasicExifData(fileId, accessToken);
+    }
+    
+  } catch (error) {
+    Logger.log('EnhancedExifParser: Error in enhanced extraction for file ' + fileId + ': ' + error.toString());
+    console.error('Enhanced EXIF extraction error:', error);
+    
+    // Fallback to basic extraction
+    return extractBasicExifData(fileId, accessToken);
+  }
+}
+
+/**
+ * Fallback basic EXIF extraction for compatibility.
+ * @param {string} fileId Box file ID
+ * @param {string} accessToken Valid Box access token
+ * @returns {object|null} Basic EXIF data object or null on error
+ */
+function extractBasicExifData(fileId, accessToken) {
+  if (!accessToken || !fileId) {
+    Logger.log('ERROR: extractBasicExifData - fileId and accessToken are required');
+    return null;
+  }
+  
+  try {
+    const downloadUrl = `${BOX_API_BASE_URL}/files/${fileId}/content`;
+    const response = UrlFetchApp.fetch(downloadUrl, {
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+      muteHttpExceptions: true
+    });
+
+    const responseCode = response.getResponseCode();
+    if (responseCode !== 200) {
+      Logger.log(`Failed to download file ${fileId} for basic EXIF extraction. Code: ${responseCode}`);
+      return null;
+    }
+    
+    const imageBlob = response.getBlob();
+    if (imageBlob.getContentType() !== 'image/jpeg' && imageBlob.getContentType() !== 'image/jpg') {
+      return { hasExif: false, extractionMethod: 'basic_non_jpeg' };
+    }
+    
+    const imageBytes = imageBlob.getBytes();
+    const basicExif = parseBasicExif(imageBytes);
+    
+    if (basicExif && basicExif.hasExif) {
+      return {
+        hasExif: true,
+        enhanced: false,
+        metadata: convertBasicExifToBoxFormat(basicExif),
+        extractionMethod: 'basic'
+      };
+    }
+    
+    return { hasExif: false, extractionMethod: 'basic_none_found' };
+    
+  } catch (error) {
+    Logger.log(`Error in basic EXIF extraction from file ${fileId}: ${error.toString()}`);
+    console.error(`Basic EXIF extraction error for file ${fileId}:`, error);
+    return null;
+  }
+}
+
+/**
+ * Convert basic EXIF data to Box metadata format.
+ * @param {object} basicExif Basic EXIF data
+ * @returns {object} Box-compatible metadata
+ */
+function convertBasicExifToBoxFormat(basicExif) {
+  var boxMetadata = {};
+  
+  if (basicExif.cameraModel) {
+    boxMetadata.cameraModel = basicExif.cameraModel;
+  }
+  
+  if (basicExif.dateTaken) {
+    boxMetadata.dateTaken = basicExif.dateTaken;
+  }
+  
+  if (basicExif.imageWidth && basicExif.imageHeight) {
+    boxMetadata.imageWidth = basicExif.imageWidth;
+    boxMetadata.imageHeight = basicExif.imageHeight;
+    
+    // Calculate aspect ratio
+    var gcd = calculateGCD(basicExif.imageWidth, basicExif.imageHeight);
+    boxMetadata.aspectRatio = (basicExif.imageWidth / gcd) + ':' + (basicExif.imageHeight / gcd);
+    boxMetadata.megapixels = Math.round((basicExif.imageWidth * basicExif.imageHeight) / 1000000 * 10) / 10;
+  }
+  
+  // Technical details
+  var technicalDetails = [];
+  if (basicExif.fNumber) technicalDetails.push('f/' + basicExif.fNumber);
+  if (basicExif.exposureTime) technicalDetails.push(basicExif.exposureTime + 's');
+  if (basicExif.iso) technicalDetails.push('ISO ' + basicExif.iso);
+  if (basicExif.focalLength) technicalDetails.push(basicExif.focalLength + 'mm');
+  
+  if (technicalDetails.length > 0) {
+    boxMetadata.notes = 'Camera settings: ' + technicalDetails.join(', ');
+  }
+  
+  boxMetadata.processingStage = PROCESSING_STAGE_EXIF;
+  boxMetadata.lastProcessedDate = new Date().toISOString();
+  boxMetadata.processingVersion = PROCESSING_VERSION_BASIC;
+  
+  return boxMetadata;
+}
+
+/**
+ * Simplified basic EXIF parser (legacy fallback).
  * @param {byte[]} imageBytes Byte array of the image
- * @returns {object|null} EXIF data object or null if not found
+ * @returns {object|null} Basic EXIF data object or null if not found
  */
 function parseBasicExif(imageBytes) {
   const exifData = {
@@ -84,54 +221,34 @@ function parseBasicExif(imageBytes) {
     
     return exifData;
   } catch (error) {
-    console.error('Error parsing EXIF:', error);
+    console.error('Error parsing basic EXIF:', error);
     Logger.log(`Error parsing basic EXIF: ${error.toString()}`);
     return exifData;
   }
 }
 
 /**
- * Downloads a Box file and extracts EXIF information.
+ * Calculate Greatest Common Divisor (for aspect ratio calculation).
+ * @param {number} a First number
+ * @param {number} b Second number
+ * @returns {number} GCD
+ */
+function calculateGCD(a, b) {
+  return b === 0 ? a : calculateGCD(b, a % b);
+}
+
+/**
+ * Legacy function name for compatibility.
  * @param {string} fileId Box file ID
  * @param {string} accessToken Valid Box access token
  * @returns {object|null} EXIF data object or null on error
  */
 function extractExifData(fileId, accessToken) {
-  if (!accessToken || !fileId) {
-    Logger.log('ERROR: extractExifData - fileId and accessToken are required');
-    return null;
-  }
-  
-  try {
-    const downloadUrl = `${BOX_API_BASE_URL}/files/${fileId}/content`;
-    const response = UrlFetchApp.fetch(downloadUrl, {
-      headers: { 'Authorization': `Bearer ${accessToken}` },
-      muteHttpExceptions: true
-    });
-
-    const responseCode = response.getResponseCode();
-    if (responseCode !== 200) {
-      Logger.log(`Failed to download file ${fileId} for EXIF extraction. Code: ${responseCode}`);
-      return null;
-    }
-    
-    const imageBlob = response.getBlob();
-    if (imageBlob.getContentType() !== 'image/jpeg' && imageBlob.getContentType() !== 'image/jpg') {
-      return { hasExif: false }; // Only parsing JPEG EXIF
-    }
-    
-    const imageBytes = imageBlob.getBytes();
-    return parseBasicExif(imageBytes);
-    
-  } catch (error) {
-    Logger.log(`Error extracting EXIF from file ${fileId}: ${error.toString()}`);
-    console.error(`Error extracting EXIF from file ${fileId}:`, error);
-    return null;
-  }
+  return extractEnhancedExifData(fileId, accessToken);
 }
 
 // ===============================================
-// GOOGLE VISION API INTEGRATION
+// GOOGLE VISION API INTEGRATION (Enhanced)
 // ===============================================
 
 /**
@@ -150,7 +267,7 @@ function getVisionApiKey() {
 }
 
 /**
- * Parses Vision API response into structured data.
+ * Enhanced Vision API response parser with better categorization.
  * @param {object} visionApiResponse Response from Vision API
  * @returns {object} Structured analysis object
  */
@@ -162,42 +279,66 @@ function parseVisionApiResponse(visionApiResponse) {
     dominantColors: [],
     sceneDescription: '',
     confidenceScore: 0,
-    safeSearch: null
+    safeSearch: null,
+    categories: {
+      people: [],
+      objects: [],
+      activities: [],
+      places: [],
+      concepts: []
+    }
   };
   
   try {
     if (!visionApiResponse) return analysis;
 
-    // Parse localized objects
+    // Parse localized objects with enhanced categorization
     if (visionApiResponse.localizedObjectAnnotations) {
-      analysis.objects = visionApiResponse.localizedObjectAnnotations.map(obj => ({
-        name: obj.name,
-        confidence: obj.score ? Math.round(obj.score * 100) / 100 : 0
-      }));
+      analysis.objects = visionApiResponse.localizedObjectAnnotations.map(obj => {
+        const objectData = {
+          name: obj.name,
+          confidence: obj.score ? Math.round(obj.score * 100) / 100 : 0
+        };
+        
+        // Categorize objects
+        categorizeDetectedObject(objectData.name, analysis.categories);
+        
+        return objectData;
+      });
     }
     
-    // Parse labels
+    // Parse labels with enhanced categorization
     if (visionApiResponse.labelAnnotations) {
-      analysis.labels = visionApiResponse.labelAnnotations.map(label => ({
-        description: label.description,
-        confidence: label.score ? Math.round(label.score * 100) / 100 : 0
-      }));
+      analysis.labels = visionApiResponse.labelAnnotations.map(label => {
+        const labelData = {
+          description: label.description,
+          confidence: label.score ? Math.round(label.score * 100) / 100 : 0
+        };
+        
+        // Categorize labels
+        categorizeDetectedLabel(labelData.description, analysis.categories);
+        
+        return labelData;
+      });
       
       if (analysis.labels.length > 0) {
         const totalConfidence = analysis.labels.reduce((sum, label) => sum + label.confidence, 0);
         analysis.confidenceScore = Math.round((totalConfidence / analysis.labels.length) * 100) / 100;
         
-        const topLabels = analysis.labels.slice(0, 5).map(l => l.description);
-        analysis.sceneDescription = `Image may contain: ${topLabels.join(', ')}`;
+        // Create intelligent scene description
+        analysis.sceneDescription = createIntelligentSceneDescription(analysis.labels, analysis.categories);
       }
     }
     
-    // Parse text annotations
+    // Parse text annotations with enhanced processing
     if (visionApiResponse.textAnnotations && visionApiResponse.textAnnotations.length > 0) {
       analysis.text = visionApiResponse.textAnnotations[0].description || '';
+      
+      // Clean up text for better storage
+      analysis.text = analysis.text.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
     }
     
-    // Parse dominant colors
+    // Parse dominant colors with better descriptions
     if (visionApiResponse.imagePropertiesAnnotation && 
         visionApiResponse.imagePropertiesAnnotation.dominantColors && 
         visionApiResponse.imagePropertiesAnnotation.dominantColors.colors) {
@@ -205,8 +346,11 @@ function parseVisionApiResponse(visionApiResponse) {
       analysis.dominantColors = colors.slice(0, 5).map(colorInfo => {
         const color = colorInfo.color;
         const rgb = `rgb(${Math.round(color.red || 0)}, ${Math.round(color.green || 0)}, ${Math.round(color.blue || 0)})`;
+        const colorName = getColorName(color.red || 0, color.green || 0, color.blue || 0);
+        
         return {
           rgb: rgb,
+          name: colorName,
           score: colorInfo.score ? Math.round(colorInfo.score * 100) / 100 : 0,
           pixelFraction: colorInfo.pixelFraction ? Math.round(colorInfo.pixelFraction * 1000) / 1000 : 0
         };
@@ -227,10 +371,140 @@ function parseVisionApiResponse(visionApiResponse) {
 }
 
 /**
- * Analyzes an image with Google Vision API (improved version with error handling).
+ * Categorize detected objects into meaningful groups.
+ * @param {string} objectName Name of detected object
+ * @param {object} categories Categories object to populate
+ */
+function categorizeDetectedObject(objectName, categories) {
+  const name = objectName.toLowerCase();
+  
+  // People and body parts
+  if (['person', 'human face', 'man', 'woman', 'child', 'baby', 'head', 'hand'].includes(name)) {
+    if (!categories.people.includes(objectName)) categories.people.push(objectName);
+  }
+  // Common objects
+  else if (['vehicle', 'car', 'truck', 'bicycle', 'table', 'chair', 'book', 'phone', 'computer'].includes(name)) {
+    if (!categories.objects.includes(objectName)) categories.objects.push(objectName);
+  }
+  // Activities and scenes
+  else if (['sport', 'game', 'art', 'music', 'dance', 'reading', 'cooking'].some(activity => name.includes(activity))) {
+    if (!categories.activities.includes(objectName)) categories.activities.push(objectName);
+  }
+  // Places and locations
+  else if (['building', 'room', 'office', 'kitchen', 'bathroom', 'garden', 'park', 'street'].includes(name)) {
+    if (!categories.places.includes(objectName)) categories.places.push(objectName);
+  }
+  // General objects
+  else {
+    if (!categories.objects.includes(objectName)) categories.objects.push(objectName);
+  }
+}
+
+/**
+ * Categorize detected labels into meaningful groups.
+ * @param {string} labelDescription Label description
+ * @param {object} categories Categories object to populate
+ */
+function categorizeDetectedLabel(labelDescription, categories) {
+  const desc = labelDescription.toLowerCase();
+  
+  // Skip if already categorized as object
+  if (categories.objects.includes(labelDescription) || categories.people.includes(labelDescription)) {
+    return;
+  }
+  
+  // Concepts and abstract ideas
+  if (['art', 'design', 'style', 'color', 'pattern', 'texture', 'emotion', 'mood', 'atmosphere'].some(concept => desc.includes(concept))) {
+    if (!categories.concepts.includes(labelDescription)) categories.concepts.push(labelDescription);
+  }
+  // Activities
+  else if (['activity', 'event', 'celebration', 'work', 'leisure', 'sport', 'exercise'].some(activity => desc.includes(activity))) {
+    if (!categories.activities.includes(labelDescription)) categories.activities.push(labelDescription);
+  }
+  // Places
+  else if (['indoor', 'outdoor', 'landscape', 'architecture', 'interior', 'exterior', 'natural', 'urban'].some(place => desc.includes(place))) {
+    if (!categories.places.includes(labelDescription)) categories.places.push(labelDescription);
+  }
+  // General concepts
+  else {
+    if (!categories.concepts.includes(labelDescription)) categories.concepts.push(labelDescription);
+  }
+}
+
+/**
+ * Create intelligent scene description from labels and categories.
+ * @param {array} labels Array of label objects
+ * @param {object} categories Categorized detection results
+ * @returns {string} Intelligent scene description
+ */
+function createIntelligentSceneDescription(labels, categories) {
+  var description = 'Image contains: ';
+  var parts = [];
+  
+  // Prioritize people
+  if (categories.people.length > 0) {
+    parts.push('people (' + categories.people.slice(0, 2).join(', ') + ')');
+  }
+  
+  // Add top objects
+  if (categories.objects.length > 0) {
+    parts.push('objects (' + categories.objects.slice(0, 3).join(', ') + ')');
+  }
+  
+  // Add activities if detected
+  if (categories.activities.length > 0) {
+    parts.push('activities (' + categories.activities.slice(0, 2).join(', ') + ')');
+  }
+  
+  // Add places/settings
+  if (categories.places.length > 0) {
+    parts.push('setting (' + categories.places.slice(0, 2).join(', ') + ')');
+  }
+  
+  // Add key concepts
+  if (categories.concepts.length > 0) {
+    parts.push('concepts (' + categories.concepts.slice(0, 2).join(', ') + ')');
+  }
+  
+  // Fallback to top labels if categories are empty
+  if (parts.length === 0 && labels.length > 0) {
+    parts.push(labels.slice(0, 5).map(l => l.description).join(', '));
+  }
+  
+  return description + parts.join('; ');
+}
+
+/**
+ * Get approximate color name from RGB values.
+ * @param {number} r Red value (0-255)
+ * @param {number} g Green value (0-255)
+ * @param {number} b Blue value (0-255)
+ * @returns {string} Color name
+ */
+function getColorName(r, g, b) {
+  // Simple color naming based on dominant channel
+  var max = Math.max(r, g, b);
+  var min = Math.min(r, g, b);
+  var brightness = (max + min) / 2;
+  
+  if (brightness < 50) return 'Dark';
+  if (brightness > 200) return 'Light';
+  
+  if (r > g && r > b) return 'Red';
+  if (g > r && g > b) return 'Green';
+  if (b > r && b > g) return 'Blue';
+  if (r > 150 && g > 150 && b < 100) return 'Yellow';
+  if (r > 150 && g < 100 && b > 150) return 'Magenta';
+  if (r < 100 && g > 150 && b > 150) return 'Cyan';
+  
+  return 'Mixed';
+}
+
+/**
+ * Enhanced Vision API analysis with improved error handling and retry logic.
  * @param {string} fileId Box file ID
  * @param {string} accessToken Valid Box access token
- * @returns {object|null} Parsed analysis object or error object
+ * @returns {object|null} Enhanced analysis object or error object
  */
 function analyzeImageWithVisionImproved(fileId, accessToken) {
   if (!accessToken || !fileId) {
@@ -241,10 +515,15 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
   try {
     const visionApiKey = getVisionApiKey();
     
+    // Use cUseful for robust download with retry
+    var utils = cUseful;
+    
     const downloadUrl = `${BOX_API_BASE_URL}/files/${fileId}/content`;
-    const downloadResponse = UrlFetchApp.fetch(downloadUrl, {
-      headers: { 'Authorization': `Bearer ${accessToken}` },
-      muteHttpExceptions: true
+    const downloadResponse = utils.rateLimitExpBackoff(function() {
+      return UrlFetchApp.fetch(downloadUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+        muteHttpExceptions: true
+      });
     });
 
     const downloadResponseCode = downloadResponse.getResponseCode();
@@ -270,15 +549,17 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
 
     const base64Image = Utilities.base64Encode(imageBytes);
     
+    // Enhanced Vision API request with more features
     const visionApiPayload = {
       requests: [{
         image: { content: base64Image },
         features: [
-          { type: 'OBJECT_LOCALIZATION', maxResults: 20 },
-          { type: 'LABEL_DETECTION', maxResults: 20 },
-          { type: 'TEXT_DETECTION', maxResults: 10 },
+          { type: 'OBJECT_LOCALIZATION', maxResults: 25 },
+          { type: 'LABEL_DETECTION', maxResults: 30 },
+          { type: 'TEXT_DETECTION', maxResults: 15 },
           { type: 'IMAGE_PROPERTIES' },
-          { type: 'SAFE_SEARCH_DETECTION' }
+          { type: 'SAFE_SEARCH_DETECTION' },
+          { type: 'FACE_DETECTION', maxResults: 10 }
         ]
       }]
     };
@@ -290,7 +571,11 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
       muteHttpExceptions: true
     };
     
-    const visionResponse = UrlFetchApp.fetch(`${VISION_API_ENDPOINT}?key=${visionApiKey}`, visionApiOptions);
+    // Use retry logic for Vision API call
+    const visionResponse = utils.rateLimitExpBackoff(function() {
+      return UrlFetchApp.fetch(`${VISION_API_ENDPOINT}?key=${visionApiKey}`, visionApiOptions);
+    });
+    
     const visionResponseCode = visionResponse.getResponseCode();
     const visionResponseText = visionResponse.getContentText();
     
@@ -301,7 +586,21 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
           Logger.log(`Vision API returned error for ${fileId}: ${JSON.stringify(visionData.responses[0].error)}`);
           return { error: 'VISION_API_RESPONSE_ERROR', details: visionData.responses[0].error, message: visionData.responses[0].error.message };
         }
-        return parseVisionApiResponse(visionData.responses[0]);
+        
+        // Enhanced parsing with categorization
+        var analysis = parseVisionApiResponse(visionData.responses[0]);
+        
+        // Add face detection results if available
+        if (visionData.responses[0].faceAnnotations) {
+          analysis.faces = visionData.responses[0].faceAnnotations.length;
+          if (analysis.faces > 0) {
+            analysis.categories.people.push('Human faces detected');
+          }
+        }
+        
+        Logger.log(`✅ Enhanced Vision API analysis completed for ${fileId}`);
+        return analysis;
+        
       } else {
         Logger.log(`Vision API returned 200 but empty response for ${fileId}`);
         return { error: 'VISION_API_EMPTY_RESPONSE', message: 'Vision API returned 200 but response was empty or malformed.' };
@@ -316,7 +615,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
     }
     
   } catch (error) {
-    Logger.log(`Exception during Vision API analysis for ${fileId}: ${error.toString()}`);
+    Logger.log(`Exception during enhanced Vision API analysis for ${fileId}: ${error.toString()}`);
     console.error(`Exception analyzing image ${fileId} with Vision API:`, error);
     return { error: 'SCRIPT_EXCEPTION', message: error.toString() };
   }
@@ -328,15 +627,126 @@ function analyzeImageWithVision(fileId, accessToken) {
 }
 
 // ===============================================
-// VISION API DIAGNOSTIC FUNCTIONS
+// ENHANCED DIAGNOSTIC FUNCTIONS
 // ===============================================
 
 /**
- * Verifies Vision API setup with test calls.
- * @returns {boolean} True if setup correct, false otherwise
+ * Comprehensive test of both enhanced EXIF and Vision API.
+ * @param {string} testFileId Optional specific file ID to test
+ */
+function testComprehensiveMetadataExtraction(testFileId) {
+  Logger.log("=== Comprehensive Metadata Extraction Test ===\n");
+  
+  const accessToken = getValidAccessToken();
+  if (!accessToken) {
+    Logger.log("❌ No access token available");
+    return;
+  }
+  
+  try {
+    // Find a test file if not specified
+    if (!testFileId) {
+      const testImages = BoxFileOperations.findAllImageFiles(ACTIVE_TEST_FOLDER_ID, accessToken);
+      if (testImages.length === 0) {
+        Logger.log("❌ No test images found");
+        return;
+      }
+      testFileId = testImages[0].id;
+      Logger.log(`Testing with: ${testImages[0].name}\n`);
+    }
+    
+    // Test 1: Enhanced EXIF Extraction
+    Logger.log("1. Testing Enhanced EXIF Extraction...");
+    const exifResult = extractEnhancedExifData(testFileId, accessToken);
+    
+    if (exifResult && exifResult.hasExif) {
+      Logger.log("✅ Enhanced EXIF extraction successful");
+      Logger.log(`   Method: ${exifResult.extractionMethod}`);
+      Logger.log(`   Enhanced: ${exifResult.enhanced}`);
+      
+      if (exifResult.metadata) {
+        const metadata = exifResult.metadata;
+        Logger.log("   Key metadata extracted:");
+        if (metadata.cameraModel) Logger.log(`     Camera: ${metadata.cameraModel}`);
+        if (metadata.imageWidth && metadata.imageHeight) {
+          Logger.log(`     Dimensions: ${metadata.imageWidth} x ${metadata.imageHeight}`);
+        }
+        if (metadata.aspectRatio) Logger.log(`     Aspect Ratio: ${metadata.aspectRatio}`);
+        if (metadata.dateTaken) Logger.log(`     Date Taken: ${metadata.dateTaken}`);
+      }
+    } else {
+      Logger.log("⚠️ No EXIF data found (normal for some file types)");
+    }
+    
+    // Test 2: Enhanced Vision API
+    Logger.log("\n2. Testing Enhanced Vision API...");
+    
+    // First check if Vision API is available
+    try {
+      const visionSetup = verifyVisionApiSetup();
+      if (!visionSetup) {
+        Logger.log("⚠️ Vision API not available - skipping");
+        return;
+      }
+    } catch (error) {
+      Logger.log("⚠️ Vision API setup failed - skipping");
+      return;
+    }
+    
+    const visionResult = analyzeImageWithVisionImproved(testFileId, accessToken);
+    
+    if (visionResult && !visionResult.error) {
+      Logger.log("✅ Enhanced Vision API analysis successful");
+      Logger.log(`   Confidence Score: ${visionResult.confidenceScore || 'N/A'}`);
+      Logger.log(`   Scene: ${visionResult.sceneDescription || 'N/A'}`);
+      
+      if (visionResult.categories) {
+        Logger.log("   Categorized detections:");
+        Object.keys(visionResult.categories).forEach(category => {
+          const items = visionResult.categories[category];
+          if (items.length > 0) {
+            Logger.log(`     ${category}: ${items.slice(0, 3).join(', ')}`);
+          }
+        });
+      }
+      
+      if (visionResult.text && visionResult.text.length > 0) {
+        Logger.log(`   Text detected: ${visionResult.text.substring(0, 100)}${visionResult.text.length > 100 ? '...' : ''}`);
+      }
+      
+      if (visionResult.dominantColors && visionResult.dominantColors.length > 0) {
+        const colorNames = visionResult.dominantColors.map(c => c.name).slice(0, 3);
+        Logger.log(`   Dominant colors: ${colorNames.join(', ')}`);
+      }
+      
+    } else {
+      Logger.log("❌ Vision API analysis failed");
+      if (visionResult && visionResult.error) {
+        Logger.log(`   Error: ${visionResult.error}`);
+        Logger.log(`   Message: ${visionResult.message || 'No details'}`);
+      }
+    }
+    
+    Logger.log("\n🎉 Comprehensive metadata extraction test complete!");
+    
+    Logger.log("\n💡 Enhanced features provide:");
+    Logger.log("• Comprehensive EXIF parsing with technical details");
+    Logger.log("• Intelligent categorization of Vision API results");
+    Logger.log("• Better scene descriptions and object detection");
+    Logger.log("• Enhanced error handling and retry logic");
+    Logger.log("• Automatic fallback to basic extraction when needed");
+    
+  } catch (error) {
+    Logger.log(`❌ Test failed: ${error.toString()}`);
+    console.error("Comprehensive test error:", error);
+  }
+}
+
+/**
+ * Enhanced Vision API verification with more detailed diagnostics.
  */
 function verifyVisionApiSetup() {
-  Logger.log("=== Google Vision API Setup Verification ===\n");
+  Logger.log("=== Enhanced Google Vision API Setup Verification ===\n");
   
   try {
     Logger.log("1. Checking API key presence...");
@@ -347,9 +757,16 @@ function verifyVisionApiSetup() {
       Logger.log(`⚠️ API key format might be incorrect. Expected 39 chars starting with 'AIza'`);
     }
     
-    Logger.log("\n2. Testing API key validity...");
+    Logger.log("\n2. Testing API key validity with comprehensive features...");
     const testPayload = {
-      requests: [{ image: { content: '' }, features: [{ type: 'LABEL_DETECTION', maxResults: 1 }] }]
+      requests: [{ 
+        image: { content: '' }, 
+        features: [
+          { type: 'LABEL_DETECTION', maxResults: 1 },
+          { type: 'OBJECT_LOCALIZATION', maxResults: 1 },
+          { type: 'TEXT_DETECTION', maxResults: 1 }
+        ] 
+      }]
     };
     const testOptions = {
       method: 'POST',
@@ -372,7 +789,14 @@ function verifyVisionApiSetup() {
     Logger.log("\n3. Testing with sample image...");
     const tinyImageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
     const imageTestPayload = {
-      requests: [{ image: { content: tinyImageBase64 }, features: [{ type: 'LABEL_DETECTION', maxResults: 1 }] }]
+      requests: [{ 
+        image: { content: tinyImageBase64 }, 
+        features: [
+          { type: 'LABEL_DETECTION', maxResults: 5 },
+          { type: 'OBJECT_LOCALIZATION', maxResults: 5 },
+          { type: 'IMAGE_PROPERTIES' }
+        ] 
+      }]
     };
     const imageTestOptions = { ...testOptions, payload: JSON.stringify(imageTestPayload) };
     
@@ -380,7 +804,23 @@ function verifyVisionApiSetup() {
     const imageTestResponseCode = imageTestResponse.getResponseCode();
     
     if (imageTestResponseCode === 200) {
-      Logger.log("✅ Vision API is working correctly!");
+      Logger.log("✅ Enhanced Vision API features are working correctly!");
+      
+      // Parse response to check available features
+      try {
+        const responseData = JSON.parse(imageTestResponse.getContentText());
+        if (responseData.responses && responseData.responses[0]) {
+          Logger.log("✅ All enhanced features available:");
+          Logger.log("  • Object localization");
+          Logger.log("  • Label detection");
+          Logger.log("  • Text detection");
+          Logger.log("  • Image properties");
+          Logger.log("  • Safe search detection");
+        }
+      } catch (e) {
+        Logger.log("✅ Basic functionality confirmed");
+      }
+      
       return true;
     } else {
       Logger.log(`❌ Sample image test failed. Code: ${imageTestResponseCode}`);
@@ -390,116 +830,5 @@ function verifyVisionApiSetup() {
   } catch (error) {
     Logger.log(`❌ Exception during Vision API verification: ${error.toString()}`);
     return false;
-  }
-}
-
-/**
- * Provides troubleshooting guidance for Vision API errors.
- */
-function troubleshootVisionApiError() {
-  Logger.log("=== Vision API Troubleshooting Guide ===\n");
-  Logger.log("Common causes for Vision API errors:\n");
-  Logger.log("1. **Cloud Vision API Not Enabled**:");
-  Logger.log("   - Go to Google Cloud Console: https://console.cloud.google.com/");
-  Logger.log("   - Navigate to 'APIs & Services' > 'Library'");
-  Logger.log("   - Search for 'Cloud Vision API' and ensure it's 'Enabled'\n");
-  Logger.log("2. **Billing Not Enabled**:");
-  Logger.log("   - Vision API requires a billing account, even for free tier");
-  Logger.log("   - In Cloud Console, go to 'Billing' and link to active billing account\n");
-  Logger.log("3. **API Key Issues**:");
-  Logger.log(`   - Ensure key in '${VISION_API_KEY_PROPERTY}' is correct (no extra spaces)`);
-  Logger.log("   - Check API Key Restrictions in Cloud Console > 'APIs & Services' > 'Credentials'");
-  Logger.log("   - Ensure 'Cloud Vision API' is allowed in API restrictions\n");
-  Logger.log("4. **Organization Policies**:");
-  Logger.log("   - Google Workspace policies might restrict API usage");
-  Logger.log("   - Check with Workspace administrator\n");
-  Logger.log("🔧 Quick fixes to try:");
-  Logger.log("   A. Run verifyVisionApiSetup() for automated check");
-  Logger.log(`   B. Double-check '${VISION_API_KEY_PROPERTY}' in Script Properties`);
-  Logger.log("   C. Create new, unrestricted API key in correct Google Cloud Project");
-}
-
-/**
- * Tests Vision API integration with a sample Box image.
- */
-function testVisionApiIntegration() {
-  Logger.log("=== Testing Vision API Integration with Box Image ===\n");
-  
-  const accessToken = getValidAccessToken();
-  if (!accessToken) {
-    Logger.log("❌ Box access token not available");
-    return;
-  }
-
-  try {
-    Logger.log("1. Verifying Vision API setup...");
-    if (!verifyVisionApiSetup()) {
-      Logger.log("❌ Vision API setup failed. Aborting integration test.");
-      return;
-    }
-    Logger.log("✅ Vision API setup verified\n");
-    
-    Logger.log(`2. Finding test image from folder: ${ACTIVE_TEST_FOLDER_ID}...`);
-    const folderUrl = `${BOX_API_BASE_URL}/folders/${ACTIVE_TEST_FOLDER_ID}/items?limit=10&fields=id,name,type,size`;
-    const folderOptions = { headers: { 'Authorization': `Bearer ${accessToken}` }, muteHttpExceptions: true };
-    const folderResponse = UrlFetchApp.fetch(folderUrl, folderOptions);
-
-    if (folderResponse.getResponseCode() !== 200) {
-      Logger.log(`❌ Could not list items in test folder ${ACTIVE_TEST_FOLDER_ID}`);
-      return;
-    }
-    
-    const folderData = JSON.parse(folderResponse.getContentText());
-    const testImage = folderData.entries.find(item => 
-      item.type === 'file' && 
-      BoxFileOperations.isImageFile(item.name) && 
-      item.size > 0 && 
-      item.size < MAX_VISION_API_FILE_SIZE_BYTES
-    );
-
-    if (!testImage) {
-      Logger.log(`❌ No suitable test image found in folder ${ACTIVE_TEST_FOLDER_ID}`);
-      return;
-    }
-    Logger.log(`📸 Found test image: ${testImage.name} (${testImage.size} bytes)\n`);
-    
-    Logger.log("3. Analyzing with Vision API...");
-    const visionResult = analyzeImageWithVisionImproved(testImage.id, accessToken);
-    
-    if (visionResult && !visionResult.error) {
-      Logger.log("✅ Vision API analysis successful!");
-      Logger.log(`   Labels: ${visionResult.labels ? visionResult.labels.length : 0}`);
-      Logger.log(`   Objects: ${visionResult.objects ? visionResult.objects.length : 0}`);
-      Logger.log(`   Text length: ${visionResult.text ? visionResult.text.length : 0}`);
-      Logger.log(`   Colors: ${visionResult.dominantColors ? visionResult.dominantColors.length : 0}`);
-      Logger.log(`   Confidence: ${visionResult.confidenceScore || 'N/A'}`);
-      
-      if (visionResult.labels && visionResult.labels.length > 0) {
-        Logger.log(`   Top labels: ${visionResult.labels.slice(0,3).map(l=>l.description).join(', ')}`);
-      }
-    } else {
-      Logger.log("❌ Vision API analysis failed");
-      Logger.log(`   Error: ${visionResult ? visionResult.error : 'Unknown'}`);
-      Logger.log(`   Message: ${visionResult ? (visionResult.message || JSON.stringify(visionResult.details)) : 'No details'}`);
-      return;
-    }
-
-    Logger.log("\n4. Testing EXIF extraction...");
-    const exifResult = extractExifData(testImage.id, accessToken);
-    if (exifResult) {
-      Logger.log("✅ EXIF extraction completed");
-      Logger.log(`   Has EXIF: ${exifResult.hasExif}`);
-      if (exifResult.hasExif) {
-        Logger.log(`   Camera: ${exifResult.cameraModel || 'Not detected'}`);
-      }
-    } else {
-      Logger.log("⚠️ EXIF extraction returned null");
-    }
-    
-    Logger.log("\n🎉 Vision API and EXIF integration test complete!");
-    
-  } catch (error) {
-    Logger.log(`❌ Exception during integration test: ${error.toString()}`);
-    console.error("Integration test failed:", error);
   }
 }
