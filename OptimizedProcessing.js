@@ -1,8 +1,8 @@
 // File: OptimizedProcessing.gs
-// Smart processing strategies that scale and respect time/resource limits
+// Simplified processing strategies with search optimization for Box Image Metadata Processing System
 
 /**
- * Optimized processing namespace with multiple strategies
+ * Optimized processing namespace with two core strategies
  */
 var OptimizedProcessing = (function() {
   'use strict';
@@ -10,17 +10,107 @@ var OptimizedProcessing = (function() {
   var ns = {};
   
   // Configuration for optimization
-  var PROCESSING_BATCH_SIZE = 10;           // Process 10 files per batch
+  var PROCESSING_BATCH_SIZE = 10;
   var MAX_EXECUTION_TIME_MS = 4 * 60 * 1000; // 4 minutes (safe margin)
   var CHECKPOINT_PROPERTY = 'LAST_PROCESSING_CHECKPOINT';
   var STATS_PROPERTY = 'PROCESSING_STATS';
   
   /**
-   * Strategy 1: Search-Based Processing (Most Efficient)
-   * Uses Box search to find unprocessed files directly
+   * Primary Strategy: Search-Based Incremental Processing with Checkpoints
+   * Uses Box search instead of recursive folder listing for performance
+   */
+  ns.processIncrementallyWithCheckpoints = function() {
+    Logger.log("=== Primary Strategy: Incremental Processing with Search Optimization ===\n");
+    
+    var startTime = Date.now();
+    var accessToken = getValidAccessToken();
+    var checkpoint = ns.getProcessingCheckpoint();
+    var processed = 0;
+    var skipped = 0;
+    var errors = 0;
+    
+    Logger.log("Starting from checkpoint: " + JSON.stringify(checkpoint));
+    
+    try {
+      var foldersToProcess = ns.getFoldersToProcess();
+      var currentFolderIndex = checkpoint.folderIndex || 0;
+      var currentFileIndex = checkpoint.fileIndex || 0;
+      
+      for (var folderIdx = currentFolderIndex; folderIdx < foldersToProcess.length; folderIdx++) {
+        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
+          Logger.log("⏰ Saving checkpoint and stopping due to time limit");
+          ns.saveProcessingCheckpoint({
+            folderIndex: folderIdx,
+            fileIndex: currentFileIndex,
+            lastRun: new Date().toISOString()
+          });
+          break;
+        }
+        
+        var folderId = foldersToProcess[folderIdx];
+        Logger.log("Processing folder tree: " + folderId);
+        
+        var files = ns.getImageFilesInFolder(folderId, accessToken);
+        
+        for (var fileIdx = currentFileIndex; fileIdx < files.length; fileIdx++) {
+          if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
+            ns.saveProcessingCheckpoint({
+              folderIndex: folderIdx,
+              fileIndex: fileIdx,
+              lastRun: new Date().toISOString()
+            });
+            Logger.log("⏰ Time limit reached, saved checkpoint");
+            break;
+          }
+          
+          var result = ns.processFileIfNeeded(files[fileIdx], accessToken);
+          if (result === 'processed') processed++;
+          else if (result === 'skipped') skipped++;
+          else errors++;
+          
+          Utilities.sleep(150);
+        }
+        
+        currentFileIndex = 0; // Reset for next folder
+        
+        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) break;
+      }
+      
+      // If we completed all folders, reset checkpoint
+      if (currentFolderIndex >= foldersToProcess.length - 1) {
+        ns.saveProcessingCheckpoint({
+          folderIndex: 0,
+          fileIndex: 0,
+          lastRun: new Date().toISOString(),
+          completedCycle: true
+        });
+        Logger.log("✅ Completed full processing cycle");
+      }
+      
+      ns.saveProcessingStats({
+        timestamp: new Date().toISOString(),
+        processed: processed,
+        skipped: skipped,
+        errors: errors,
+        strategy: 'incremental_search'
+      });
+      
+      Logger.log("\n📊 Incremental processing complete:");
+      Logger.log("✅ Processed: " + processed);
+      Logger.log("⏭️ Skipped (already processed): " + skipped);
+      Logger.log("❌ Errors: " + errors);
+      
+    } catch (error) {
+      Logger.log("❌ Error in incremental processing: " + error.toString());
+    }
+  };
+  
+  /**
+   * Fallback Strategy: Simple Search-Based Processing (Unprocessed Only)
+   * Quick recovery strategy and manual trigger option
    */
   ns.processUnprocessedFilesOnly = function() {
-    Logger.log("=== Strategy 1: Processing Unprocessed Files Only ===\n");
+    Logger.log("=== Fallback Strategy: Processing Unprocessed Files Only ===\n");
     
     var startTime = Date.now();
     var accessToken = getValidAccessToken();
@@ -30,7 +120,6 @@ var OptimizedProcessing = (function() {
     
     try {
       // Search for image files that likely don't have metadata
-      // We'll search for recent images and check them
       var searchQueries = [
         'type:file .jpg',
         'type:file .png', 
@@ -63,7 +152,6 @@ var OptimizedProcessing = (function() {
           else if (result === 'skipped') skipped++;
           else errors++;
           
-          // Small delay to avoid rate limits
           Utilities.sleep(100);
         }
         
@@ -75,10 +163,10 @@ var OptimizedProcessing = (function() {
         processed: processed,
         skipped: skipped,
         errors: errors,
-        strategy: 'search_based'
+        strategy: 'search_unprocessed'
       });
       
-      Logger.log("\\n📊 Search-based processing complete:");
+      Logger.log("\n📊 Search-based processing complete:");
       Logger.log("✅ Processed: " + processed);
       Logger.log("⏭️ Skipped (already processed): " + skipped);
       Logger.log("❌ Errors: " + errors);
@@ -88,183 +176,10 @@ var OptimizedProcessing = (function() {
     }
   };
   
-  /**
-   * Strategy 2: Recent Files First (Time-based)
-   * Process files modified/created in the last N days
-   */
-  ns.processRecentFilesFirst = function(daysSinceLastRun) {
-    daysSinceLastRun = daysSinceLastRun || 7; // Default: last week
-    
-    Logger.log("=== Strategy 2: Processing Recent Files (Last " + daysSinceLastRun + " Days) ===\\n");
-    
-    var startTime = Date.now();
-    var accessToken = getValidAccessToken();
-    var lastCheckpoint = ns.getLastCheckpoint();
-    
-    // Calculate date range
-    var sinceDate = new Date();
-    sinceDate.setDate(sinceDate.getDate() - daysSinceLastRun);
-    var sinceDateISO = sinceDate.toISOString().split('T')[0]; // YYYY-MM-DD format
-    
-    Logger.log("Looking for files modified since: " + sinceDateISO);
-    
-    try {
-      // Use Box search with date filter
-      var dateQuery = "type:file modified_at:>" + sinceDateISO + " (.jpg OR .png OR .jpeg)";
-      var recentFiles = ns.searchBoxFiles(dateQuery, accessToken, 50);
-      
-      Logger.log("Found " + recentFiles.length + " recent image files");
-      
-      var processed = 0;
-      for (var i = 0; i < recentFiles.length; i++) {
-        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
-          Logger.log("⏰ Time limit reached");
-          break;
-        }
-        
-        var result = ns.processFileIfNeeded(recentFiles[i], accessToken);
-        if (result === 'processed') processed++;
-        
-        Utilities.sleep(200); // Rate limiting
-      }
-      
-      ns.saveCheckpoint(new Date().toISOString());
-      Logger.log("\n✅ Recent files processing complete. Processed: " + processed);
-      
-    } catch (error) {
-      Logger.log("❌ Error in recent files processing: " + error.toString());
-    }
-  };
-  
-  /**
-   * Strategy 3: Incremental Folder Processing
-   * Process folders incrementally, saving progress between runs
-   */
-  ns.processIncrementallyWithCheckpoints = function() {
-    Logger.log("=== Strategy 3: Incremental Processing with Checkpoints ===\\n");
-    
-    var startTime = Date.now();
-    var accessToken = getValidAccessToken();
-    var checkpoint = ns.getProcessingCheckpoint();
-    
-    Logger.log("Starting from checkpoint: " + JSON.stringify(checkpoint));
-    
-    try {
-      var foldersToProcess = ns.getFoldersToProcess();
-      var currentFolderIndex = checkpoint.folderIndex || 0;
-      var currentFileIndex = checkpoint.fileIndex || 0;
-      
-      for (var folderIdx = currentFolderIndex; folderIdx < foldersToProcess.length; folderIdx++) {
-        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
-          Logger.log("⏰ Saving checkpoint and stopping");
-          ns.saveProcessingCheckpoint({
-            folderIndex: folderIdx,
-            fileIndex: currentFileIndex,
-            lastRun: new Date().toISOString()
-          });
-          break;
-        }
-        
-        var folderId = foldersToProcess[folderIdx];
-        Logger.log("Processing folder: " + folderId);
-        
-        var files = ns.getImageFilesInFolder(folderId, accessToken);
-        
-        for (var fileIdx = currentFileIndex; fileIdx < files.length; fileIdx++) {
-          if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
-            ns.saveProcessingCheckpoint({
-              folderIndex: folderIdx,
-              fileIndex: fileIdx,
-              lastRun: new Date().toISOString()
-            });
-            return;
-          }
-          
-          ns.processFileIfNeeded(files[fileIdx], accessToken);
-          Utilities.sleep(150);
-        }
-        
-        currentFileIndex = 0; // Reset for next folder
-      }
-      
-      // If we completed all folders, reset checkpoint
-      if (currentFolderIndex >= foldersToProcess.length - 1) {
-        ns.saveProcessingCheckpoint({
-          folderIndex: 0,
-          fileIndex: 0,
-          lastRun: new Date().toISOString(),
-          completedCycle: true
-        });
-        Logger.log("✅ Completed full processing cycle");
-      }
-      
-    } catch (error) {
-      Logger.log("❌ Error in incremental processing: " + error.toString());
-    }
-  };
-  
-  /**
-   * Strategy 4: Priority-Based Processing
-   * Process high-priority content first (new uploads, specific content types, etc.)
-   */
-  ns.processByPriority = function() {
-    Logger.log("=== Strategy 4: Priority-Based Processing ===\\n");
-    
-    var startTime = Date.now();
-    var accessToken = getValidAccessToken();
-    
-    // Priority levels (process in this order)
-    var priorities = [
-      {
-        name: "New uploads (last 24 hours)",
-        query: "type:file created_at:>2024-" + ns.getYesterdayISO() + " (.jpg OR .png)",
-        weight: 10
-      },
-      {
-        name: "Recently modified images",
-        query: "type:file modified_at:>" + ns.getLastWeekISO() + " .jpg",
-        weight: 8
-      },
-      {
-        name: "Large images (likely important)",
-        query: "type:file .jpg size:>1000000", // >1MB
-        weight: 6
-      }
-    ];
-    
-    var totalProcessed = 0;
-    
-    for (var i = 0; i < priorities.length; i++) {
-      if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) break;
-      
-      var priority = priorities[i];
-      Logger.log("Processing priority: " + priority.name);
-      
-      var files = ns.searchBoxFiles(priority.query, accessToken, 20);
-      var processed = 0;
-      
-      for (var j = 0; j < files.length; j++) {
-        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) break;
-        
-        var result = ns.processFileIfNeeded(files[j], accessToken);
-        if (result === 'processed') {
-          processed++;
-          totalProcessed++;
-        }
-        
-        Utilities.sleep(100);
-      }
-      
-      Logger.log("Processed " + processed + " files in priority: " + priority.name);
-    }
-    
-    Logger.log("\\n✅ Priority processing complete. Total processed: " + totalProcessed);
-  };
-  
   // Helper Functions
   
   /**
-   * Find files that don't have our metadata template
+   * Find files that don't have our metadata template using search
    */
   ns.findUnprocessedFiles = function(query, accessToken) {
     var allFiles = ns.searchBoxFiles(query, accessToken, 100);
@@ -273,7 +188,6 @@ var OptimizedProcessing = (function() {
     for (var i = 0; i < allFiles.length; i++) {
       var file = allFiles[i];
       
-      // Quick check: does this file have our metadata?
       var hasMetadata = ns.quickMetadataCheck(file.id, accessToken);
       if (!hasMetadata) {
         unprocessed.push(file);
@@ -295,7 +209,7 @@ var OptimizedProcessing = (function() {
                 Config.BOX_METADATA_SCOPE + '/' + Config.BOX_METADATA_TEMPLATE_KEY;
       
       var response = UrlFetchApp.fetch(url, {
-        method: 'HEAD', // Just check existence, don't download content
+        method: 'HEAD',
         headers: { 'Authorization': 'Bearer ' + accessToken },
         muteHttpExceptions: true
       });
@@ -328,7 +242,6 @@ var OptimizedProcessing = (function() {
         var fileDetails = JSON.parse(response.getContentText());
         var metadata = MetadataExtraction.extractComprehensiveMetadata(fileDetails);
         
-        // Apply metadata using the BoxFileOperations namespace
         var success = BoxFileOperations.applyMetadata(file.id, metadata, accessToken);
         
         if (success) {
@@ -377,6 +290,23 @@ var OptimizedProcessing = (function() {
     }
   };
   
+  /**
+   * OPTIMIZED: Get image files using search instead of recursive folder listing
+   * This replaces the slow recursive approach with Box search API
+   */
+  ns.getImageFilesInFolder = function(folderId, accessToken) {
+    Logger.log("OptimizedProcessing: Using search to find image files in folder tree of ID: " + folderId);
+
+    // Search for all image files within the specified folderId and its subfolders
+    var searchQuery = "ancestor_folder_ids:'" + folderId + "'";
+    
+    // Use existing search utility with higher limit for folder trees
+    var imageFiles = ns.searchBoxFiles(searchQuery, accessToken, Config.DEFAULT_API_ITEM_LIMIT);
+
+    Logger.log("OptimizedProcessing: Search found " + imageFiles.length + " image file(s) in folder tree of " + folderId);
+    return imageFiles;
+  };
+  
   // Checkpoint and Statistics Management
   
   ns.getProcessingCheckpoint = function() {
@@ -412,26 +342,9 @@ var OptimizedProcessing = (function() {
     Config.SCRIPT_PROPERTIES.setProperty(STATS_PROPERTY, JSON.stringify(allStats));
   };
   
-  // Utility date functions
-  ns.getYesterdayISO = function() {
-    var yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    return yesterday.toISOString().split('T')[0];
-  };
-  
-  ns.getLastWeekISO = function() {
-    var lastWeek = new Date();
-    lastWeek.setDate(lastWeek.getDate() - 7);
-    return lastWeek.toISOString().split('T')[0];
-  };
-  
   ns.getFoldersToProcess = function() {
     // Define specific folders to process, or discover them dynamically
-    return [Config.ACTIVE_TEST_FOLDER_ID]; // Start with test folder
-  };
-  
-  ns.getImageFilesInFolder = function(folderId, accessToken) {
-    return BoxFileOperations.findAllImageFiles(folderId, accessToken);
+    return [Config.ACTIVE_TEST_FOLDER_ID, Config.DEFAULT_PROCESSING_FOLDER_ID]; 
   };
   
   return ns;
@@ -439,28 +352,25 @@ var OptimizedProcessing = (function() {
 
 // Main optimized processing function for triggers
 function processBoxImagesOptimized() {
-  Logger.log("🚀 Starting Optimized Box Image Processing\\n");
+  Logger.log("🚀 Starting Optimized Box Image Processing\n");
   
   // Choose strategy based on conditions
   var lastRun = OptimizedProcessing.getLastCheckpoint();
   var daysSinceLastRun = lastRun ? 
     Math.floor((Date.now() - new Date(lastRun).getTime()) / (1000 * 60 * 60 * 24)) : 7;
   
-  if (daysSinceLastRun <= 1) {
-    // Recent run - just check for new files
+  if (daysSinceLastRun <= 3) {
+    // Recent run - use fallback strategy for new files
     OptimizedProcessing.processUnprocessedFilesOnly();
-  } else if (daysSinceLastRun <= 7) {
-    // Weekly run - process recent files
-    OptimizedProcessing.processRecentFilesFirst(daysSinceLastRun);
   } else {
-    // Longer gap - use priority-based processing
-    OptimizedProcessing.processByPriority();
+    // Use primary incremental strategy with checkpoints
+    OptimizedProcessing.processIncrementallyWithCheckpoints();
   }
 }
 
 // Show processing statistics
 function showOptimizedProcessingStats() {
-  Logger.log("=== Optimized Processing Statistics ===\\n");
+  Logger.log("=== Optimized Processing Statistics ===\n");
   
   var statsStr = Config.SCRIPT_PROPERTIES.getProperty('PROCESSING_STATS');
   if (!statsStr) {
@@ -481,16 +391,12 @@ function showOptimizedProcessingStats() {
   if (checkpoint.lastRun) {
     var lastRun = new Date(checkpoint.lastRun);
     var daysSince = Math.floor((Date.now() - lastRun.getTime()) / (1000 * 60 * 60 * 24));
-    Logger.log("\\nLast processing run: " + daysSince + " days ago");
+    Logger.log("\nLast processing run: " + daysSince + " days ago");
   }
 }
 
 /**
- * Smart processing recommendations and configuration
- */
-
-/**
- * Analyzes your Box account and recommends the best processing strategy
+ * Analyzes Box account and recommends processing strategy
  */
 function recommendProcessingStrategy() {
   Logger.log("=== Box Processing Strategy Recommendation ===\n");
@@ -502,114 +408,44 @@ function recommendProcessingStrategy() {
   }
   
   try {
-    // Analyze account size and activity
     Logger.log("🔍 Analyzing your Box account...");
     
-    // Get user info
-    const userResponse = UrlFetchApp.fetch(Config.BOX_API_BASE_URL + '/users/me', {
-      headers: { 'Authorization': 'Bearer ' + accessToken },
-      muteHttpExceptions: true
-    });
-    
-    if (userResponse.getResponseCode() !== 200) {
-      Logger.log("❌ Cannot access user info");
-      return;
-    }
-    
-    const user = JSON.parse(userResponse.getContentText());
-    Logger.log(`📊 Account: ${user.name} (${user.login})`);
-    
     // Quick search to estimate image count
-    const searches = [
-      { query: 'type:file .jpg', name: 'JPG files' },
-      { query: 'type:file .png', name: 'PNG files' },
-      { query: 'type:file (.jpg OR .png OR .jpeg)', name: 'Total images' }
-    ];
-    
-    let totalEstimatedImages = 0;
-    let recentImages = 0;
-    
-    for (const search of searches) {
-      try {
-        const searchUrl = `${Config.BOX_API_BASE_URL}/search?query=${encodeURIComponent(search.query)}&limit=100`;
-        const searchResponse = UrlFetchApp.fetch(searchUrl, {
-          headers: { 'Authorization': 'Bearer ' + accessToken },
-          muteHttpExceptions: true
-        });
-        
-        if (searchResponse.getResponseCode() === 200) {
-          const searchData = JSON.parse(searchResponse.getContentText());
-          Logger.log(`${search.name}: ${searchData.entries.length}+ files`);
-          
-          if (search.name === 'Total images') {
-            totalEstimatedImages = searchData.entries.length;
-            
-            // Count recent files (last 30 days)
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-            
-            recentImages = searchData.entries.filter(file => 
-              new Date(file.created_at) > thirtyDaysAgo
-            ).length;
-          }
-        }
-        
-        Utilities.sleep(500); // Rate limiting
-      } catch (error) {
-        Logger.log(`Error searching ${search.name}: ${error.toString()}`);
+    const totalImagesResponse = UrlFetchApp.fetch(
+      Config.BOX_API_BASE_URL + '/search?query=' + encodeURIComponent('type:file (.jpg OR .png OR .jpeg)') + '&limit=100',
+      {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
       }
-    }
+    );
     
-    Logger.log(`\n📈 Analysis Results:`);
-    Logger.log(`• Estimated total images: ${totalEstimatedImages}+`);
-    Logger.log(`• Recent images (last 30 days): ${recentImages}`);
-    
-    // Make recommendations based on analysis
-    Logger.log(`\n🎯 Recommended Strategy:`);
-    
-    if (totalEstimatedImages < 100) {
-      Logger.log(`**SMALL COLLECTION** - Use Strategy 2 (Recent Files)`);
-      Logger.log(`• Your collection is small enough to process quickly`);
-      Logger.log(`• Run: OptimizedProcessing.processRecentFilesFirst(30)`);
-      Logger.log(`• Set trigger: Every 6 hours`);
+    if (totalImagesResponse.getResponseCode() === 200) {
+      const searchData = JSON.parse(totalImagesResponse.getContentText());
+      const totalEstimatedImages = searchData.entries.length;
       
-    } else if (totalEstimatedImages < 1000) {
-      Logger.log(`**MEDIUM COLLECTION** - Use Strategy 1 (Search-Based)`);
-      Logger.log(`• Focus on unprocessed files only`);
-      Logger.log(`• Run: OptimizedProcessing.processUnprocessedFilesOnly()`);
-      Logger.log(`• Set trigger: Every 2 hours`);
+      Logger.log("📈 Analysis Results:");
+      Logger.log("• Estimated total images: " + totalEstimatedImages + "+");
       
-    } else if (recentImages > 50) {
-      Logger.log(`**LARGE ACTIVE COLLECTION** - Use Strategy 4 (Priority-Based)`);
-      Logger.log(`• High activity requires priority processing`);
-      Logger.log(`• Run: OptimizedProcessing.processByPriority()`);
-      Logger.log(`• Set trigger: Every hour`);
+      Logger.log("\n🎯 Recommended Setup:");
+      if (totalEstimatedImages < 500) {
+        Logger.log("**SMALL COLLECTION** - Use both strategies as configured");
+        Logger.log("• Set trigger: Every 12 hours");
+      } else {
+        Logger.log("**LARGE COLLECTION** - Primary incremental strategy will handle this well");
+        Logger.log("• Set trigger: Every 6 hours");
+      }
+      
+      Logger.log("\n🔧 Implementation:");
+      Logger.log("• Primary: processIncrementallyWithCheckpoints() (search-optimized)");
+      Logger.log("• Fallback: processUnprocessedFilesOnly() (for quick recovery)");
+      Logger.log("• Main function: processBoxImagesOptimized() (auto-chooses strategy)");
       
     } else {
-      Logger.log(`**LARGE STABLE COLLECTION** - Use Strategy 3 (Incremental)`);
-      Logger.log(`• Large collection needs systematic processing`);
-      Logger.log(`• Run: OptimizedProcessing.processIncrementallyWithCheckpoints()`);
-      Logger.log(`• Set trigger: Every 4 hours`);
-    }
-    
-    Logger.log(`\n🔧 Implementation Steps:`);
-    Logger.log(`1. Replace your current trigger function:`);
-    Logger.log(`   ScriptApp.newTrigger('processBoxImagesOptimized')`);
-    Logger.log(`2. Test the recommended strategy manually first`);
-    Logger.log(`3. Monitor with: showOptimizedProcessingStats()`);
-    
-    // Show current processing state
-    const checkpoint = OptimizedProcessing.getProcessingCheckpoint();
-    if (checkpoint.lastRun) {
-      const lastRun = new Date(checkpoint.lastRun);
-      const daysSince = Math.floor((Date.now() - lastRun.getTime()) / (1000 * 60 * 60 * 24));
-      Logger.log(`\n📅 Last processing: ${daysSince} days ago`);
-    } else {
-      Logger.log(`\n📅 No previous processing runs detected`);
+      Logger.log("❌ Could not analyze account");
     }
     
   } catch (error) {
-    Logger.log(`❌ Error analyzing account: ${error.toString()}`);
+    Logger.log("❌ Error analyzing account: " + error.toString());
   }
 }
 
@@ -620,7 +456,7 @@ function setupOptimizedProcessing() {
   Logger.log("=== Setting Up Optimized Processing ===\n");
   
   try {
-    // 1. Test basic connectivity
+    // Test basic connectivity
     Logger.log("1. Testing Box connectivity...");
     const testResult = testBoxAccess();
     if (!testResult.success) {
@@ -629,7 +465,7 @@ function setupOptimizedProcessing() {
     }
     Logger.log("✅ Box connected");
     
-    // 2. Ensure template exists
+    // Ensure template exists
     Logger.log("\n2. Checking metadata template...");
     const accessToken = getValidAccessToken();
     const template = getOrCreateImageTemplate(accessToken);
@@ -639,12 +475,8 @@ function setupOptimizedProcessing() {
     }
     Logger.log("✅ Template ready: " + template.displayName);
     
-    // 3. Get recommendation
-    Logger.log("\n3. Analyzing account for recommendations...");
-    recommendProcessingStrategy();
-    
-    // 4. Update trigger
-    Logger.log("\n4. Updating trigger...");
+    // Update trigger
+    Logger.log("\n3. Updating trigger...");
     
     // Delete old triggers
     ScriptApp.getProjectTriggers().forEach(trigger => {
@@ -653,100 +485,25 @@ function setupOptimizedProcessing() {
           funcName === 'processBoxImagesEnhanced' ||
           funcName === 'processBoxImagesOptimized') {
         ScriptApp.deleteTrigger(trigger);
-        Logger.log(`Deleted old trigger: ${funcName}`);
+        Logger.log("Deleted old trigger: " + funcName);
       }
     });
     
     // Create new optimized trigger
     ScriptApp.newTrigger('processBoxImagesOptimized')
       .timeBased()
-      .everyHours(2)  // Conservative starting point
+      .everyHours(6)
       .create();
     
-    Logger.log("✅ Created optimized trigger (every 2 hours)");
-    
-    // 5. Test run
-    Logger.log("\n5. Running initial test...");
-    try {
-      OptimizedProcessing.processUnprocessedFilesOnly();
-      Logger.log("✅ Test processing completed");
-    } catch (error) {
-      Logger.log("❌ Test processing failed: " + error.toString());
-    }
+    Logger.log("✅ Created optimized trigger (every 6 hours)");
     
     Logger.log("\n🎉 Optimized Processing Setup Complete!");
-    Logger.log("\n📋 What's Different Now:");
-    Logger.log("• Only processes files that need processing");
-    Logger.log("• Respects execution time limits");
-    Logger.log("• Saves progress between runs");
-    Logger.log("• Prioritizes recent/important files");
-    Logger.log("• Uses efficient Box search APIs");
-    
-    Logger.log("\n🔍 Monitoring Commands:");
-    Logger.log("• showOptimizedProcessingStats() - View processing history");
-    Logger.log("• recommendProcessingStrategy() - Re-analyze and get new recommendations");
-    Logger.log("• processBoxImagesOptimized() - Manual run of optimized processing");
+    Logger.log("• Two-strategy approach implemented");
+    Logger.log("• Search optimization enabled");
+    Logger.log("• Execution time limits respected");
+    Logger.log("• Progress checkpoints active");
     
   } catch (error) {
     Logger.log("❌ Setup error: " + error.toString());
-  }
-}
-
-/**
- * Test the optimized approach on a small batch
- */
-function testOptimizedApproach() {
-  Logger.log("=== Testing Optimized Approach ===\n");
-  
-  const accessToken = getValidAccessToken();
-  if (!accessToken) {
-    Logger.log("❌ No access token");
-    return;
-  }
-  
-  Logger.log("🔍 Testing search-based unprocessed file detection...");
-  
-  try {
-    // Search for a few image files
-    const searchUrl = `${Config.BOX_API_BASE_URL}/search?query=type:file .jpg&limit=5&fields=id,name,size`;
-    const response = UrlFetchApp.fetch(searchUrl, {
-      headers: { 'Authorization': 'Bearer ' + accessToken },
-      muteHttpExceptions: true
-    });
-    
-    if (response.getResponseCode() === 200) {
-      const data = JSON.parse(response.getContentText());
-      Logger.log(`✅ Found ${data.entries.length} image files via search`);
-      
-      if (data.entries.length > 0) {
-        // Test quick metadata check on first file
-        const testFile = data.entries[0];
-        Logger.log(`\n🔍 Testing quick metadata check on: ${testFile.name}`);
-        
-        const hasMetadata = OptimizedProcessing.quickMetadataCheck(testFile.id, accessToken);
-        Logger.log(`Metadata exists: ${hasMetadata ? 'Yes' : 'No'}`);
-        
-        if (!hasMetadata) {
-          Logger.log(`\n✅ This file would be processed by optimized approach`);
-          Logger.log(`File: ${testFile.name} (${Math.round(testFile.size/1024)}KB)`);
-        } else {
-          Logger.log(`\n⏭️ This file would be skipped (already processed)`);
-        }
-        
-        Logger.log(`\n🎯 Optimized processing would be much faster because:`);
-        Logger.log(`• Only processes files that need it`);
-        Logger.log(`• Uses search instead of scanning all folders`);
-        Logger.log(`• Quick HEAD requests to check metadata existence`);
-        Logger.log(`• Processes in small batches with time limits`);
-        
-      } else {
-        Logger.log("⚠️ No image files found in search");
-      }
-    } else {
-      Logger.log(`❌ Search failed: ${response.getResponseCode()}`);
-    }
-    
-  } catch (error) {
-    Logger.log(`❌ Test error: ${error.toString()}`);
   }
 }
