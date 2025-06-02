@@ -2,6 +2,12 @@
 // Main orchestrator for Box Image Metadata Processing System
 // Uses Bruce McPherson's cGoa and cUseful libraries for robust operations
 // Depends on: Config.gs, BoxAuth.gs, BoxMetadataTemplates.gs, BoxFileOperations.gs, MetadataExtraction.gs
+/**
+ * Boxer is a simple-as-possible Google Apps Script that periodically sweeps through our box.com storage and attempts 
+ * to add useful metadata to media assets, primarily mage files. This is a utility for my personal use within a 200 person 
+ * organization. I'm aiming for good quality, but do NOT want to invest significant effort in enterprise-level robustness. 
+ * It will be run as a Google Apps Script on a timed trigger, a couple times a week.
+ */
 
 // ===============================================
 // MAIN PROCESSING FUNCTIONS
