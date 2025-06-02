@@ -138,6 +138,7 @@ function createOptimalImageMetadataTemplate(accessToken) {
       { key: 'aiConfidenceScore', displayName: 'AI Confidence Score', type: 'float', description: 'AI analysis confidence (0.0-1.0)' },
       { key: 'lastProcessedDate', displayName: 'Last Processed', type: 'date', description: 'When metadata was last updated' },
       { key: 'processingVersion', displayName: 'Processing Version', type: 'string', description: 'Version of processing algorithm used' },
+      { key: 'buildNumber', displayName: 'Build Number', type: 'string', description: 'Boxer build that processed this file' },
       { key: 'needsReview', displayName: 'Needs Human Review', type: 'enum', description: 'Flags for manual review',
         options: [
           { key: 'yes', displayName: 'Yes' },

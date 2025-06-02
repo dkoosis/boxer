@@ -69,5 +69,22 @@ var Config = {
     return this.IMAGE_EXTENSIONS.some(function(ext) { 
       return lowerFilename.endsWith(ext); 
     });
+  },
+  
+  /**
+   * Get current build number from Script Properties
+   * @returns {string} Current build number
+   */
+  getCurrentBuild: function() {
+    return this.SCRIPT_PROPERTIES.getProperty('BUILD_NUMBER') || '20241202.001';
+  },
+  
+  /**
+   * Check if file needs reprocessing due to build change
+   * @param {string} fileBuildNumber Build number from file metadata
+   * @returns {boolean} True if file should be reprocessed
+   */
+  shouldReprocessForBuild: function(fileBuildNumber) {
+    return !fileBuildNumber || fileBuildNumber !== this.getCurrentBuild();
   }
 };

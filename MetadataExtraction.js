@@ -305,6 +305,7 @@ var MetadataExtraction = (function() {
         processingStage: Config.PROCESSING_STAGE_BASIC,
         lastProcessedDate: new Date().toISOString(),
         processingVersion: Config.PROCESSING_VERSION_BASIC,
+        buildNumber: Config.getCurrentBuild(),
         needsReview: contentAnalysis.needsReview || 'no'
       };
       
@@ -338,22 +339,19 @@ var MetadataExtraction = (function() {
     var utils = initUtils_();
     
     try {
-      // Check current metadata state
+      // Check if processing needed (including build updates)
       var currentMetadata = BoxFileOperations.getCurrentMetadata(fileEntry.id, accessToken);
-      var currentStage = currentMetadata ? currentMetadata.processingStage : 
-                        Config.PROCESSING_STAGE_UNPROCESSED;
+      var needsProcessing = !currentMetadata || 
+                           currentMetadata.processingStage === Config.PROCESSING_STAGE_UNPROCESSED ||
+                           Config.shouldReprocessForBuild(currentMetadata.buildNumber);
       
-      // Skip if already processed
-      var skipStages = [
-        Config.PROCESSING_STAGE_COMPLETE,
-        Config.PROCESSING_STAGE_AI,
-        Config.PROCESSING_STAGE_EXIF,
-        Config.PROCESSING_STAGE_BASIC
-      ];
-      
-      if (skipStages.indexOf(currentStage) !== -1) {
-        return; // Already processed
+      if (!needsProcessing) {
+        return; // Skip if up-to-date
       }
+      
+      var reason = !currentMetadata ? 'new' : 
+                   Config.shouldReprocessForBuild(currentMetadata.buildNumber) ? 'build_update' : 'incomplete';
+      Logger.log('🐕 Processing ' + fileEntry.name + ' (' + reason + ')');
       
       // Fetch full file details with robust error handling
       var fileDetailsUrl = Config.BOX_API_BASE_URL + '/files/' + fileEntry.id + 
@@ -499,6 +497,7 @@ var MetadataExtraction = (function() {
     // Finalize processing metadata
     combinedMetadata.lastProcessedDate = new Date().toISOString();
     combinedMetadata.processingVersion = Config.PROCESSING_VERSION_ENHANCED;
+    combinedMetadata.buildNumber = Config.getCurrentBuild();
     
     return combinedMetadata;
   };
