@@ -1,5 +1,6 @@
 // File: MainScript.gs
-// Main script functions optimized with search-based file discovery
+// Main orchestration functions optimized with search-based file discovery
+// Depends on: Config.gs, BoxAuth.gs, OptimizedProcessing.gs, BoxFileOperations.gs
 
 /**
  * Lists all processed and unprocessed image files with their status.
@@ -280,7 +281,7 @@ function testProcessThreeFiles() {
         
         // Extract enhanced metadata (includes basic, EXIF, and Vision API)
         Logger.log("  🔍 Boxer is sniffing out all the details...");
-        const enhancedMetadata = MetadataExtraction.extractEnhancedMetadata(fileDetails, accessToken);
+        const enhancedMetadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
         
         // Apply metadata to file
         Logger.log("  💾 Boxer is burying the treasure in Box...");
@@ -442,66 +443,3 @@ var ns = {
     return allImages;
   }
 };
-
-// File: BuildManagement.gs (or add these to MainScript.gs)
-// Simple build management functions
-
-/**
- * Increment build number (run after making processing changes)
- */
-function incrementBuild() {
-  const current = Config.getCurrentBuild();
-  const today = new Date().toISOString().slice(0,10).replace(/-/g, '');
-  const parts = current.split('.');
-  const increment = parts[0] === today ? String(parseInt(parts[1]) + 1).padStart(3, '0') : '001';
-  const newBuild = today + '.' + increment;
-  
-  Config.SCRIPT_PROPERTIES.setProperty('BUILD_NUMBER', newBuild);
-  Logger.log('🐕 Boxer build updated: ' + current + ' → ' + newBuild);
-  return newBuild;
-}
-
-/**
- * Check how many files need build updates
- */
-function checkBuildStatus() {
-  Logger.log('Current build: ' + Config.getCurrentBuild());
-  
-  const accessToken = getValidAccessToken();
-  const images = BoxFileOperations.findAllImageFiles(Config.ACTIVE_TEST_FOLDER_ID, accessToken);
-  
-  let needsUpdate = 0;
-  let upToDate = 0;
-  
-  images.slice(0, 20).forEach(image => {
-    const metadata = BoxFileOperations.getCurrentMetadata(image.id, accessToken);
-    if (metadata) {
-      Config.shouldReprocessForBuild(metadata.buildNumber) ? needsUpdate++ : upToDate++;
-    }
-  });
-  
-  Logger.log('Up-to-date: ' + upToDate + ', Needs update: ' + needsUpdate);
-}
-
-/**
- * Process files with outdated build numbers
- */
-function processOutdatedFiles(maxFiles = 10) {
-  const accessToken = getValidAccessToken();
-  const images = BoxFileOperations.findAllImageFiles(Config.ACTIVE_TEST_FOLDER_ID, accessToken);
-  
-  let processed = 0;
-  
-  for (const image of images) {
-    if (processed >= maxFiles) break;
-    
-    const metadata = BoxFileOperations.getCurrentMetadata(image.id, accessToken);
-    if (metadata && Config.shouldReprocessForBuild(metadata.buildNumber)) {
-      MetadataExtraction.processSingleImageBasic(image, accessToken);
-      processed++;
-      Utilities.sleep(1000);
-    }
-  }
-  
-  Logger.log('Updated ' + processed + ' files to build ' + Config.getCurrentBuild());
-}

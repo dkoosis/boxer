@@ -450,18 +450,18 @@ var MetadataExtraction = (function() {
   };
   
   /**
-   * Extracts enhanced metadata combining basic info, EXIF, and Vision API analysis.
+   * Extracts metadata combining basic info, EXIF, and Vision API analysis.
    * @param {object} fileDetails Full file details from Box API
    * @param {string} accessToken Valid Box access token
    * @returns {object} Enhanced metadata object
    */
-  ns.extractEnhancedMetadata = function(fileDetails, accessToken) {
+  ns.extractMetadata = function(fileDetails, accessToken) {
     // Start with basic metadata
     var basicMetadata = ns.extractComprehensiveMetadata(fileDetails);
     var combinedMetadata = JSON.parse(JSON.stringify(basicMetadata)); // Deep copy
 
     // Extract EXIF data
-    var exifData = extractExifData(fileDetails.id, accessToken);
+    var exifData = extractMetadata(fileDetails.id, accessToken);
     if (exifData && exifData.hasExif) {
       if (exifData.cameraModel) combinedMetadata.cameraModel = exifData.cameraModel;
       if (exifData.dateTaken) combinedMetadata.dateTaken = exifData.dateTaken;

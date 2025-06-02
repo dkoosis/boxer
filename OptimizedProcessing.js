@@ -261,7 +261,7 @@ var OptimizedProcessing = (function() {
   };
   
   /**
-   * Search Box for files with query
+   * Search Box for files with query - CORRECTED VERSION
    */
   ns.searchBoxFiles = function(query, accessToken, limit) {
     limit = limit || 50;
@@ -289,7 +289,40 @@ var OptimizedProcessing = (function() {
       return [];
     }
   };
+
+  /**
+   * Search for files in a specific folder using ancestor_folder_ids parameter - CORRECTED VERSION
+   */
+ns.searchBoxFilesInFolder = function(folderId, accessToken, limit) {
+  limit = limit || 50;
   
+  try {
+    var searchUrl = Config.BOX_API_BASE_URL + '/search?' + 
+                   'query=' + encodeURIComponent('type:file') +
+                   '&ancestor_folder_ids=' + folderId +
+                   '&limit=' + limit + 
+                   '&fields=id,name,type,size,created_at,modified_at,parent';
+    
+    var response = UrlFetchApp.fetch(searchUrl, {
+      headers: { 'Authorization': 'Bearer ' + accessToken },
+      muteHttpExceptions: true
+    });
+    
+    if (response.getResponseCode() === 200) {
+      var data = JSON.parse(response.getContentText());
+      return data.entries.filter(function(item) {
+        return item.type === 'file' && BoxFileOperations.isImageFile(item.name);
+      });
+    } else {
+      Logger.log("Folder search failed: " + response.getResponseCode());
+      Logger.log("Response: " + response.getContentText());
+      return [];
+    }
+  } catch (error) {
+    Logger.log("Folder search error: " + error.toString());
+    return [];
+  }
+};  
   /**
    * OPTIMIZED: Get image files using search instead of recursive folder listing
    * This replaces the slow recursive approach with Box search API
@@ -297,11 +330,8 @@ var OptimizedProcessing = (function() {
   ns.getImageFilesInFolder = function(folderId, accessToken) {
     Logger.log("OptimizedProcessing: Using search to find image files in folder tree of ID: " + folderId);
 
-    // Search for all image files within the specified folderId and its subfolders
-    var searchQuery = "ancestor_folder_ids:'" + folderId + "'";
-    
-    // Use existing search utility with higher limit for folder trees
-    var imageFiles = ns.searchBoxFiles(searchQuery, accessToken, Config.DEFAULT_API_ITEM_LIMIT);
+    // Use the corrected search function
+    var imageFiles = ns.searchBoxFilesInFolder(folderId, accessToken, Config.DEFAULT_API_ITEM_LIMIT);
 
     Logger.log("OptimizedProcessing: Search found " + imageFiles.length + " image file(s) in folder tree of " + folderId);
     return imageFiles;
@@ -506,4 +536,40 @@ function setupOptimizedProcessing() {
   } catch (error) {
     Logger.log("❌ Setup error: " + error.toString());
   }
+}
+
+/**
+ * Process all images in test folder using corrected search
+ */
+function processAllTestFolderImages() {
+  const accessToken = getValidAccessToken();
+  const folderId = '256585558894'; // Updated folder ID
+  
+  Logger.log("Processing all images in test folder: " + folderId);
+  
+  // Use corrected search
+  const imageFiles = OptimizedProcessing.searchBoxFilesInFolder(folderId, accessToken, 100);
+  
+  Logger.log(`Found ${imageFiles.length} images to process`);
+  
+  imageFiles.forEach((image, index) => {
+    try {
+      Logger.log(`${index + 1}/${imageFiles.length}: ${image.name}`);
+      
+      // Get full file details
+      const detailsUrl = Config.BOX_API_BASE_URL + '/files/' + image.id + 
+                        '?fields=id,name,size,path_collection,created_at,parent';
+      const detailsResponse = UrlFetchApp.fetch(detailsUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken }
+      });
+      const fileDetails = JSON.parse(detailsResponse.getContentText());
+      
+      const metadata = MetadataExtraction.extractEnhancedMetadata(fileDetails, accessToken);
+      BoxFileOperations.applyMetadata(image.id, metadata, accessToken);
+      
+      Utilities.sleep(2000);
+    } catch (error) {
+      Logger.log(`Error processing ${image.name}: ${error.toString()}`);
+    }
+  });
 }

@@ -293,3 +293,135 @@ function getOrCreateImageTemplate(accessToken) {
   
   return template;
 }
+
+// Add this function to your BoxMetadataTemplates.gs file
+
+/**
+ * Fetches and logs the schema (structure) of ALL metadata templates within a given scope.
+ *
+ * @param {string} scope Optional. The scope of the metadata templates (e.g., 'enterprise'). 
+ * Defaults to Config.BOX_METADATA_SCOPE.
+ */
+function showAllMetadataTemplateSchemas(scope) {
+  const accessToken = getValidAccessToken(); // From BoxAuth.gs
+  if (!accessToken) {
+    Logger.log('ERROR: Could not get a valid access token. Please ensure Box authentication is complete.');
+    console.error('ERROR: Could not get a valid access token.');
+    return;
+  }
+
+  const effectiveScope = scope || Config.BOX_METADATA_SCOPE;
+
+  Logger.log(`Attempting to fetch all template schemas for Scope: ${effectiveScope}`);
+
+  const listUrl = `${Config.BOX_API_BASE_URL}/metadata_templates/${effectiveScope}`;
+  const listOptions = {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    },
+    muteHttpExceptions: true
+  };
+
+  try {
+    const listResponse = UrlFetchApp.fetch(listUrl, listOptions);
+    const listResponseCode = listResponse.getResponseCode();
+    const listResponseText = listResponse.getContentText();
+
+    if (listResponseCode === 200) {
+      const templatesList = JSON.parse(listResponseText);
+      if (templatesList.entries && templatesList.entries.length > 0) {
+        Logger.log(`Found ${templatesList.entries.length} template(s) in scope '${effectiveScope}'. Fetching schemas...`);
+        Logger.log('------------------------------------------------------');
+
+        templatesList.entries.forEach(function(templateEntry, index) {
+          Logger.log(`SCHEMA ${index + 1} of ${templatesList.entries.length}`);
+          // Now fetch and display the schema for each templateKey
+          // Reusing the logic from the single schema display function for clarity
+          fetchAndLogSingleTemplateSchema(templateEntry.templateKey, effectiveScope, accessToken);
+          Logger.log('------------------------------------------------------');
+          if (index < templatesList.entries.length - 1) {
+             Utilities.sleep(500); // Small delay between fetching each schema to be kind to the API
+          }
+        });
+        Logger.log('All template schemas displayed.');
+
+      } else {
+        Logger.log(`No metadata templates found in scope '${effectiveScope}'.`);
+      }
+    } else {
+      Logger.log(`ERROR: Failed to list metadata templates for scope '${effectiveScope}'. HTTP Code: ${listResponseCode}`);
+      Logger.log(`Response: ${listResponseText}`);
+    }
+  } catch (error) {
+    Logger.log(`EXCEPTION: An error occurred while trying to list or fetch template schemas for scope '${effectiveScope}': ${error.toString()}`);
+    console.error(`EXCEPTION for scope '${effectiveScope}': `, error);
+  }
+}
+
+/**
+ * Helper function to fetch and log a single template's schema.
+ * (This is similar to the 'showMetadataTemplateSchema' function provided earlier but adapted for internal use here)
+ * @param {string} templateKey
+ * @param {string} scope
+ * @param {string} accessToken
+ */
+function fetchAndLogSingleTemplateSchema(templateKey, scope, accessToken) {
+  const schemaUrl = `${Config.BOX_API_BASE_URL}/metadata_templates/${scope}/${templateKey}/schema`;
+  const schemaOptions = {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    },
+    muteHttpExceptions: true
+  };
+
+  try {
+    const schemaResponse = UrlFetchApp.fetch(schemaUrl, schemaOptions);
+    const schemaResponseCode = schemaResponse.getResponseCode();
+    const schemaResponseText = schemaResponse.getContentText();
+
+    if (schemaResponseCode === 200) {
+      const templateSchema = JSON.parse(schemaResponseText);
+      Logger.log(`  Template Key: ${templateSchema.templateKey}`);
+      Logger.log(`  Display Name: ${templateSchema.displayName}`);
+      Logger.log(`  Scope: ${templateSchema.scope}`);
+      Logger.log(`  Hidden: ${templateSchema.hidden || false}`);
+      Logger.log(`  Copy Instance On Item Copy: ${templateSchema.copyInstanceOnItemCopy || false}`);
+
+      if (templateSchema.fields && templateSchema.fields.length > 0) {
+        Logger.log(`  Fields (${templateSchema.fields.length}):`);
+        templateSchema.fields.forEach(function(field, index) {
+          Logger.log(`    Field ${index + 1}:`);
+          Logger.log(`      - Key: ${field.key}`);
+          Logger.log(`      - Display Name: ${field.displayName}`);
+          Logger.log(`      - Type: ${field.type}`);
+          Logger.log(`      - Hidden: ${field.hidden || false}`);
+          if (field.description) {
+            Logger.log(`      - Description: ${field.description}`);
+          }
+          if (field.type === 'enum' && field.options) {
+            Logger.log(`      - Options (${field.options.length}):`);
+            field.options.forEach(function(option, optIndex) {
+              Logger.log(`        Option ${optIndex + 1}: { key: "${option.key}", displayName: "${option.displayName || option.key}" }`);
+            });
+          }
+        });
+      } else {
+        Logger.log('  Fields: None defined.');
+      }
+    } else {
+      Logger.log(`  ERROR fetching schema for '${templateKey}'. HTTP Code: ${schemaResponseCode}. Response: ${schemaResponseText.substring(0, 200)}...`);
+    }
+  } catch (e) {
+    Logger.log(`  EXCEPTION fetching schema for '${templateKey}': ${e.toString()}`);
+  }
+}
+
+function runTestShowAllTemplateSchemas() {
+  // You can optionally specify a scope if it's different from your Config.BOX_METADATA_SCOPE
+  // const specificScope = 'global'; // for example, if you wanted to see global templates
+  // showAllMetadataTemplateSchemas(specificScope); 
+  
+  showAllMetadataTemplateSchemas(); // This will use the default scope from Config.gs
+}

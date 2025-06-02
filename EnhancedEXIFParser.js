@@ -4,7 +4,7 @@
 // Depends on: Config.gs, BoxAuth.gs
 
 /**
- * EnhancedExifParser namespace - robust metadata extraction for multiple image formats.
+ * EnhancedExifParser namespace - comprehensive metadata extraction for multiple image formats.
  * Provides comprehensive metadata extraction with sophisticated parsing and fallback mechanisms.
  */
 var EnhancedExifParser = (function() {
@@ -702,21 +702,21 @@ var EnhancedExifParser = (function() {
   }
   
   /**
-   * Main extraction function - robust metadata extraction from image files
+   * Main extraction function - comprehensive metadata extraction from image files
    * @param {string} fileId Box file ID
    * @param {string} accessToken Valid Box access token
    * @returns {object|null} Comprehensive metadata or null on error
    */
-  ns.extractRobustMetadata = function(fileId, accessToken) {
+  ns.extractMetadata = function(fileId, accessToken) {
     if (!fileId || !accessToken) {
-      Logger.log('ERROR: extractRobustMetadata requires fileId and accessToken');
+      Logger.log('ERROR: extractMetadata requires fileId and accessToken');
       return null;
     }
     
     var utils = initUtils_();
     
     try {
-      Logger.log('Starting robust metadata extraction for file ' + fileId);
+      Logger.log('Starting comprehensive metadata extraction for file ' + fileId);
       
       // Download file with retry logic
       var downloadUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/content';
@@ -756,7 +756,7 @@ var EnhancedExifParser = (function() {
       }
       
       if (metadata) {
-        Logger.log('✅ Robust metadata extraction successful for file ' + fileId);
+        Logger.log('✅ Comprehensive metadata extraction successful for file ' + fileId);
         return convertToBoxFormat_(metadata);
       } else {
         Logger.log('⚠️ No metadata extracted for file ' + fileId);
@@ -764,7 +764,7 @@ var EnhancedExifParser = (function() {
       }
       
     } catch (error) {
-      Logger.log('ERROR: Robust metadata extraction failed for file ' + fileId + ': ' + error.toString());
+      Logger.log('ERROR: Comprehensive metadata extraction failed for file ' + fileId + ': ' + error.toString());
       return null;
     }
   };
@@ -809,8 +809,8 @@ var EnhancedExifParser = (function() {
    * Comprehensive test function
    * @param {string} testFileId Optional test file ID
    */
-  ns.testRobustExtraction = function(testFileId) {
-    Logger.log("=== Robust Metadata Extraction Test ===");
+  ns.testMetadataExtraction = function(testFileId) {
+    Logger.log("=== Comprehensive Metadata Extraction Test ===");
     
     var accessToken = getValidAccessToken();
     if (!accessToken) {
@@ -829,7 +829,7 @@ var EnhancedExifParser = (function() {
         Logger.log("Testing with: " + testImages[0].name);
       }
       
-      var result = ns.extractRobustMetadata(testFileId, accessToken);
+      var result = ns.extractMetadata(testFileId, accessToken);
       
       if (result) {
         Logger.log("✅ Extraction successful!");

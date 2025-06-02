@@ -92,7 +92,8 @@ var BoxFileOperations = (function() {
       var fieldsToFetch = 'id,name,type,size,path_collection,created_at,modified_at,parent';
       var url = Config.BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
                 Config.DEFAULT_API_ITEM_LIMIT + '&fields=' + fieldsToFetch;
-      
+                
+      Logger.log('Applying metadata: ' + JSON.stringify(metadata, null, 2));  
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
           headers: { 'Authorization': 'Bearer ' + accessToken },

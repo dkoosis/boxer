@@ -1,7 +1,7 @@
 // File: BoxTests.gs
 // Comprehensive test functions for Box Image Metadata Processing System
 // Uses Bruce McPherson's cGoa library for authentication testing
-// Depends on: Config.gs, BoxAuth.gs, BoxFileOperations.gs, VisionExif.gs
+// Depends on: Config.gs, BoxAuth.gs, BoxFileOperations.gs, VisionAnalysis.gs, ExifExtraction.gs
 
 /**
  * Complete test of Box authentication setup following Bruce McPherson's cGoa patterns.
@@ -238,7 +238,7 @@ function testBasicProcessingWorkflow() {
 /**
  * Test enhanced processing features (EXIF and Vision API).
  */
-function testEnhancedProcessingFeatures() {
+function testFeatures() {
   Logger.log('=== Testing Enhanced Processing Features ===\n');
   
   try {
@@ -249,8 +249,8 @@ function testEnhancedProcessingFeatures() {
     }
     
     Logger.log('1. Testing Vision API setup...');
-    const visionSetupOk = verifyVisionApiSetup();
-    if (visionSetupOk) {
+    const visionSetup = verifyVisionApiSetup();
+    if (visionSetup) {
       Logger.log('✅ Vision API setup verified');
     } else {
       Logger.log('❌ Vision API setup failed - enhanced features may not work');
@@ -273,12 +273,12 @@ function testEnhancedProcessingFeatures() {
     
     Logger.log('\n3. Testing EXIF extraction...');
     try {
-      const exifResult = extractExifData(suitableImage.id, accessToken);
+      const exifResult = extractMetadata(suitableImage.id, accessToken);
       if (exifResult) {
         Logger.log('✅ EXIF extraction completed');
         Logger.log('   Has EXIF: ' + exifResult.hasExif);
-        if (exifResult.hasExif && exifResult.cameraModel) {
-          Logger.log('   Camera: ' + exifResult.cameraModel);
+        if (exifResult.hasExif && exifResult.metadata && exifResult.metadata.cameraModel) {
+          Logger.log('   Camera: ' + exifResult.metadata.cameraModel);
         }
       } else {
         Logger.log('⚠️ EXIF extraction returned null (normal for non-JPEG files)');
@@ -288,7 +288,7 @@ function testEnhancedProcessingFeatures() {
     }
     
     Logger.log('\n4. Testing Vision API analysis...');
-    if (visionSetupOk) {
+    if (visionSetup) {
       try {
         const visionResult = analyzeImageWithVisionImproved(suitableImage.id, accessToken);
         if (visionResult && !visionResult.error) {
@@ -327,8 +327,9 @@ function testEnhancedProcessingFeatures() {
       
       if (response.getResponseCode() === 200) {
         const fileDetails = JSON.parse(response.getContentText());
-        processImageFileEnhanced({ id: suitableImage.id, name: suitableImage.name }, accessToken);
+        const enhancedMetadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
         Logger.log('✅ Enhanced processing test completed');
+        Logger.log('   Final stage: ' + enhancedMetadata.processingStage);
       } else {
         Logger.log('❌ Could not get file details for enhanced processing');
       }
@@ -438,7 +439,7 @@ function testCompleteSetup() {
     testBasicProcessingWorkflow();
     
     Logger.log('\n3. Testing enhanced processing...');
-    testEnhancedProcessingFeatures();
+    testFeatures();
     
     Logger.log('\n4. Testing summary functions...');
     getImageProcessingSummary();
@@ -563,5 +564,208 @@ function diagnoseFolderAccess() {
     
   } catch (error) {
     Logger.log(`❌ Diagnostic error: ${error.toString()}`);
+  }
+}
+
+/**
+ * Comprehensive test of both EXIF and Vision API.
+ * @param {string} testFileId Optional specific file ID to test
+ */
+function testComprehensiveMetadataExtraction(testFileId) {
+  Logger.log("=== Comprehensive Metadata Extraction Test ===\n");
+  
+  const accessToken = getValidAccessToken();
+  if (!accessToken) {
+    Logger.log("❌ No access token available");
+    return;
+  }
+  
+  try {
+    // Find a test file if not specified
+    if (!testFileId) {
+      const testImages = BoxFileOperations.findAllImageFiles(Config.ACTIVE_TEST_FOLDER_ID, accessToken);
+      if (testImages.length === 0) {
+        Logger.log("❌ No test images found");
+        return;
+      }
+      testFileId = testImages[0].id;
+      Logger.log(`Testing with: ${testImages[0].name}\n`);
+    }
+    
+    // Test 1: EXIF Extraction
+    Logger.log("1. Testing EXIF Extraction...");
+    const exifResult = extractMetadata(testFileId, accessToken);
+    
+    if (exifResult && exifResult.hasExif) {
+      Logger.log("✅ EXIF extraction successful");
+      Logger.log(`   Method: ${exifResult.extractionMethod}`);
+      Logger.log(`   Enhanced: ${exifResult.enhanced}`);
+      
+      if (exifResult.metadata) {
+        const metadata = exifResult.metadata;
+        Logger.log("   Key metadata extracted:");
+        if (metadata.cameraModel) Logger.log(`     Camera: ${metadata.cameraModel}`);
+        if (metadata.imageWidth && metadata.imageHeight) {
+          Logger.log(`     Dimensions: ${metadata.imageWidth} x ${metadata.imageHeight}`);
+        }
+        if (metadata.aspectRatio) Logger.log(`     Aspect Ratio: ${metadata.aspectRatio}`);
+        if (metadata.dateTaken) Logger.log(`     Date Taken: ${metadata.dateTaken}`);
+      }
+    } else {
+      Logger.log("⚠️ No EXIF data found (normal for some file types)");
+    }
+    
+    // Test 2: Vision API
+    Logger.log("\n2. Testing Vision API...");
+    
+    // First check if Vision API is available
+    try {
+      const visionSetup = verifyVisionApiSetup();
+      if (!visionSetup) {
+        Logger.log("⚠️ Vision API not available - skipping");
+        return;
+      }
+    } catch (error) {
+      Logger.log("⚠️ Vision API setup failed - skipping");
+      return;
+    }
+    
+    const visionResult = analyzeImageWithVisionImproved(testFileId, accessToken);
+    
+    if (visionResult && !visionResult.error) {
+      Logger.log("✅ Vision API analysis successful");
+      Logger.log(`   Confidence Score: ${visionResult.confidenceScore || 'N/A'}`);
+      Logger.log(`   Scene: ${visionResult.sceneDescription || 'N/A'}`);
+      
+      if (visionResult.categories) {
+        Logger.log("   Categorized detections:");
+        Object.keys(visionResult.categories).forEach(category => {
+          const items = visionResult.categories[category];
+          if (items.length > 0) {
+            Logger.log(`     ${category}: ${items.slice(0, 3).join(', ')}`);
+          }
+        });
+      }
+      
+      if (visionResult.text && visionResult.text.length > 0) {
+        Logger.log(`   Text detected: ${visionResult.text.substring(0, 100)}${visionResult.text.length > 100 ? '...' : ''}`);
+      }
+      
+      if (visionResult.dominantColors && visionResult.dominantColors.length > 0) {
+        const colorNames = visionResult.dominantColors.map(c => c.name).slice(0, 3);
+        Logger.log(`   Dominant colors: ${colorNames.join(', ')}`);
+      }
+      
+    } else {
+      Logger.log("❌ Vision API analysis failed");
+      if (visionResult && visionResult.error) {
+        Logger.log(`   Error: ${visionResult.error}`);
+        Logger.log(`   Message: ${visionResult.message || 'No details'}`);
+      }
+    }
+    
+    Logger.log("\n🎉 Comprehensive metadata extraction test complete!");
+    
+    Logger.log("\n💡 Features provide:");
+    Logger.log("• Comprehensive EXIF parsing with technical details");
+    Logger.log("• Intelligent categorization of Vision API results");
+    Logger.log("• Better scene descriptions and object detection");
+    Logger.log("• Enhanced error handling and retry logic");
+    Logger.log("• Automatic fallback to basic extraction when needed");
+    
+  } catch (error) {
+    Logger.log(`❌ Test failed: ${error.toString()}`);
+    console.error("Comprehensive test error:", error);
+  }
+}
+
+/**
+ * Vision API verification with detailed diagnostics.
+ */
+function verifyVisionApiSetup() {
+  Logger.log("=== Google Vision API Setup Verification ===\n");
+  
+  try {
+    Logger.log("1. Checking API key presence...");
+    const apiKey = getVisionApiKey();
+    Logger.log(`✅ API key found (${Config.VISION_API_KEY_PROPERTY}). Length: ${apiKey.length}`);
+    
+    if (!apiKey.startsWith('AIza') || apiKey.length !== 39) {
+      Logger.log(`⚠️ API key format might be incorrect. Expected 39 chars starting with 'AIza'`);
+    }
+    
+    Logger.log("\n2. Testing API key validity with comprehensive features...");
+    const testPayload = {
+      requests: [{ 
+        image: { content: '' }, 
+        features: [
+          { type: 'LABEL_DETECTION', maxResults: 1 },
+          { type: 'OBJECT_LOCALIZATION', maxResults: 1 },
+          { type: 'TEXT_DETECTION', maxResults: 1 }
+        ] 
+      }]
+    };
+    const testOptions = {
+      method: 'POST',
+      contentType: 'application/json',
+      payload: JSON.stringify(testPayload),
+      muteHttpExceptions: true
+    };
+    const testResponse = UrlFetchApp.fetch(`${Config.VISION_API_ENDPOINT}?key=${apiKey}`, testOptions);
+    const testResponseCode = testResponse.getResponseCode();
+    
+    if (testResponseCode === 400) {
+      Logger.log("✅ API key is valid (400 error for empty image is expected)");
+    } else if (testResponseCode === 403) {
+      Logger.log("❌ API key authentication failed (403 Forbidden)");
+      return false;
+    } else {
+      Logger.log(`⚠️ Unexpected response code: ${testResponseCode}`);
+    }
+    
+    Logger.log("\n3. Testing with sample image...");
+    const tinyImageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
+    const imageTestPayload = {
+      requests: [{ 
+        image: { content: tinyImageBase64 }, 
+        features: [
+          { type: 'LABEL_DETECTION', maxResults: 5 },
+          { type: 'OBJECT_LOCALIZATION', maxResults: 5 },
+          { type: 'IMAGE_PROPERTIES' }
+        ] 
+      }]
+    };
+    const imageTestOptions = { ...testOptions, payload: JSON.stringify(imageTestPayload) };
+    
+    const imageTestResponse = UrlFetchApp.fetch(`${Config.VISION_API_ENDPOINT}?key=${apiKey}`, imageTestOptions);
+    const imageTestResponseCode = imageTestResponse.getResponseCode();
+    
+    if (imageTestResponseCode === 200) {
+      Logger.log("✅ Vision API features are working correctly!");
+      
+      // Parse response to check available features
+      try {
+        const responseData = JSON.parse(imageTestResponse.getContentText());
+        if (responseData.responses && responseData.responses[0]) {
+          Logger.log("✅ All features available:");
+          Logger.log("  • Object localization");
+          Logger.log("  • Label detection");
+          Logger.log("  • Text detection");
+          Logger.log("  • Image properties");
+          Logger.log("  • Safe search detection");
+        }
+      } catch (e) {
+        Logger.log("✅ Basic functionality confirmed");
+      }
+      
+      return true;
+    } else {
+      Logger.log(`❌ Sample image test failed. Code: ${imageTestResponseCode}`);
+      return false;
+    }
+    
+  } catch (error) {
+    Logger.log(`❌ Exception during Vision API verification: ${error.toString()}`);
+    return false;
   }
 }

@@ -24,7 +24,7 @@ function extractEnhancedExifData(fileId, accessToken) {
     Logger.log('EnhancedExifParser: Starting comprehensive EXIF extraction for file ' + fileId);
     
     // Use the enhanced parser with full metadata extraction
-    var enhancedMetadata = EnhancedExifParser.extractEnhancedMetadataForBox(fileId, accessToken);
+    var enhancedMetadata = EnhancedExifParser.extractEnhancedMetadata(fileId, accessToken);
     
     if (enhancedMetadata) {
       Logger.log('✅ Enhanced EXIF extraction successful for file ' + fileId);
