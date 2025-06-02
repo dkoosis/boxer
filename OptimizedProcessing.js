@@ -564,7 +564,7 @@ function processAllTestFolderImages() {
       });
       const fileDetails = JSON.parse(detailsResponse.getContentText());
       
-      const metadata = MetadataExtraction.extractEnhancedMetadata(fileDetails, accessToken);
+      const metadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
       BoxFileOperations.applyMetadata(image.id, metadata, accessToken);
       
       Utilities.sleep(2000);

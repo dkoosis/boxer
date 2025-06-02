@@ -9,40 +9,46 @@
  * @param {string} accessToken Valid Box access token
  * @returns {object|null} Comprehensive EXIF data object or null on error
  */
-function extractMetadata(fileId, accessToken) {
+function extractMetadata(fileId, accessToken, filename) {
+  const fileDisplayName = filename || fileId; // Use filename if provided, else fileId
+
   if (!accessToken || !fileId) {
     Logger.log('ERROR: extractMetadata - fileId and accessToken are required');
     return null;
   }
-  
+
   try {
-    Logger.log('EnhancedExifParser: Starting comprehensive EXIF extraction for file ' + fileId);
-    
-    // Use the enhanced parser with full metadata extraction
-    var enhancedMetadata = EnhancedExifParser.extractMetadata(fileId, accessToken);
-    
-    if (enhancedMetadata) {
-      Logger.log('✅ Enhanced EXIF extraction successful for file ' + fileId);
+    Logger.log(`  Extracting EXIF data for ${fileDisplayName}...`);
+
+    // Use the enhanced parser with full metadata extraction, passing filename
+    var enhancedMetadataContainer = EnhancedExifParser.extractMetadata(fileId, accessToken, filename); // Pass filename here
+
+    if (enhancedMetadataContainer) { // This is the Box-formatted metadata from the parser
+      Logger.log(`  ✅ EXIF data processed for ${fileDisplayName}.`);
+      // The container from EnhancedExifParser is already Box-formatted
+      // but we need to add hasExif, enhanced, extractionMethod for this function's contract
       return {
-        hasExif: true,
-        enhanced: true,
-        metadata: enhancedMetadata,
-        extractionMethod: 'comprehensive'
+        hasExif: true, // Or determine this based on actual data in enhancedMetadataContainer
+        enhanced: true, // Assuming parser is always "enhanced"
+        metadata: enhancedMetadataContainer, // This is the payload for Box
+        extractionMethod: 'comprehensive_parser'
       };
     } else {
-      Logger.log('⚠️ No enhanced EXIF data found, falling back to basic extraction');
-      return extractBasicExifData(fileId, accessToken);
+      Logger.log(`  ⚠️ No EXIF data found or parser error for ${fileDisplayName}, falling back if basic extraction was intended.`);
+      // Fallback to basic extraction (if you still want it, otherwise remove)
+      // return extractBasicExifData(fileId, accessToken, filename); // Pass filename if basic is kept
+      return { hasExif: false, fileInfo: {filename: fileDisplayName}, extractionMethod: 'parser_returned_null' };
     }
-    
+
   } catch (error) {
-    Logger.log('EnhancedExifParser: Error in enhanced extraction for file ' + fileId + ': ' + error.toString());
-    console.error('Enhanced EXIF extraction error:', error);
-    
-    // Fallback to basic extraction
-    return extractBasicExifData(fileId, accessToken);
+    Logger.log(`  Error during EXIF data extraction for ${fileDisplayName}: ${error.toString()}`);
+    console.error(`EXIF extraction error for ${fileDisplayName}:`, error);
+
+    // Fallback to basic extraction (if you still want it, otherwise remove)
+    // return extractBasicExifData(fileId, accessToken, filename); // Pass filename if basic is kept
+    return { hasExif: false, fileInfo: {filename: fileDisplayName}, error: error.toString() };
   }
 }
-
 /**
  * Fallback basic EXIF extraction for compatibility.
  * @param {string} fileId Box file ID

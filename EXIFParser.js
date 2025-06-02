@@ -720,67 +720,70 @@ function convertToBoxFormat_(metadata) { // metadata is the object from organize
    * @param {string} accessToken Valid Box access token
    * @returns {object|null} Comprehensive metadata or null on error
    */
-  ns.extractMetadata = function(fileId, accessToken) {
-    if (!fileId || !accessToken) {
-      Logger.log('ERROR: extractMetadata requires fileId and accessToken');
-      return null;
-    }
-    
-    var utils = initUtils_();
-    
-    try {
-      Logger.log('Starting comprehensive metadata extraction for file ' + fileId);
-      
-      // Download file with retry logic
-      var downloadUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/content';
-      var response = utils.rateLimitExpBackoff(function() {
-        return UrlFetchApp.fetch(downloadUrl, {
-          headers: { 'Authorization': 'Bearer ' + accessToken },
-          muteHttpExceptions: true
-        });
+ns.extractMetadata = function(fileId, accessToken, filename) {
+  const fileDisplayName = filename || fileId;
+
+  if (!fileId || !accessToken) {
+    Logger.log('ERROR: EnhancedExifParser.extractMetadata requires fileId and accessToken');
+    return null;
+  }
+
+  var utils = initUtils_();
+
+  try {
+    Logger.log(`    Parsing file structure for EXIF data from ${fileDisplayName}...`);
+
+    var downloadUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/content';
+    var response = utils.rateLimitExpBackoff(function() {
+      return UrlFetchApp.fetch(downloadUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
       });
-      
-      if (response.getResponseCode() !== 200) {
-        Logger.log('Failed to download file ' + fileId + ' for metadata extraction');
-        return null;
-      }
-      
-      var imageBlob = response.getBlob();
-      var imageBytes = new Uint8Array(imageBlob.getBytes());
-      
-      // Extract basic file information
-      var basicInfo = extractBasicFileInfo_(imageBytes);
-      Logger.log('File format detected: ' + (basicInfo.format || 'Unknown'));
-      
-      var metadata = null;
-      
-      // Try format-specific extraction
-      if (basicInfo.format === 'JPEG') {
-        metadata = extractJpegMetadata_(imageBytes, basicInfo);
-      } else if (['PNG', 'WEBP', 'HEIC', 'AVIF', 'TIFF'].indexOf(basicInfo.format) !== -1) {
-        metadata = extractOtherFormatMetadata_(imageBytes, basicInfo);
-      } else {
-        // Fallback: still try JPEG extraction in case format detection failed
-        metadata = extractJpegMetadata_(imageBytes, basicInfo);
-        if (!metadata || !metadata.hasExif) {
-          // Last resort: just return basic file info
-          metadata = { hasExif: false, fileInfo: basicInfo };
-        }
-      }
-      
-      if (metadata) {
-        Logger.log('✅ Comprehensive metadata extraction successful for file ' + fileId);
-        return convertToBoxFormat_(metadata);
-      } else {
-        Logger.log('⚠️ No metadata extracted for file ' + fileId);
-        return null;
-      }
-      
-    } catch (error) {
-      Logger.log('ERROR: Comprehensive metadata extraction failed for file ' + fileId + ': ' + error.toString());
+    });
+
+    if (response.getResponseCode() !== 200) {
+      Logger.log(`    Failed to download ${fileDisplayName} for metadata extraction. HTTP Code: ${response.getResponseCode()}`);
       return null;
     }
-  };
+
+    var imageBlob = response.getBlob();
+    var imageBytes = new Uint8Array(imageBlob.getBytes());
+
+    var basicInfo = extractBasicFileInfo_(imageBytes);
+    basicInfo.filename = fileDisplayName; // Add filename to basicInfo for convertToBoxFormat_
+    Logger.log(`      Format detected: ${(basicInfo.format || 'Unknown')} for ${fileDisplayName}.`);
+
+    var metadataFromParser = null; // Renamed to avoid conflict
+
+    if (basicInfo.format === 'JPEG') {
+      metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
+    } else if (['PNG', 'WEBP', 'HEIC', 'AVIF', 'TIFF'].indexOf(basicInfo.format) !== -1) {
+      metadataFromParser = extractOtherFormatMetadata_(imageBytes, basicInfo);
+    } else {
+      metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
+      if (!metadataFromParser || !metadataFromParser.hasExif) {
+        metadataFromParser = { hasExif: false, fileInfo: basicInfo };
+      }
+    }
+
+    if (metadataFromParser) {
+      Logger.log(`    ✅ File parsed and EXIF structure processed for ${fileDisplayName}.`);
+      return convertToBoxFormat_(metadataFromParser); // This now returns the Box-ready metadata
+    } else {
+      Logger.log(`    ⚠️ No processable EXIF structure found in ${fileDisplayName}.`);
+      // Return a minimal Box-formatted object even if no EXIF, based on basicInfo
+      return convertToBoxFormat_({ hasExif: false, fileInfo: basicInfo });
+    }
+
+  } catch (error) {
+    Logger.log(`    ERROR: Parsing EXIF from ${fileDisplayName} failed: ${error.toString()}`);
+    // Return a minimal Box-formatted object on error, possibly with an error note
+    const errorBasicInfo = { filename: fileDisplayName, fileSize: imageBytes ? imageBytes.length : 0, format: 'unknown' };
+    let boxErrorFormat = convertToBoxFormat_({ hasExif: false, fileInfo: errorBasicInfo });
+    boxErrorFormat.technicalNotes = (boxErrorFormat.technicalNotes || "") + ` EXIF Parsing Error: ${error.message}`;
+    return boxErrorFormat;
+  }
+};
   
   /**
    * Extract metadata from JPEG files

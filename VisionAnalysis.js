@@ -258,19 +258,19 @@ function getColorName(r, g, b) {
  * @param {string} accessToken Valid Box access token
  * @returns {object|null} Enhanced analysis object or error object
  */
-function analyzeImageWithVisionImproved(fileId, accessToken) {
+function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
+  const fileDisplayName = filename || fileId; // Use filename if provided, else fileId
+
   if (!accessToken || !fileId) {
     Logger.log('ERROR: analyzeImageWithVisionImproved - fileId and accessToken required');
     return { error: 'MISSING_PARAMETERS', message: 'File ID and Access Token are required.' };
   }
-  
+
   try {
     const visionApiKey = getVisionApiKey();
-    
-    // Use cUseful for robust download with retry
-    var utils = cUseful;
-    
-    const downloadUrl = `${Config.BOX_API_BASE_URL}/files/${fileId}/content`;
+    var utils = cUseful; // Assuming cUseful is globally available or initialized
+
+    const downloadUrl = `<span class="math-inline">\{Config\.BOX\_API\_BASE\_URL\}/files/</span>{fileId}/content`;
     const downloadResponse = utils.rateLimitExpBackoff(function() {
       return UrlFetchApp.fetch(downloadUrl, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
@@ -280,28 +280,27 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
 
     const downloadResponseCode = downloadResponse.getResponseCode();
     if (downloadResponseCode !== 200) {
-      Logger.log(`Failed to download file ${fileId} for Vision API. Code: ${downloadResponseCode}`);
-      return { error: 'BOX_DOWNLOAD_FAILED', code: downloadResponseCode, message: `Failed to download file from Box (ID: ${fileId}).`};
+      Logger.log(`  Failed to download ${fileDisplayName} for Vision API. Code: ${downloadResponseCode}`);
+      return { error: 'BOX_DOWNLOAD_FAILED', code: downloadResponseCode, message: `Failed to download file from Box (ID: ${fileId}, Name: ${fileDisplayName}).`};
     }
 
     const imageBlob = downloadResponse.getBlob();
     const imageBytes = imageBlob.getBytes();
     const imageSize = imageBytes.length;
-    
+
     if (imageSize > Config.MAX_VISION_API_FILE_SIZE_BYTES) {
       const sizeMB = Math.round(imageSize / (1024 * 1024) * 10) / 10;
-      Logger.log(`Image ${fileId} too large for Vision API (${sizeMB}MB)`);
-      return { error: 'FILE_TOO_LARGE', sizeMB: sizeMB, message: `File size ${sizeMB}MB exceeds Vision API limit.` };
+      Logger.log(`  Image <span class="math-inline">\{fileDisplayName\} too large for Vision API \(</span>{sizeMB}MB)`);
+      return { error: 'FILE_TOO_LARGE', sizeMB: sizeMB, message: `File ${fileDisplayName} size ${sizeMB}MB exceeds Vision API limit.` };
     }
-    
+
     if (imageSize === 0) {
-      Logger.log(`Image ${fileId} is empty (0 bytes)`);
-      return { error: 'FILE_EMPTY', message: 'Image file is empty.'};
+      Logger.log(`  Image ${fileDisplayName} is empty (0 bytes)`);
+      return { error: 'FILE_EMPTY', message: `Image file ${fileDisplayName} is empty.`};
     }
 
     const base64Image = Utilities.base64Encode(imageBytes);
-    
-    // Enhanced Vision API request with more features
+
     const visionApiPayload = {
       requests: [{
         image: { content: base64Image },
@@ -315,60 +314,61 @@ function analyzeImageWithVisionImproved(fileId, accessToken) {
         ]
       }]
     };
-    
+
     const visionApiOptions = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       payload: JSON.stringify(visionApiPayload),
       muteHttpExceptions: true
     };
-    
-    // Use retry logic for Vision API call
+
     const visionResponse = utils.rateLimitExpBackoff(function() {
-      return UrlFetchApp.fetch(`${Config.VISION_API_ENDPOINT}?key=${visionApiKey}`, visionApiOptions);
+      return UrlFetchApp.fetch(`<span class="math-inline">\{Config\.VISION\_API\_ENDPOINT\}?key\=</span>{visionApiKey}`, visionApiOptions);
     });
-    
+
     const visionResponseCode = visionResponse.getResponseCode();
     const visionResponseText = visionResponse.getContentText();
-    
+
     if (visionResponseCode === 200) {
       const visionData = JSON.parse(visionResponseText);
       if (visionData.responses && visionData.responses[0]) {
         if (visionData.responses[0].error) {
-          Logger.log(`Vision API returned error for ${fileId}: ${JSON.stringify(visionData.responses[0].error)}`);
+          Logger.log(`  Vision API returned error for ${fileDisplayName}: ${JSON.stringify(visionData.responses[0].error)}`);
           return { error: 'VISION_API_RESPONSE_ERROR', details: visionData.responses[0].error, message: visionData.responses[0].error.message };
         }
-        
-        // Enhanced parsing with categorization
+
         var analysis = parseVisionApiResponse(visionData.responses[0]);
-        
-        // Add face detection results if available
+
         if (visionData.responses[0].faceAnnotations) {
           analysis.faces = visionData.responses[0].faceAnnotations.length;
-          if (analysis.faces > 0) {
+          if (analysis.faces > 0 && analysis.categories && analysis.categories.people) { // Check categories.people exists
             analysis.categories.people.push('Human faces detected');
+          } else if (analysis.faces > 0 && analysis.categories) { // If categories.people doesn't exist, initialize it
+            analysis.categories.people = ['Human faces detected'];
+          } else if (analysis.faces > 0 && !analysis.categories) { // If categories itself doesn't exist
+             analysis.categories = { people: ['Human faces detected']};
           }
         }
-        
-        Logger.log(`✅ Enhanced Vision API analysis completed for ${fileId}`);
+
+        Logger.log(`  ✅ Vision API analysis completed for ${fileDisplayName}.`);
         return analysis;
-        
+
       } else {
-        Logger.log(`Vision API returned 200 but empty response for ${fileId}`);
-        return { error: 'VISION_API_EMPTY_RESPONSE', message: 'Vision API returned 200 but response was empty or malformed.' };
+        Logger.log(`  Vision API returned 200 but empty/malformed response for ${fileDisplayName}.`);
+        return { error: 'VISION_API_EMPTY_RESPONSE', message: `Vision API returned 200 for ${fileDisplayName} but response was empty or malformed.` };
       }
     } else {
-      Logger.log(`Vision API HTTP Error ${visionResponseCode} for ${fileId}: ${visionResponseText.substring(0,500)}`);
+      Logger.log(`  Vision API HTTP Error ${visionResponseCode} for ${fileDisplayName}: ${visionResponseText.substring(0,500)}`);
       let errorDetails = visionResponseText;
       try {
         errorDetails = JSON.parse(visionResponseText).error || errorDetails;
       } catch (e) { /* Use raw text */ }
-      return { error: 'VISION_API_HTTP_ERROR', code: visionResponseCode, message: `Vision API request failed with HTTP ${visionResponseCode}.`, details: errorDetails };
+      return { error: 'VISION_API_HTTP_ERROR', code: visionResponseCode, message: `Vision API request for ${fileDisplayName} failed with HTTP ${visionResponseCode}.`, details: errorDetails };
     }
-    
+
   } catch (error) {
-    Logger.log(`Exception during enhanced Vision API analysis for ${fileId}: ${error.toString()}`);
-    console.error(`Exception analyzing image ${fileId} with Vision API:`, error);
+    Logger.log(`  Exception during Vision API analysis for ${fileDisplayName}: ${error.toString()}`);
+    console.error(`Exception analyzing image ${fileDisplayName} with Vision API:`, error);
     return { error: 'SCRIPT_EXCEPTION', message: error.toString() };
   }
 }

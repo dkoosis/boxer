@@ -455,54 +455,63 @@ var MetadataExtraction = (function() {
    * @param {string} accessToken Valid Box access token
    * @returns {object} Enhanced metadata object
    */
-  ns.extractMetadata = function(fileDetails, accessToken) {
-    // Start with basic metadata
-    var basicMetadata = ns.extractComprehensiveMetadata(fileDetails);
-    var combinedMetadata = JSON.parse(JSON.stringify(basicMetadata)); // Deep copy
+ns.extractMetadata = function(fileDetails, accessToken) {
+  // Extract filename and fileId from fileDetails for use in logging and calls
+  const filename = fileDetails.name;
+  const fileId = fileDetails.id;
 
-    // Extract EXIF data
-    var exifData = extractMetadata(fileDetails.id, accessToken);
-    if (exifData && exifData.hasExif) {
-      if (exifData.cameraModel) combinedMetadata.cameraModel = exifData.cameraModel;
-      if (exifData.dateTaken) combinedMetadata.dateTaken = exifData.dateTaken;
-      combinedMetadata.processingStage = Config.PROCESSING_STAGE_EXIF;
-    }
-    
-    // Analyze with Vision API
-    var visionAnalysis = analyzeImageWithVisionImproved(fileDetails.id, accessToken);
-    
-    if (visionAnalysis && !visionAnalysis.error) {
-      combinedMetadata.aiDetectedObjects = visionAnalysis.objects ? 
-        visionAnalysis.objects.map(function(obj) { return obj.name + ' (' + obj.confidence + ')'; }).join('; ') : '';
-      combinedMetadata.aiSceneDescription = visionAnalysis.sceneDescription || '';
-      combinedMetadata.extractedText = visionAnalysis.text ? 
-        visionAnalysis.text.replace(/\n/g, ' ').substring(0, Config.MAX_TEXT_EXTRACTION_LENGTH) : '';
-      combinedMetadata.dominantColors = visionAnalysis.dominantColors ? 
-        visionAnalysis.dominantColors.map(function(c) { return c.rgb + ' (' + c.score + ', ' + c.pixelFraction + ')'; }).join('; ') : '';
-      combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
-      combinedMetadata.processingStage = Config.PROCESSING_STAGE_AI;
-      
-      // Apply AI-driven content enhancements
-      var aiEnhancements = ns.enhanceContentAnalysisWithAI(combinedMetadata, visionAnalysis, fileDetails.name, combinedMetadata.folderPath);
-      Object.keys(aiEnhancements).forEach(function(key) {
-        combinedMetadata[key] = aiEnhancements[key];
-      });
-      
-    } else if (visionAnalysis && visionAnalysis.error) {
-      Logger.log('Vision API error for ' + fileDetails.name + ': ' + (visionAnalysis.message || visionAnalysis.error));
-      combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
-        'Vision API Error: ' + (visionAnalysis.message || visionAnalysis.error);
-    }
+  // Start with basic metadata
+  var basicMetadata = ns.extractComprehensiveMetadata(fileDetails); // This function primarily uses fileDetails
+  var combinedMetadata = JSON.parse(JSON.stringify(basicMetadata)); // Deep copy
 
-    // Finalize processing metadata
-    combinedMetadata.lastProcessedDate = new Date().toISOString();
-    combinedMetadata.processingVersion = Config.PROCESSING_VERSION_ENHANCED;
-    combinedMetadata.buildNumber = Config.getCurrentBuild();
-    
-    return combinedMetadata;
-  };
-  
-  /**
+  // Extract EXIF data, passing filename for logging
+  var exifData = extractMetadata(fileId, accessToken, filename); // Call to ExifExtraction.js#extractMetadata
+  if (exifData && exifData.hasExif) {
+    if (exifData.cameraModel) combinedMetadata.cameraModel = exifData.cameraModel;
+    if (exifData.dateTaken) combinedMetadata.dateTaken = exifData.dateTaken; // Ensure this is the correct field from your exifData structure
+    // If your exifData.metadata is the object to merge, adjust accordingly
+    if (exifData.metadata) { // Assuming exifData.metadata holds the fields
+        if (exifData.metadata.cameraModel) combinedMetadata.cameraModel = exifData.metadata.cameraModel;
+        if (exifData.metadata.dateTaken) combinedMetadata.dateTaken = exifData.metadata.dateTaken;
+        // Add other relevant EXIF fields from exifData.metadata to combinedMetadata
+    }
+    combinedMetadata.processingStage = Config.PROCESSING_STAGE_EXIF;
+  }
+
+  // Analyze with Vision API, passing filename for logging
+  var visionAnalysis = analyzeImageWithVisionImproved(fileId, accessToken, filename); // Call to VisionAnalysis.js#analyzeImageWithVisionImproved
+
+  if (visionAnalysis && !visionAnalysis.error) {
+    combinedMetadata.aiDetectedObjects = visionAnalysis.objects ? 
+      visionAnalysis.objects.map(function(obj) { return obj.name + ' (' + obj.confidence + ')'; }).join('; ') : '';
+    combinedMetadata.aiSceneDescription = visionAnalysis.sceneDescription || '';
+    combinedMetadata.extractedText = visionAnalysis.text ? 
+      visionAnalysis.text.replace(/\n/g, ' ').substring(0, Config.MAX_TEXT_EXTRACTION_LENGTH) : '';
+    combinedMetadata.dominantColors = visionAnalysis.dominantColors ? 
+      visionAnalysis.dominantColors.map(function(c) { return c.rgb + ' (' + c.score + ', ' + c.pixelFraction + ')'; }).join('; ') : '';
+    combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
+    combinedMetadata.processingStage = Config.PROCESSING_STAGE_AI;
+
+    // Apply AI-driven content enhancements
+    var aiEnhancements = ns.enhanceContentAnalysisWithAI(combinedMetadata, visionAnalysis, filename, combinedMetadata.folderPath);
+    Object.keys(aiEnhancements).forEach(function(key) {
+      combinedMetadata[key] = aiEnhancements[key];
+    });
+
+  } else if (visionAnalysis && visionAnalysis.error) {
+    Logger.log(`  Vision API error for ${filename}: ${(visionAnalysis.message || visionAnalysis.error)}`);
+    combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
+      'Vision API Error: ' + (visionAnalysis.message || visionAnalysis.error);
+  }
+
+  // Finalize processing metadata
+  combinedMetadata.lastProcessedDate = new Date().toISOString();
+  combinedMetadata.processingVersion = Config.PROCESSING_VERSION_ENHANCED; // Or dynamically set based on what was successful
+  combinedMetadata.buildNumber = Config.getCurrentBuild();
+
+  return combinedMetadata;
+};
+ /**
    * Enhances metadata with AI-driven insights from Vision API.
    * @param {object} basicMetadata Base metadata object
    * @param {object} visionAnalysis Vision API analysis results
