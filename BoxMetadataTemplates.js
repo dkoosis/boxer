@@ -422,3 +422,190 @@ function fetchAndLogSingleTemplateSchema(templateKey, scope, accessToken) {
 function runTestShowAllTemplateSchemas() {
   showAllMetadataTemplateSchemas();
 }
+
+/**
+ * Adds GPS location fields to the existing Box metadata template.
+ * Add this function to your BoxMetadataTemplates.js file.
+ * 
+ * @param {string} accessToken Valid Box access token
+ * @returns {boolean} Success status
+ */
+function addGpsFieldsToTemplate(accessToken) {
+  if (!accessToken) {
+    Logger.log('ERROR: addGpsFieldsToTemplate - accessToken is required');
+    return false;
+  }
+  
+  Logger.log('=== Adding GPS Location Fields to Box Template ===');
+  
+  try {
+    // Define the new GPS fields to add
+    const newGpsFields = [
+      {
+        op: 'addField',
+        data: {
+          key: 'gpsLocation',
+          displayName: 'GPS Location',
+          type: 'string',
+          description: 'Full formatted location from GPS coordinates'
+        }
+      },
+      {
+        op: 'addField', 
+        data: {
+          key: 'gpsVenue',
+          displayName: 'Venue/Address',
+          type: 'string',
+          description: 'Specific venue, building, or street address'
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'gpsNeighborhood', 
+          displayName: 'Neighborhood',
+          type: 'string',
+          description: 'Neighborhood or district'
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'gpsCity',
+          displayName: 'City', 
+          type: 'string',
+          description: 'City or locality'
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'gpsRegion',
+          displayName: 'State/Region',
+          type: 'string', 
+          description: 'State, borough, or administrative region'
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'gpsCountry',
+          displayName: 'Country',
+          type: 'string',
+          description: 'Country where photo was taken'
+        }
+      }
+    ];
+    
+    // Check if template exists first
+    const existingTemplate = checkTemplateExists(Config.BOX_METADATA_TEMPLATE_KEY, accessToken);
+    if (!existingTemplate) {
+      Logger.log('❌ Template not found. Create the base template first.');
+      return false;
+    }
+    
+    Logger.log('✅ Found existing template: ' + existingTemplate.displayName);
+    Logger.log('📝 Adding ' + newGpsFields.length + ' GPS location fields...');
+    
+    // Check which fields already exist to avoid duplicates
+    const existingFieldKeys = existingTemplate.fields ? 
+      existingTemplate.fields.map(f => f.key) : [];
+    
+    const fieldsToAdd = newGpsFields.filter(field => 
+      !existingFieldKeys.includes(field.data.key)
+    );
+    
+    if (fieldsToAdd.length === 0) {
+      Logger.log('ℹ️ All GPS fields already exist in template');
+      return true;
+    }
+    
+    Logger.log('➕ Adding ' + fieldsToAdd.length + ' new fields: ' + 
+              fieldsToAdd.map(f => f.data.key).join(', '));
+    
+    // Update template using Box API
+    const updateUrl = `${Config.BOX_API_BASE_URL}/metadata_templates/${Config.BOX_METADATA_SCOPE}/${Config.BOX_METADATA_TEMPLATE_KEY}/schema`;
+    
+    const updateOptions = {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json-patch+json'
+      },
+      payload: JSON.stringify(fieldsToAdd),
+      muteHttpExceptions: true
+    };
+    
+    const response = UrlFetchApp.fetch(updateUrl, updateOptions);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    
+    if (responseCode === 200) {
+      const updatedTemplate = JSON.parse(responseText);
+      Logger.log('✅ Successfully updated template!');
+      Logger.log('📊 Template now has ' + updatedTemplate.fields.length + ' total fields');
+      
+      // Log the new fields that were added
+      fieldsToAdd.forEach(field => {
+        Logger.log('  ➕ Added: ' + field.data.displayName + ' (' + field.data.key + ')');
+      });
+      
+      return true;
+      
+    } else {
+      Logger.log('❌ Failed to update template. HTTP Code: ' + responseCode);
+      Logger.log('Response: ' + responseText);
+      return false;
+    }
+    
+  } catch (error) {
+    Logger.log('❌ Exception updating template: ' + error.toString());
+    return false;
+  }
+}
+
+/**
+ * Quick test function to run the GPS fields addition
+ */
+function testAddGpsFields() {
+  Logger.log('=== Testing GPS Fields Addition ===');
+  
+  try {
+    const accessToken = getValidAccessToken();
+    if (!accessToken) {
+      Logger.log('❌ No access token available');
+      return;
+    }
+    
+    const success = addGpsFieldsToTemplate(accessToken);
+    
+    if (success) {
+      Logger.log('🎉 GPS fields successfully added to template!');
+      Logger.log('💡 Next steps:');
+      Logger.log('   1. Test geocoding with a sample file');
+      Logger.log('   2. Update your processing functions to populate these fields');
+    } else {
+      Logger.log('❌ Failed to add GPS fields. Check the logs above.');
+    }
+    
+  } catch (error) {
+    Logger.log('❌ Test failed: ' + error.toString());
+  }
+}
+
+/**
+ * Show current template fields for verification
+ */
+function showCurrentTemplateFields() {
+  const accessToken = getValidAccessToken();
+  const template = checkTemplateExists(Config.BOX_METADATA_TEMPLATE_KEY, accessToken);
+  
+  if (template && template.fields) {
+    Logger.log('📋 Current template fields (' + template.fields.length + ' total):');
+    template.fields.forEach((field, index) => {
+      Logger.log(`  ${index + 1}. ${field.displayName} (${field.key}) - ${field.type}`);
+    });
+  } else {
+    Logger.log('❌ Could not retrieve template fields');
+  }
+}

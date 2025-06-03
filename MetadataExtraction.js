@@ -62,9 +62,134 @@ var MetadataExtraction = (function() {
   };
   
   /**
-   * Content analysis utilities using Bruce's patterns.
+   * Gets the Geocoding API key from Script Properties.
+   * @returns {string|null} API key or null if not found
    * @private
    */
+  function getGeocodingApiKey_() {
+    try {
+      return Config.SCRIPT_PROPERTIES.getProperty('GEOCODE_API_KEY');
+    } catch (error) {
+      Logger.log('Error getting geocoding API key: ' + error.toString());
+      return null;
+    }
+  }
+  
+  /**
+   * Reverse geocodes GPS coordinates to human-readable location.
+   * @param {number} latitude GPS latitude
+   * @param {number} longitude GPS longitude
+   * @returns {object|null} Location data or null on error
+   * @private
+   */
+  function reverseGeocode_(latitude, longitude) {
+    var apiKey = getGeocodingApiKey_();
+    if (!apiKey) {
+      Logger.log('⚠️ No GEOCODE_API_KEY found - skipping reverse geocoding');
+      return null;
+    }
+    
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+      Logger.log('⚠️ Invalid GPS coordinates for geocoding');
+      return null;
+    }
+    
+    try {
+      Logger.log('🗺️ Reverse geocoding: ' + latitude + ', ' + longitude);
+      
+      var geocodeUrl = 'https://maps.googleapis.com/maps/api/geocode/json?' +
+                      'latlng=' + latitude + ',' + longitude +
+                      '&key=' + apiKey;
+      
+      var utils = initUtils_();
+      var response = utils.rateLimitExpBackoff(function() {
+        return UrlFetchApp.fetch(geocodeUrl, {
+          method: 'GET',
+          muteHttpExceptions: true
+        });
+      });
+      
+      var responseCode = response.getResponseCode();
+      if (responseCode !== 200) {
+        Logger.log('❌ Geocoding API error: HTTP ' + responseCode);
+        return null;
+      }
+      
+      var data = JSON.parse(response.getContentText());
+      if (data.status !== 'OK' || !data.results || data.results.length === 0) {
+        Logger.log('❌ Geocoding failed: ' + (data.status || 'No results'));
+        return null;
+      }
+      
+      // Parse the best result (first one is usually most accurate)
+      var result = data.results[0];
+      var location = {
+        gpsLocation: result.formatted_address || '',
+        gpsVenue: '',
+        gpsNeighborhood: '', 
+        gpsCity: '',
+        gpsRegion: '',
+        gpsCountry: ''
+      };
+      
+      // Parse address components for fine-grained location data
+      if (result.address_components) {
+        result.address_components.forEach(function(component) {
+          var types = component.types || [];
+          var longName = component.long_name || '';
+          var shortName = component.short_name || '';
+          
+          // Venue/Address (street number + route)
+          if (types.indexOf('street_number') !== -1) {
+            location.gpsVenue = longName + ' ';
+          } else if (types.indexOf('route') !== -1) {
+            location.gpsVenue += longName;
+          } else if (types.indexOf('premise') !== -1 || types.indexOf('establishment') !== -1) {
+            location.gpsVenue = longName;
+          }
+          
+          // Neighborhood
+          if (types.indexOf('neighborhood') !== -1 || types.indexOf('sublocality') !== -1) {
+            location.gpsNeighborhood = longName;
+          }
+          
+          // City
+          if (types.indexOf('locality') !== -1) {
+            location.gpsCity = longName;
+          }
+          
+          // Region (State, Borough, etc.)
+          if (types.indexOf('administrative_area_level_1') !== -1) {
+            location.gpsRegion = longName;
+          } else if (types.indexOf('sublocality_level_1') !== -1 && !location.gpsRegion) {
+            // For NYC boroughs, which sometimes appear as sublocality_level_1
+            location.gpsRegion = longName;
+          }
+          
+          // Country
+          if (types.indexOf('country') !== -1) {
+            location.gpsCountry = longName;
+          }
+        });
+      }
+      
+      // Clean up venue field
+      location.gpsVenue = location.gpsVenue.trim();
+      
+      Logger.log('✅ Geocoded to: ' + location.gpsLocation);
+      if (location.gpsVenue) Logger.log('   📍 Venue: ' + location.gpsVenue);
+      if (location.gpsNeighborhood) Logger.log('   🏘️ Neighborhood: ' + location.gpsNeighborhood);
+      if (location.gpsCity) Logger.log('   🏙️ City: ' + location.gpsCity);
+      if (location.gpsRegion) Logger.log('   🗺️ Region: ' + location.gpsRegion);
+      if (location.gpsCountry) Logger.log('   🌍 Country: ' + location.gpsCountry);
+      
+      return location;
+      
+    } catch (error) {
+      Logger.log('❌ Reverse geocoding error: ' + error.toString());
+      return null;
+    }
+  }
   var ContentAnalyzer_ = {
     /**
      * Maps location keywords to enum values.
@@ -228,116 +353,121 @@ var MetadataExtraction = (function() {
     }
   };
   
-  // Add this function to MetadataExtraction.js
-
-/**
- * Validates and sanitizes metadata before sending to Box
- * @param {object} metadata Raw metadata object
- * @returns {object} Clean metadata object
- */
-ns.sanitizeMetadataForBox = function(metadata) {
-  var clean = {};
-  
-  try {
-    // String fields
-    if (metadata.originalFilename) clean.originalFilename = String(metadata.originalFilename);
-    if (metadata.folderPath) clean.folderPath = String(metadata.folderPath);
-    if (metadata.fileFormat) clean.fileFormat = String(metadata.fileFormat);
-    if (metadata.cameraModel) clean.cameraModel = String(metadata.cameraModel);
-    if (metadata.subject) clean.subject = String(metadata.subject);
-    if (metadata.aspectRatio) clean.aspectRatio = String(metadata.aspectRatio);
+  /**
+   * Validates and sanitizes metadata before sending to Box
+   * @param {object} metadata Raw metadata object
+   * @returns {object} Clean metadata object
+   */
+  ns.sanitizeMetadataForBox = function(metadata) {
+    var clean = {};
     
-    // Float fields - ensure they're numbers
-    if (typeof metadata.fileSizeMB === 'number' && !isNaN(metadata.fileSizeMB)) {
-      clean.fileSizeMB = Number(metadata.fileSizeMB);
-    }
-    if (typeof metadata.imageWidth === 'number' && !isNaN(metadata.imageWidth)) {
-      clean.imageWidth = Number(metadata.imageWidth);
-    }
-    if (typeof metadata.imageHeight === 'number' && !isNaN(metadata.imageHeight)) {
-      clean.imageHeight = Number(metadata.imageHeight);
-    }
-    if (typeof metadata.megapixels === 'number' && !isNaN(metadata.megapixels)) {
-      clean.megapixels = Number(metadata.megapixels);
-    }
-    
-    // GPS coordinates
-    if (typeof metadata.gpsLatitude === 'number' && !isNaN(metadata.gpsLatitude)) {
-      clean.gpsLatitude = Number(metadata.gpsLatitude);
-    }
-    if (typeof metadata.gpsLongitude === 'number' && !isNaN(metadata.gpsLongitude)) {
-      clean.gpsLongitude = Number(metadata.gpsLongitude);
-    }
-    if (typeof metadata.gpsAltitude === 'number' && !isNaN(metadata.gpsAltitude)) {
-      clean.gpsAltitude = Number(metadata.gpsAltitude);
-    }
-    
-    // Date fields - ensure proper format
-    if (metadata.dateTaken) {
-      try {
-        var date = new Date(metadata.dateTaken);
-        if (!isNaN(date.getTime())) {
-          clean.dateTaken = date.toISOString().split('T')[0]; // YYYY-MM-DD
-        }
-      } catch (e) {
-        // Skip invalid dates
+    try {
+      // String fields
+      if (metadata.originalFilename) clean.originalFilename = String(metadata.originalFilename);
+      if (metadata.folderPath) clean.folderPath = String(metadata.folderPath);
+      if (metadata.fileFormat) clean.fileFormat = String(metadata.fileFormat);
+      if (metadata.cameraModel) clean.cameraModel = String(metadata.cameraModel);
+      if (metadata.subject) clean.subject = String(metadata.subject);
+      if (metadata.aspectRatio) clean.aspectRatio = String(metadata.aspectRatio);
+      
+      // Float fields - ensure they're numbers
+      if (typeof metadata.fileSizeMB === 'number' && !isNaN(metadata.fileSizeMB)) {
+        clean.fileSizeMB = Number(metadata.fileSizeMB);
       }
-    }
-    
-    if (metadata.lastProcessedDate) {
-      try {
-        var procDate = new Date(metadata.lastProcessedDate);
-        if (!isNaN(procDate.getTime())) {
-          clean.lastProcessedDate = procDate.toISOString().split('T')[0];
-        }
-      } catch (e) {
-        clean.lastProcessedDate = new Date().toISOString().split('T')[0];
+      if (typeof metadata.imageWidth === 'number' && !isNaN(metadata.imageWidth)) {
+        clean.imageWidth = Number(metadata.imageWidth);
       }
+      if (typeof metadata.imageHeight === 'number' && !isNaN(metadata.imageHeight)) {
+        clean.imageHeight = Number(metadata.imageHeight);
+      }
+      if (typeof metadata.megapixels === 'number' && !isNaN(metadata.megapixels)) {
+        clean.megapixels = Number(metadata.megapixels);
+      }
+      
+      // GPS coordinates
+      if (typeof metadata.gpsLatitude === 'number' && !isNaN(metadata.gpsLatitude)) {
+        clean.gpsLatitude = Number(metadata.gpsLatitude);
+      }
+      if (typeof metadata.gpsLongitude === 'number' && !isNaN(metadata.gpsLongitude)) {
+        clean.gpsLongitude = Number(metadata.gpsLongitude);
+      }
+      if (typeof metadata.gpsAltitude === 'number' && !isNaN(metadata.gpsAltitude)) {
+        clean.gpsAltitude = Number(metadata.gpsAltitude);
+      }
+      
+      // GPS location fields (human-readable)
+      if (metadata.gpsLocation) clean.gpsLocation = String(metadata.gpsLocation);
+      if (metadata.gpsVenue) clean.gpsVenue = String(metadata.gpsVenue);
+      if (metadata.gpsNeighborhood) clean.gpsNeighborhood = String(metadata.gpsNeighborhood);
+      if (metadata.gpsCity) clean.gpsCity = String(metadata.gpsCity);
+      if (metadata.gpsRegion) clean.gpsRegion = String(metadata.gpsRegion);
+      if (metadata.gpsCountry) clean.gpsCountry = String(metadata.gpsCountry);
+      
+      // Date fields - Box expects full ISO datetime for date type fields
+      if (metadata.dateTaken) {
+        try {
+          var date = new Date(metadata.dateTaken);
+          if (!isNaN(date.getTime())) {
+            clean.dateTaken = date.toISOString(); // Full ISO string for Box date fields
+          }
+        } catch (e) {
+          // Skip invalid dates
+        }
+      }
+      
+      if (metadata.lastProcessedDate) {
+        try {
+          var procDate = new Date(metadata.lastProcessedDate);
+          if (!isNaN(procDate.getTime())) {
+            clean.lastProcessedDate = procDate.toISOString(); // Full ISO string for Box date fields
+          }
+        } catch (e) {
+          clean.lastProcessedDate = new Date().toISOString();
+        }
+      } else {
+        // Always provide a valid date for required field
+        clean.lastProcessedDate = new Date().toISOString();
+      }
+      
+      // Enum fields - ensure valid values
+      var validContentTypes = ['artwork', 'fabrication_process', 'marketing_material', 'team_portrait', 'event_photo', 'equipment', 'facility_interior', 'facility_exterior', 'documentation', 'other'];
+      if (validContentTypes.indexOf(metadata.contentType) !== -1) {
+        clean.contentType = metadata.contentType;
+      } else {
+        clean.contentType = 'other';
+      }
+      
+      var validStages = ['unprocessed', 'basic_extracted', 'exif_extracted', 'ai_analyzed', 'human_reviewed', 'complete'];
+      if (validStages.indexOf(metadata.processingStage) !== -1) {
+        clean.processingStage = metadata.processingStage;
+      } else {
+        clean.processingStage = 'basic_extracted';
+      }
+      
+      var validDepartments = ['fabrication', 'design', 'marketing', 'administration', 'operations', 'general'];
+      if (validDepartments.indexOf(metadata.department) !== -1) {
+        clean.department = metadata.department;
+      } else {
+        clean.department = 'general';
+      }
+      
+      // Add other essential fields
+      if (metadata.processingVersion) clean.processingVersion = String(metadata.processingVersion);
+      if (metadata.buildNumber) clean.buildNumber = String(metadata.buildNumber);
+      
+      return clean;
+      
+    } catch (error) {
+      Logger.log('Error sanitizing metadata: ' + error.toString());
+      return {
+        originalFilename: metadata.originalFilename || 'unknown',
+        processingStage: 'basic_extracted',
+        contentType: 'other',
+        department: 'general',
+        lastProcessedDate: new Date().toISOString().split('T')[0]
+      };
     }
-    
-    // Enum fields - ensure valid values
-    var validContentTypes = ['artwork', 'fabrication_process', 'marketing_material', 'team_portrait', 'event_photo', 'equipment', 'facility_interior', 'facility_exterior', 'documentation', 'other'];
-    if (validContentTypes.indexOf(metadata.contentType) !== -1) {
-      clean.contentType = metadata.contentType;
-    } else {
-      clean.contentType = 'other';
-    }
-    
-    var validStages = ['unprocessed', 'basic_extracted', 'exif_extracted', 'ai_analyzed', 'human_reviewed', 'complete'];
-    if (validStages.indexOf(metadata.processingStage) !== -1) {
-      clean.processingStage = metadata.processingStage;
-    } else {
-      clean.processingStage = 'basic_extracted';
-    }
-    
-    var validDepartments = ['fabrication', 'design', 'marketing', 'administration', 'operations', 'general'];
-    if (validDepartments.indexOf(metadata.department) !== -1) {
-      clean.department = metadata.department;
-    } else {
-      clean.department = 'general';
-    }
-    
-    // Add other essential fields
-    if (metadata.processingVersion) clean.processingVersion = String(metadata.processingVersion);
-    if (metadata.buildNumber) clean.buildNumber = String(metadata.buildNumber);
-    
-    return clean;
-    
-  } catch (error) {
-    Logger.log('Error sanitizing metadata: ' + error.toString());
-    return {
-      originalFilename: metadata.originalFilename || 'unknown',
-      processingStage: 'basic_extracted',
-      contentType: 'other',
-      department: 'general',
-      lastProcessedDate: new Date().toISOString().split('T')[0]
-    };
-  }
-};
-
-// Update the extractMetadata function to use sanitization:
-// Replace the final return statement with:
-return ns.sanitizeMetadataForBox(combinedMetadata);
+  };
 
   /**
    * Extracts comprehensive metadata from file details.
@@ -414,7 +544,7 @@ return ns.sanitizeMetadataForBox(combinedMetadata);
         usageRights: contentAnalysis.usageRights,
         importance: contentAnalysis.importance,
         processingStage: Config.PROCESSING_STAGE_BASIC,
-        lastProcessedDate: new Date().toISOString(),
+        lastProcessedDate: new Date().toISOString(), // Full ISO datetime
         processingVersion: Config.PROCESSING_VERSION_BASIC,
         buildNumber: Config.getCurrentBuild(),
         needsReview: contentAnalysis.needsReview || 'no'
@@ -566,93 +696,109 @@ return ns.sanitizeMetadataForBox(combinedMetadata);
    * @param {string} accessToken Valid Box access token
    * @returns {object} Enhanced metadata object
    */
-// Replace the extractMetadata function in MetadataExtraction.js with this fixed version:
+  ns.extractMetadata = function(fileDetails, accessToken) {
+    // Extract filename and fileId from fileDetails for use in logging and calls
+    var filename = fileDetails.name;
+    var fileId = fileDetails.id;
 
-/**
- * Extracts metadata combining basic info, EXIF, and Vision API analysis.
- * @param {object} fileDetails Full file details from Box API
- * @param {string} accessToken Valid Box access token
- * @returns {object} Enhanced metadata object
- */
-ns.extractMetadata = function(fileDetails, accessToken) {
-  // Extract filename and fileId from fileDetails for use in logging and calls
-  const filename = fileDetails.name;
-  const fileId = fileDetails.id;
+    // Start with basic metadata
+    var basicMetadata = ns.extractComprehensiveMetadata(fileDetails);
+    var combinedMetadata = JSON.parse(JSON.stringify(basicMetadata)); // Deep copy
 
-  // Start with basic metadata
-  var basicMetadata = ns.extractComprehensiveMetadata(fileDetails); // This function primarily uses fileDetails
-  var combinedMetadata = JSON.parse(JSON.stringify(basicMetadata)); // Deep copy
-
-  // Extract EXIF data, passing filename for logging
-  var exifData = extractMetadata(fileId, accessToken, filename); // Call to ExifExtraction.js#extractMetadata
-  if (exifData && exifData.hasExif) {
-    if (exifData.metadata) { // Assuming exifData.metadata holds the fields
-      if (exifData.metadata.cameraModel) combinedMetadata.cameraModel = exifData.metadata.cameraModel;
-      if (exifData.metadata.dateTaken) combinedMetadata.dateTaken = exifData.metadata.dateTaken;
-      if (exifData.metadata.imageWidth) combinedMetadata.imageWidth = exifData.metadata.imageWidth;
-      if (exifData.metadata.imageHeight) combinedMetadata.imageHeight = exifData.metadata.imageHeight;
-      if (exifData.metadata.aspectRatio) combinedMetadata.aspectRatio = exifData.metadata.aspectRatio;
-      if (exifData.metadata.megapixels) combinedMetadata.megapixels = exifData.metadata.megapixels;
-      
-      // GPS coordinates - all three values
-      if (typeof exifData.metadata.gpsLatitude === 'number') {
-        combinedMetadata.gpsLatitude = exifData.metadata.gpsLatitude;
+    // Extract EXIF data, passing filename for logging
+    var exifData = extractMetadata(fileId, accessToken, filename);
+    if (exifData && exifData.hasExif) {
+      if (exifData.metadata) {
+        if (exifData.metadata.cameraModel) combinedMetadata.cameraModel = exifData.metadata.cameraModel;
+        if (exifData.metadata.dateTaken) combinedMetadata.dateTaken = exifData.metadata.dateTaken;
+        if (exifData.metadata.imageWidth) combinedMetadata.imageWidth = exifData.metadata.imageWidth;
+        if (exifData.metadata.imageHeight) combinedMetadata.imageHeight = exifData.metadata.imageHeight;
+        if (exifData.metadata.aspectRatio) combinedMetadata.aspectRatio = exifData.metadata.aspectRatio;
+        if (exifData.metadata.megapixels) combinedMetadata.megapixels = exifData.metadata.megapixels;
+        
+        // GPS coordinates - all three values
+        if (typeof exifData.metadata.gpsLatitude === 'number') {
+          combinedMetadata.gpsLatitude = exifData.metadata.gpsLatitude;
+        }
+        if (typeof exifData.metadata.gpsLongitude === 'number') {
+          combinedMetadata.gpsLongitude = exifData.metadata.gpsLongitude;
+        }
+        if (typeof exifData.metadata.gpsAltitude === 'number') {
+          combinedMetadata.gpsAltitude = exifData.metadata.gpsAltitude;
+        }
+        
+        // Camera settings
+        if (exifData.metadata.cameraSettings) {
+          combinedMetadata.cameraSettings = exifData.metadata.cameraSettings;
+        }
+        
+        // Technical notes
+        if (exifData.metadata.technicalNotes) {
+          combinedMetadata.technicalNotes = exifData.metadata.technicalNotes;
+        }
       }
-      if (typeof exifData.metadata.gpsLongitude === 'number') {
-        combinedMetadata.gpsLongitude = exifData.metadata.gpsLongitude;
-      }
-      if (typeof exifData.metadata.gpsAltitude === 'number') {
-        combinedMetadata.gpsAltitude = exifData.metadata.gpsAltitude;
-      }
-      
-      // Camera settings
-      if (exifData.metadata.cameraSettings) {
-        combinedMetadata.cameraSettings = exifData.metadata.cameraSettings;
-      }
-      
-      // Technical notes
-      if (exifData.metadata.technicalNotes) {
-        combinedMetadata.technicalNotes = exifData.metadata.technicalNotes;
-      }
+      combinedMetadata.processingStage = Config.PROCESSING_STAGE_EXIF;
     }
-    combinedMetadata.processingStage = Config.PROCESSING_STAGE_EXIF;
-  }
 
-  // Analyze with Vision API, passing filename for logging
-  var visionAnalysis = analyzeImageWithVisionImproved(fileId, accessToken, filename); // Call to VisionAnalysis.js#analyzeImageWithVisionImproved
+    // Reverse geocode GPS coordinates if available
+    if (typeof combinedMetadata.gpsLatitude === 'number' && typeof combinedMetadata.gpsLongitude === 'number') {
+      Logger.log('🗺️ GPS coordinates found, performing reverse geocoding...');
+      var locationData = reverseGeocode_(combinedMetadata.gpsLatitude, combinedMetadata.gpsLongitude);
+      
+      if (locationData) {
+        // Add all the geocoded location fields
+        if (locationData.gpsLocation) combinedMetadata.gpsLocation = locationData.gpsLocation;
+        if (locationData.gpsVenue) combinedMetadata.gpsVenue = locationData.gpsVenue;
+        if (locationData.gpsNeighborhood) combinedMetadata.gpsNeighborhood = locationData.gpsNeighborhood;
+        if (locationData.gpsCity) combinedMetadata.gpsCity = locationData.gpsCity;
+        if (locationData.gpsRegion) combinedMetadata.gpsRegion = locationData.gpsRegion;
+        if (locationData.gpsCountry) combinedMetadata.gpsCountry = locationData.gpsCountry;
+        
+        Logger.log('✅ Location data added to metadata');
+      } else {
+        Logger.log('⚠️ Reverse geocoding failed - GPS coordinates preserved');
+      }
+      
+      // Small delay to be respectful to Google's API
+      Utilities.sleep(500);
+    }
 
-  if (visionAnalysis && !visionAnalysis.error) {
-    combinedMetadata.aiDetectedObjects = visionAnalysis.objects ? 
-      visionAnalysis.objects.map(function(obj) { return obj.name + ' (' + obj.confidence + ')'; }).join('; ') : '';
-    combinedMetadata.aiSceneDescription = visionAnalysis.sceneDescription || '';
-    combinedMetadata.extractedText = visionAnalysis.text ? 
-      visionAnalysis.text.replace(/\n/g, ' ').substring(0, Config.MAX_TEXT_EXTRACTION_LENGTH) : '';
-    combinedMetadata.dominantColors = visionAnalysis.dominantColors ? 
-      visionAnalysis.dominantColors.map(function(c) { return c.rgb + ' (' + c.score + ', ' + c.pixelFraction + ')'; }).join('; ') : '';
-    combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
-    combinedMetadata.processingStage = Config.PROCESSING_STAGE_AI;
+    // Analyze with Vision API, passing filename for logging
+    var visionAnalysis = analyzeImageWithVisionImproved(fileId, accessToken, filename);
 
-    // Apply AI-driven content enhancements
-    var aiEnhancements = ns.enhanceContentAnalysisWithAI(combinedMetadata, visionAnalysis, filename, combinedMetadata.folderPath);
-    Object.keys(aiEnhancements).forEach(function(key) {
-      combinedMetadata[key] = aiEnhancements[key];
-    });
+    if (visionAnalysis && !visionAnalysis.error) {
+      combinedMetadata.aiDetectedObjects = visionAnalysis.objects ? 
+        visionAnalysis.objects.map(function(obj) { return obj.name + ' (' + obj.confidence + ')'; }).join('; ') : '';
+      combinedMetadata.aiSceneDescription = visionAnalysis.sceneDescription || '';
+      combinedMetadata.extractedText = visionAnalysis.text ? 
+        visionAnalysis.text.replace(/\n/g, ' ').substring(0, Config.MAX_TEXT_EXTRACTION_LENGTH) : '';
+      combinedMetadata.dominantColors = visionAnalysis.dominantColors ? 
+        visionAnalysis.dominantColors.map(function(c) { return c.rgb + ' (' + c.score + ', ' + c.pixelFraction + ')'; }).join('; ') : '';
+      combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
+      combinedMetadata.processingStage = Config.PROCESSING_STAGE_AI;
 
-  } else if (visionAnalysis && visionAnalysis.error) {
-    Logger.log(`  Vision API error for ${filename}: ${(visionAnalysis.message || visionAnalysis.error)}`);
-    combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
-      'Vision API Error: ' + (visionAnalysis.message || visionAnalysis.error);
-  }
+      // Apply AI-driven content enhancements
+      var aiEnhancements = ns.enhanceContentAnalysisWithAI(combinedMetadata, visionAnalysis, filename, combinedMetadata.folderPath);
+      Object.keys(aiEnhancements).forEach(function(key) {
+        combinedMetadata[key] = aiEnhancements[key];
+      });
 
-  // Finalize processing metadata
-  combinedMetadata.lastProcessedDate = new Date().toISOString();
-  combinedMetadata.processingVersion = Config.PROCESSING_VERSION_ENHANCED; // Or dynamically set based on what was successful
-  combinedMetadata.buildNumber = Config.getCurrentBuild();
+    } else if (visionAnalysis && visionAnalysis.error) {
+      Logger.log('  Vision API error for ' + filename + ': ' + (visionAnalysis.message || visionAnalysis.error));
+      combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
+        'Vision API Error: ' + (visionAnalysis.message || visionAnalysis.error);
+    }
 
-  // Apply sanitization and return
-  return ns.sanitizeMetadataForBox(combinedMetadata);
-};
- /**
+    // Finalize processing metadata
+    combinedMetadata.lastProcessedDate = new Date().toISOString(); // Use current timestamp
+    combinedMetadata.processingVersion = Config.PROCESSING_VERSION_ENHANCED;
+    combinedMetadata.buildNumber = Config.getCurrentBuild();
+
+    // Apply sanitization and return
+    return ns.sanitizeMetadataForBox(combinedMetadata);
+  };
+
+  /**
    * Enhances metadata with AI-driven insights from Vision API.
    * @param {object} basicMetadata Base metadata object
    * @param {object} visionAnalysis Vision API analysis results
@@ -736,6 +882,55 @@ ns.extractMetadata = function(fileDetails, accessToken) {
     return enhancements;
   };
   
+  /**
+   * Test function for reverse geocoding functionality.
+   * @param {number} testLat Optional test latitude (defaults to NYC)
+   * @param {number} testLng Optional test longitude (defaults to NYC)
+   */
+  ns.testReverseGeocoding = function(testLat, testLng) {
+    Logger.log('=== Testing Reverse Geocoding ===');
+    
+    // Default to NYC coordinates if not provided
+    var lat = testLat || 40.7580;  // Times Square
+    var lng = testLng || -73.9855;
+    
+    Logger.log('🧪 Testing with coordinates: ' + lat + ', ' + lng);
+    
+    var apiKey = getGeocodingApiKey_();
+    if (!apiKey) {
+      Logger.log('❌ GEOCODE_API_KEY not found in Script Properties');
+      Logger.log('💡 Add your Google Geocoding API key to Script Properties');
+      return;
+    }
+    
+    Logger.log('✅ API key found: ' + apiKey.substring(0, 10) + '...');
+    
+    var result = reverseGeocode_(lat, lng);
+    
+    if (result) {
+      Logger.log('🎉 Reverse geocoding successful!');
+      Logger.log('📍 Results:');
+      Object.keys(result).forEach(function(key) {
+        if (result[key]) {
+          Logger.log('   ' + key + ': ' + result[key]);
+        }
+      });
+    } else {
+      Logger.log('❌ Reverse geocoding failed');
+    }
+  };
+  
   // Return public interface
   return ns;
 })();
+
+/**
+ * Quick test functions for easy access
+ */
+function testReverseGeocodingNYC() {
+  MetadataExtraction.testReverseGeocoding(40.7580, -73.9855); // Times Square
+}
+
+function testReverseGeocodingKyoto() {
+  MetadataExtraction.testReverseGeocoding(35.014377, 135.669015); // From your sample
+}

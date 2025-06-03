@@ -1,4 +1,4 @@
-// File: ExifParser.gs
+// File: EXIFParser.gs
 // Robust metadata extraction from multiple image formats
 // Depends on: Config.gs, BoxAuth.gs
 
@@ -630,217 +630,187 @@ var EnhancedExifParser = (function() {
   }
   
   /**
-   * Convert metadata to Box-compatible format
+   * Convert metadata to Box-compatible format - FIXED VERSION
    * @param {object} metadata Organized metadata
    * @returns {object} Box-compatible metadata
    */
-function convertToBoxFormat_(metadata) {
-  var boxMetadata = {
-    // Initialize with defaults, but consider what's appropriate if no EXIF found
-    processingStage: metadata.hasExif ? Config.PROCESSING_STAGE_EXIF : Config.PROCESSING_STAGE_BASIC,
-    lastProcessedDate: new Date().toISOString(),
-    processingVersion: metadata.hasExif ? Config.PROCESSING_VERSION_ENHANCED : Config.PROCESSING_VERSION_BASIC 
-  };
+  function convertToBoxFormat_(metadata) {
+    var boxMetadata = {
+      // Initialize with defaults, but consider what's appropriate if no EXIF found
+      processingStage: metadata.hasExif ? Config.PROCESSING_STAGE_EXIF : Config.PROCESSING_STAGE_BASIC,
+      lastProcessedDate: new Date().toISOString(),
+      processingVersion: metadata.hasExif ? Config.PROCESSING_VERSION_ENHANCED : Config.PROCESSING_VERSION_BASIC 
+    };
 
-  try {
-    // Camera and technical info
-    if (metadata.camera && (metadata.camera.make || metadata.camera.model)) {
-      boxMetadata.cameraModel = [metadata.camera.make, metadata.camera.model].filter(Boolean).join(' ');
-    }
-
-    // Image dimensions
-// In convertToBoxFormat_, ensure numeric fields are numbers:
-if (metadata.image && metadata.image.imagewidth) {
-  boxMetadata.imageWidth = Number(metadata.image.imagewidth);
-  boxMetadata.imageHeight = Number(metadata.image.imagelength);
-}
-if (typeof metadata.location.latitude === 'number') {
-  boxMetadata.gpsLatitude = Number(metadata.location.latitude);
-}
-
-
-
-    if (metadata.image && metadata.image.imagewidth && metadata.image.imagelength) {
-      boxMetadata.imageWidth = metadata.image.imagewidth;
-      boxMetadata.imageHeight = metadata.image.imagelength;
-      if (metadata.image.aspectRatio) boxMetadata.aspectRatio = metadata.image.aspectRatio;
-      if (metadata.image.megapixels) boxMetadata.megapixels = metadata.image.megapixels;
-    } else if (metadata.fileInfo && metadata.fileInfo.width && metadata.fileInfo.height) {
-      // Fallback to basicInfo if available (e.g., from PNG header parsing in extractBasicFileInfo_)
-      boxMetadata.imageWidth = metadata.fileInfo.width;
-      boxMetadata.imageHeight = metadata.fileInfo.height;
-    }
-
-    // Date taken
-// In EXIFParser.js, fix the date conversion:
-if (metadata.datetime && metadata.datetime.datetimeoriginal) {
-  const dateValue = metadata.datetime.datetimeoriginal;
-  if (typeof dateValue === 'string') {
     try {
-      const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-      const parsedDate = new Date(isoDate);
-      if (!isNaN(parsedDate.getTime())) {
-        boxMetadata.dateTaken = parsedDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      // Camera and technical info
+      if (metadata.camera && (metadata.camera.make || metadata.camera.model)) {
+        boxMetadata.cameraModel = [metadata.camera.make, metadata.camera.model].filter(Boolean).join(' ');
       }
-    } catch (e) {
-      // Skip invalid dates
-    }
-  }
-}
 
-
- if (metadata.datetime && metadata.datetime.datetimeoriginal) {
-  const dateValue = metadata.datetime.datetimeoriginal;
-  if (typeof dateValue === 'string') {
-    try {
-      const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-      const parsedDate = new Date(isoDate);
-      if (!isNaN(parsedDate.getTime())) {
-        boxMetadata.dateTaken = parsedDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      // Image dimensions
+      if (metadata.image && metadata.image.imagewidth) {
+        boxMetadata.imageWidth = Number(metadata.image.imagewidth);
+        boxMetadata.imageHeight = Number(metadata.image.imagelength);
+        if (metadata.image.aspectRatio) boxMetadata.aspectRatio = metadata.image.aspectRatio;
+        if (metadata.image.megapixels) boxMetadata.megapixels = metadata.image.megapixels;
+      } else if (metadata.fileInfo && metadata.fileInfo.width && metadata.fileInfo.height) {
+        // Fallback to basicInfo if available
+        boxMetadata.imageWidth = metadata.fileInfo.width;
+        boxMetadata.imageHeight = metadata.fileInfo.height;
       }
-    } catch (e) {
-      // Skip invalid dates
-    }
-  }
-} else if (metadata.datetime && metadata.datetime.datetime) {
-  const dateValue = metadata.datetime.datetime;
-  if (typeof dateValue === 'string') {
-    try {
-      const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-      const parsedDate = new Date(isoDate);
-      if (!isNaN(parsedDate.getTime())) {
-        boxMetadata.dateTaken = parsedDate.toISOString().split('T')[0]; // YYYY-MM-DD format
-      }
-    } catch (e) {
-      // Skip invalid dates
-    }
-  }
-}
 
-    // Camera settings summary
-    if (metadata.settings) {
+      // Date taken - ensure proper ISO format
+      if (metadata.datetime && metadata.datetime.datetimeoriginal) {
+        var dateValue = metadata.datetime.datetimeoriginal;
+        if (typeof dateValue === 'string') {
+          try {
+            var isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+            var parsedDate = new Date(isoDate);
+            if (!isNaN(parsedDate.getTime())) {
+              boxMetadata.dateTaken = parsedDate.toISOString(); // Full ISO string for Box date fields
+            }
+          } catch (e) {
+            // Skip invalid dates
+          }
+        }
+      } else if (metadata.datetime && metadata.datetime.datetime) {
+        var dateValue = metadata.datetime.datetime;
+        if (typeof dateValue === 'string') {
+          try {
+            var isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+            var parsedDate = new Date(isoDate);
+            if (!isNaN(parsedDate.getTime())) {
+              boxMetadata.dateTaken = parsedDate.toISOString(); // Full ISO string for Box date fields
+            }
+          } catch (e) {
+            // Skip invalid dates
+          }
+        }
+      }
+
+      // Camera settings summary
+      if (metadata.settings) {
         var settings = [];
         if (metadata.settings.fnumber) settings.push('f/' + metadata.settings.fnumber);
         if (metadata.settings.exposuretime) {
-            var et = metadata.settings.exposuretime;
-            settings.push((et > 0.25 ? et + 's' : '1/' + Math.round(1/et) + 's'));
+          var et = metadata.settings.exposuretime;
+          settings.push((et > 0.25 ? et + 's' : '1/' + Math.round(1/et) + 's'));
         }
         if (metadata.settings.isospeedratings) settings.push('ISO ' + metadata.settings.isospeedratings);
         if (metadata.settings.focallength) settings.push(metadata.settings.focallength + 'mm');
         
         if (settings.length > 0) {
-            boxMetadata.cameraSettings = settings.join(', ');
+          boxMetadata.cameraSettings = settings.join(', ');
         }
-    }
-
-    // GPS coordinates - ALL THREE VALUES
-    if (metadata.location) {
-      if (metadata.location.latitude && metadata.location.longitude) {
-        boxMetadata.gpsLatitude = metadata.location.latitude;
-        boxMetadata.gpsLongitude = metadata.location.longitude;
       }
+
+      // GPS coordinates - FIXED with proper null checking
+      if (metadata.location && typeof metadata.location === 'object') {
+        if (typeof metadata.location.latitude === 'number' && typeof metadata.location.longitude === 'number') {
+          boxMetadata.gpsLatitude = metadata.location.latitude;
+          boxMetadata.gpsLongitude = metadata.location.longitude;
+        }
+        
+        // GPS altitude
+        if (typeof metadata.location.altitude === 'number') {
+          boxMetadata.gpsAltitude = metadata.location.altitude;
+        }
+      }
+
+      // File format
+      if (metadata.fileInfo && metadata.fileInfo.format) {
+        boxMetadata.fileFormat = metadata.fileInfo.format;
+      }
+
+      // Technical notes
+      var notes = [];
+      if (metadata.image && metadata.image.orientationDesc) notes.push('Orientation: ' + metadata.image.orientationDesc);
+      if (metadata.settings && metadata.settings.exposureprogramdesc) notes.push('Mode: ' + metadata.settings.exposureprogramdesc);
+      if (metadata.settings && metadata.settings.whitebalancedesc) notes.push('WB: ' + metadata.settings.whitebalancedesc);
       
-      // GPS altitude
-      if (typeof metadata.location.altitude === 'number') {
-        boxMetadata.gpsAltitude = metadata.location.altitude;
+      if (notes.length > 0) {
+        boxMetadata.technicalNotes = notes.join('; ');
       }
+
+    } catch (error) {
+      // Log the error but don't crash the processing
+      Logger.log('Error during convertToBoxFormat_: ' + error.toString() + ' - Metadata from parser: ' + JSON.stringify(metadata));
+      // Don't add error details to metadata as it would break Box API
     }
 
-    // File format
-    if (metadata.fileInfo && metadata.fileInfo.format) {
-      boxMetadata.fileFormat = metadata.fileInfo.format;
-    }
-
-    // Technical notes
-    var notes = [];
-    if (metadata.image && metadata.image.orientationDesc) notes.push('Orientation: ' + metadata.image.orientationDesc);
-    if (metadata.settings && metadata.settings.exposureprogramdesc) notes.push('Mode: ' + metadata.settings.exposureprogramdesc);
-    if (metadata.settings && metadata.settings.whitebalancedesc) notes.push('WB: ' + metadata.settings.whitebalancedesc);
-    
-    if (notes.length > 0) {
-      boxMetadata.technicalNotes = notes.join('; ');
-    }
-
-  } catch (error) {
-    // Log the error but avoid crashing the main flow if metadata is partially processed.
-    // The calling function should decide how to handle this.
-    Logger.log('Error during convertToBoxFormat_: ' + error.toString() + ' - Metadata from parser: ' + JSON.stringify(metadata));
-    // Consider adding a specific error field to boxMetadata if needed.
+    return boxMetadata;
   }
-
-  return boxMetadata;
-}
   
   /**
    * Main extraction function - comprehensive metadata extraction from image files
    * @param {string} fileId Box file ID
    * @param {string} accessToken Valid Box access token
+   * @param {string} filename Optional filename for logging
    * @returns {object|null} Comprehensive metadata or null on error
    */
-ns.extractMetadata = function(fileId, accessToken, filename) {
-  const fileDisplayName = filename || fileId;
+  ns.extractMetadata = function(fileId, accessToken, filename) {
+    var fileDisplayName = filename || fileId;
 
-  if (!fileId || !accessToken) {
-    Logger.log('ERROR: EnhancedExifParser.extractMetadata requires fileId and accessToken');
-    return null;
-  }
-
-  var utils = initUtils_();
-
-  try {
-    Logger.log(` > Parsing file structure for EXIF data from ${fileDisplayName}...`);
-
-    var downloadUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/content';
-    var response = utils.rateLimitExpBackoff(function() {
-      return UrlFetchApp.fetch(downloadUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        muteHttpExceptions: true
-      });
-    });
-
-    if (response.getResponseCode() !== 200) {
-      Logger.log(`    Failed to download ${fileDisplayName} for metadata extraction. HTTP Code: ${response.getResponseCode()}`);
+    if (!fileId || !accessToken) {
+      Logger.log('ERROR: EnhancedExifParser.extractMetadata requires fileId and accessToken');
       return null;
     }
 
-    var imageBlob = response.getBlob();
-    var imageBytes = new Uint8Array(imageBlob.getBytes());
+    var utils = initUtils_();
 
-    var basicInfo = extractBasicFileInfo_(imageBytes);
-    basicInfo.filename = fileDisplayName; // Add filename to basicInfo for convertToBoxFormat_
-    Logger.log(` > Format detected: ${(basicInfo.format || 'Unknown')} for ${fileDisplayName}.`);
+    try {
+      Logger.log(' > Parsing file structure for EXIF data from ' + fileDisplayName + '...');
 
-    var metadataFromParser = null; // Renamed to avoid conflict
+      var downloadUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/content';
+      var response = utils.rateLimitExpBackoff(function() {
+        return UrlFetchApp.fetch(downloadUrl, {
+          headers: { 'Authorization': 'Bearer ' + accessToken },
+          muteHttpExceptions: true
+        });
+      });
 
-    if (basicInfo.format === 'JPEG') {
-      metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
-    } else if (['PNG', 'WEBP', 'HEIC', 'AVIF', 'TIFF'].indexOf(basicInfo.format) !== -1) {
-      metadataFromParser = extractOtherFormatMetadata_(imageBytes, basicInfo);
-    } else {
-      metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
-      if (!metadataFromParser || !metadataFromParser.hasExif) {
-        metadataFromParser = { hasExif: false, fileInfo: basicInfo };
+      if (response.getResponseCode() !== 200) {
+        Logger.log('    Failed to download ' + fileDisplayName + ' for metadata extraction. HTTP Code: ' + response.getResponseCode());
+        return null;
       }
-    }
 
-    if (metadataFromParser) {
-      Logger.log(` > File parsed and EXIF structure processed for ${fileDisplayName}.`);
-      return convertToBoxFormat_(metadataFromParser); // This now returns the Box-ready metadata
-    } else {
-      Logger.log(` ⚠️ No processable EXIF structure found in ${fileDisplayName}.`);
-      // Return a minimal Box-formatted object even if no EXIF, based on basicInfo
-      return convertToBoxFormat_({ hasExif: false, fileInfo: basicInfo });
-    }
+      var imageBlob = response.getBlob();
+      var imageBytes = new Uint8Array(imageBlob.getBytes());
 
-  } catch (error) {
-    Logger.log(`    ERROR: Parsing EXIF from ${fileDisplayName} failed: ${error.toString()}`);
-    // Return a minimal Box-formatted object on error, possibly with an error note
-    const errorBasicInfo = { filename: fileDisplayName, fileSize: imageBytes ? imageBytes.length : 0, format: 'unknown' };
-    let boxErrorFormat = convertToBoxFormat_({ hasExif: false, fileInfo: errorBasicInfo });
-    boxErrorFormat.technicalNotes = (boxErrorFormat.technicalNotes || "") + ` EXIF Parsing Error: ${error.message}`;
-    return boxErrorFormat;
-  }
-};
+      var basicInfo = extractBasicFileInfo_(imageBytes);
+      basicInfo.filename = fileDisplayName;
+      Logger.log(' > Format detected: ' + (basicInfo.format || 'Unknown') + ' for ' + fileDisplayName + '.');
+
+      var metadataFromParser = null;
+
+      if (basicInfo.format === 'JPEG') {
+        metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
+      } else if (['PNG', 'WEBP', 'HEIC', 'AVIF', 'TIFF'].indexOf(basicInfo.format) !== -1) {
+        metadataFromParser = extractOtherFormatMetadata_(imageBytes, basicInfo);
+      } else {
+        metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
+        if (!metadataFromParser || !metadataFromParser.hasExif) {
+          metadataFromParser = { hasExif: false, fileInfo: basicInfo };
+        }
+      }
+
+      if (metadataFromParser) {
+        Logger.log(' > File parsed and EXIF structure processed for ' + fileDisplayName + '.');
+        return convertToBoxFormat_(metadataFromParser);
+      } else {
+        Logger.log(' ⚠️ No processable EXIF structure found in ' + fileDisplayName + '.');
+        return convertToBoxFormat_({ hasExif: false, fileInfo: basicInfo });
+      }
+
+    } catch (error) {
+      Logger.log('    ERROR: Parsing EXIF from ' + fileDisplayName + ' failed: ' + error.toString());
+      var errorBasicInfo = { filename: fileDisplayName, fileSize: imageBytes ? imageBytes.length : 0, format: 'unknown' };
+      var boxErrorFormat = convertToBoxFormat_({ hasExif: false, fileInfo: errorBasicInfo });
+      boxErrorFormat.technicalNotes = (boxErrorFormat.technicalNotes || '') + ' EXIF Parsing Error: ' + error.message;
+      return boxErrorFormat;
+    }
+  };
 
   /**
    * Extract metadata from JPEG files

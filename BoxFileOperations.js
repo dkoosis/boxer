@@ -245,7 +245,7 @@ var BoxFileOperations = (function() {
     }
     
     var utils = initUtils_();
-    Logger.log('BoxFileOperations.applyMetadata: Attempting to apply to fileId: ' + fileId + '. Metadata PAYLOAD to be sent: ' + JSON.stringify(metadata, null, 2));
+    //Logger.log('BoxFileOperations.applyMetadata: Attempting to apply to fileId: ' + fileId + '. Metadata PAYLOAD to be sent: ' + JSON.stringify(metadata, null, 2));
 
     try {
       var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
