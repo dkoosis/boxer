@@ -269,8 +269,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
   try {
     const visionApiKey = getVisionApiKey();
     var utils = cUseful; // Assuming cUseful is globally available or initialized
-
-    const downloadUrl = `<span class="math-inline">\{Config\.BOX\_API\_BASE\_URL\}/files/</span>{fileId}/content`;
+    const downloadUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/content';
     const downloadResponse = utils.rateLimitExpBackoff(function() {
       return UrlFetchApp.fetch(downloadUrl, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
@@ -322,9 +321,11 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
       muteHttpExceptions: true
     };
 
+
     const visionResponse = utils.rateLimitExpBackoff(function() {
-      return UrlFetchApp.fetch(`<span class="math-inline">\{Config\.VISION\_API\_ENDPOINT\}?key\=</span>{visionApiKey}`, visionApiOptions);
+      return UrlFetchApp.fetch(Config.VISION_API_ENDPOINT + '?key=' + visionApiKey, visionApiOptions);
     });
+
 
     const visionResponseCode = visionResponse.getResponseCode();
     const visionResponseText = visionResponse.getContentText();
@@ -350,7 +351,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
           }
         }
 
-        Logger.log(`  ✅ Vision API analysis completed for ${fileDisplayName}.`);
+        Logger.log(` > Vision API analysis completed for ${fileDisplayName}.`);
         return analysis;
 
       } else {

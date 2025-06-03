@@ -66,7 +66,7 @@ function initializeBoxPackage() {
     if (!existingPackage) {
       Logger.log('No existing Box package found, creating new one...');
       createBoxPackage();
-      Logger.log('✅ Box package initialized successfully');
+      Logger.log('ℹ️ Box package initialized successfully');
     } else {
       Logger.log('✅ Box package already exists');
     }

@@ -22,7 +22,7 @@ var MetadataExtraction = (function() {
     if (!utils_) {
       try {
         utils_ = cUseful;
-        Logger.log('MetadataExtraction: cUseful library initialized');
+        Logger.log('ℹ️ MetadataExtraction: cUseful library initialized');
       } catch (e) {
         Logger.log('ERROR: MetadataExtraction - cUseful library not available: ' + e.toString());
         throw new Error('cUseful library is required but not available');

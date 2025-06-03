@@ -22,7 +22,7 @@ var BoxFileOperations = (function() {
     if (!utils_) {
       try {
         utils_ = cUseful;
-        Logger.log('BoxFileOperations: cUseful library initialized');
+        Logger.log('ℹ️ BoxFileOperations: cUseful library initialized');
       } catch (e) {
         Logger.log('ERROR: BoxFileOperations - cUseful library not available: ' + e.toString());
         throw new Error('cUseful library is required but not available');

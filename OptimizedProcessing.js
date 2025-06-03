@@ -136,7 +136,7 @@ var OptimizedProcessing = (function() {
         Logger.log("Searching for: " + query);
         
         var unprocessedFiles = ns.findUnprocessedFiles(query, accessToken);
-        Logger.log("Found " + unprocessedFiles.length + " potentially unprocessed files");
+        Logger.log("ℹ️ Found " + unprocessedFiles.length + " potentially unprocessed files");
         
         // Process in small batches
         for (var j = 0; j < Math.min(unprocessedFiles.length, PROCESSING_BATCH_SIZE); j++) {
@@ -550,11 +550,11 @@ function processAllTestFolderImages() {
   // Use corrected search
   const imageFiles = OptimizedProcessing.searchBoxFilesInFolder(folderId, accessToken, 100);
   
-  Logger.log(`Found ${imageFiles.length} images to process`);
+  Logger.log(`ℹ️ Found ${imageFiles.length} images to process`);
   
   imageFiles.forEach((image, index) => {
     try {
-      Logger.log(`${index + 1}/${imageFiles.length}: ${image.name}`);
+      Logger.log(`ℹ️ ${index + 1}/${imageFiles.length}: ${image.name}`);
       
       // Get full file details
       const detailsUrl = Config.BOX_API_BASE_URL + '/files/' + image.id + 

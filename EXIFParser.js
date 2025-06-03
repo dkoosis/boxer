@@ -105,9 +105,9 @@ var EnhancedExifParser = (function() {
     if (!utils_) {
       try {
         utils_ = cUseful;
-        Logger.log('EnhancedExifParser: cUseful library initialized');
+        Logger.log('ℹ️ ExifParser: cUseful library initialized');
       } catch (e) {
-        Logger.log('ERROR: EnhancedExifParser - cUseful library not available');
+        Logger.log('❌ ERROR: EnhancedExifParser - cUseful library not available');
         throw new Error('cUseful library is required but not available');
       }
     }
@@ -656,11 +656,21 @@ function convertToBoxFormat_(metadata) { // metadata is the object from organize
     }
 
     // Date taken
-    if (metadata.datetime && metadata.datetime.datetimeoriginal) {
-      boxMetadata.dateTaken = metadata.datetime.datetimeoriginal;
-    } else if (metadata.datetime && metadata.datetime.datetime) {
-      boxMetadata.dateTaken = metadata.datetime.datetime;
-    }
+  if (metadata.datetime && metadata.datetime.datetimeoriginal) {
+  // Ensure proper ISO format
+  const dateValue = metadata.datetime.datetimeoriginal;
+  if (typeof dateValue === 'string') {
+    // Convert EXIF date format (YYYY:MM:DD HH:MM:SS) to ISO
+    const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+    boxMetadata.dateTaken = new Date(isoDate).toISOString();
+  }
+} else if (metadata.datetime && metadata.datetime.datetime) {
+  const dateValue = metadata.datetime.datetime;
+  if (typeof dateValue === 'string') {
+    const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+    boxMetadata.dateTaken = new Date(isoDate).toISOString();
+  }
+}
 
     // Camera settings summary
     if (metadata.settings) {
@@ -731,7 +741,7 @@ ns.extractMetadata = function(fileId, accessToken, filename) {
   var utils = initUtils_();
 
   try {
-    Logger.log(`    Parsing file structure for EXIF data from ${fileDisplayName}...`);
+    Logger.log(` > Parsing file structure for EXIF data from ${fileDisplayName}...`);
 
     var downloadUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/content';
     var response = utils.rateLimitExpBackoff(function() {
@@ -751,7 +761,7 @@ ns.extractMetadata = function(fileId, accessToken, filename) {
 
     var basicInfo = extractBasicFileInfo_(imageBytes);
     basicInfo.filename = fileDisplayName; // Add filename to basicInfo for convertToBoxFormat_
-    Logger.log(`      Format detected: ${(basicInfo.format || 'Unknown')} for ${fileDisplayName}.`);
+    Logger.log(` > Format detected: ${(basicInfo.format || 'Unknown')} for ${fileDisplayName}.`);
 
     var metadataFromParser = null; // Renamed to avoid conflict
 
@@ -767,10 +777,10 @@ ns.extractMetadata = function(fileId, accessToken, filename) {
     }
 
     if (metadataFromParser) {
-      Logger.log(`    ✅ File parsed and EXIF structure processed for ${fileDisplayName}.`);
+      Logger.log(` > File parsed and EXIF structure processed for ${fileDisplayName}.`);
       return convertToBoxFormat_(metadataFromParser); // This now returns the Box-ready metadata
     } else {
-      Logger.log(`    ⚠️ No processable EXIF structure found in ${fileDisplayName}.`);
+      Logger.log(` ⚠️ No processable EXIF structure found in ${fileDisplayName}.`);
       // Return a minimal Box-formatted object even if no EXIF, based on basicInfo
       return convertToBoxFormat_({ hasExif: false, fileInfo: basicInfo });
     }
@@ -784,7 +794,7 @@ ns.extractMetadata = function(fileId, accessToken, filename) {
     return boxErrorFormat;
   }
 };
-  
+
   /**
    * Extract metadata from JPEG files
    * @param {Uint8Array} imageBytes Image data
@@ -795,7 +805,7 @@ ns.extractMetadata = function(fileId, accessToken, filename) {
     try {
       var exifData = findExifSegment_(imageBytes);
       if (!exifData) {
-        Logger.log('No EXIF data found in JPEG');
+        Logger.log(' ⚠️ No EXIF data found in JPEG');
         return { hasExif: false, fileInfo: basicInfo };
       }
       
@@ -817,7 +827,7 @@ ns.extractMetadata = function(fileId, accessToken, filename) {
   function extractOtherFormatMetadata_(imageBytes, basicInfo) {
     // For now, return basic file info
     // TODO: Implement format-specific metadata extraction for PNG, WEBP, etc.
-    Logger.log('Format-specific extraction not yet implemented for ' + basicInfo.format);
+    Logger.log(' ⚠️ Format-specific extraction not yet implemented for ' + basicInfo.format);
     return { hasExif: false, fileInfo: basicInfo };
   }
   
