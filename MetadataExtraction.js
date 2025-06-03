@@ -228,6 +228,117 @@ var MetadataExtraction = (function() {
     }
   };
   
+  // Add this function to MetadataExtraction.js
+
+/**
+ * Validates and sanitizes metadata before sending to Box
+ * @param {object} metadata Raw metadata object
+ * @returns {object} Clean metadata object
+ */
+ns.sanitizeMetadataForBox = function(metadata) {
+  var clean = {};
+  
+  try {
+    // String fields
+    if (metadata.originalFilename) clean.originalFilename = String(metadata.originalFilename);
+    if (metadata.folderPath) clean.folderPath = String(metadata.folderPath);
+    if (metadata.fileFormat) clean.fileFormat = String(metadata.fileFormat);
+    if (metadata.cameraModel) clean.cameraModel = String(metadata.cameraModel);
+    if (metadata.subject) clean.subject = String(metadata.subject);
+    if (metadata.aspectRatio) clean.aspectRatio = String(metadata.aspectRatio);
+    
+    // Float fields - ensure they're numbers
+    if (typeof metadata.fileSizeMB === 'number' && !isNaN(metadata.fileSizeMB)) {
+      clean.fileSizeMB = Number(metadata.fileSizeMB);
+    }
+    if (typeof metadata.imageWidth === 'number' && !isNaN(metadata.imageWidth)) {
+      clean.imageWidth = Number(metadata.imageWidth);
+    }
+    if (typeof metadata.imageHeight === 'number' && !isNaN(metadata.imageHeight)) {
+      clean.imageHeight = Number(metadata.imageHeight);
+    }
+    if (typeof metadata.megapixels === 'number' && !isNaN(metadata.megapixels)) {
+      clean.megapixels = Number(metadata.megapixels);
+    }
+    
+    // GPS coordinates
+    if (typeof metadata.gpsLatitude === 'number' && !isNaN(metadata.gpsLatitude)) {
+      clean.gpsLatitude = Number(metadata.gpsLatitude);
+    }
+    if (typeof metadata.gpsLongitude === 'number' && !isNaN(metadata.gpsLongitude)) {
+      clean.gpsLongitude = Number(metadata.gpsLongitude);
+    }
+    if (typeof metadata.gpsAltitude === 'number' && !isNaN(metadata.gpsAltitude)) {
+      clean.gpsAltitude = Number(metadata.gpsAltitude);
+    }
+    
+    // Date fields - ensure proper format
+    if (metadata.dateTaken) {
+      try {
+        var date = new Date(metadata.dateTaken);
+        if (!isNaN(date.getTime())) {
+          clean.dateTaken = date.toISOString().split('T')[0]; // YYYY-MM-DD
+        }
+      } catch (e) {
+        // Skip invalid dates
+      }
+    }
+    
+    if (metadata.lastProcessedDate) {
+      try {
+        var procDate = new Date(metadata.lastProcessedDate);
+        if (!isNaN(procDate.getTime())) {
+          clean.lastProcessedDate = procDate.toISOString().split('T')[0];
+        }
+      } catch (e) {
+        clean.lastProcessedDate = new Date().toISOString().split('T')[0];
+      }
+    }
+    
+    // Enum fields - ensure valid values
+    var validContentTypes = ['artwork', 'fabrication_process', 'marketing_material', 'team_portrait', 'event_photo', 'equipment', 'facility_interior', 'facility_exterior', 'documentation', 'other'];
+    if (validContentTypes.indexOf(metadata.contentType) !== -1) {
+      clean.contentType = metadata.contentType;
+    } else {
+      clean.contentType = 'other';
+    }
+    
+    var validStages = ['unprocessed', 'basic_extracted', 'exif_extracted', 'ai_analyzed', 'human_reviewed', 'complete'];
+    if (validStages.indexOf(metadata.processingStage) !== -1) {
+      clean.processingStage = metadata.processingStage;
+    } else {
+      clean.processingStage = 'basic_extracted';
+    }
+    
+    var validDepartments = ['fabrication', 'design', 'marketing', 'administration', 'operations', 'general'];
+    if (validDepartments.indexOf(metadata.department) !== -1) {
+      clean.department = metadata.department;
+    } else {
+      clean.department = 'general';
+    }
+    
+    // Add other essential fields
+    if (metadata.processingVersion) clean.processingVersion = String(metadata.processingVersion);
+    if (metadata.buildNumber) clean.buildNumber = String(metadata.buildNumber);
+    
+    return clean;
+    
+  } catch (error) {
+    Logger.log('Error sanitizing metadata: ' + error.toString());
+    return {
+      originalFilename: metadata.originalFilename || 'unknown',
+      processingStage: 'basic_extracted',
+      contentType: 'other',
+      department: 'general',
+      lastProcessedDate: new Date().toISOString().split('T')[0]
+    };
+  }
+};
+
+// Update the extractMetadata function to use sanitization:
+// Replace the final return statement with:
+return ns.sanitizeMetadataForBox(combinedMetadata);
+
   /**
    * Extracts comprehensive metadata from file details.
    * @param {object} fileDetails File details from Box API
@@ -455,6 +566,14 @@ var MetadataExtraction = (function() {
    * @param {string} accessToken Valid Box access token
    * @returns {object} Enhanced metadata object
    */
+// Replace the extractMetadata function in MetadataExtraction.js with this fixed version:
+
+/**
+ * Extracts metadata combining basic info, EXIF, and Vision API analysis.
+ * @param {object} fileDetails Full file details from Box API
+ * @param {string} accessToken Valid Box access token
+ * @returns {object} Enhanced metadata object
+ */
 ns.extractMetadata = function(fileDetails, accessToken) {
   // Extract filename and fileId from fileDetails for use in logging and calls
   const filename = fileDetails.name;
@@ -467,13 +586,34 @@ ns.extractMetadata = function(fileDetails, accessToken) {
   // Extract EXIF data, passing filename for logging
   var exifData = extractMetadata(fileId, accessToken, filename); // Call to ExifExtraction.js#extractMetadata
   if (exifData && exifData.hasExif) {
-    if (exifData.cameraModel) combinedMetadata.cameraModel = exifData.cameraModel;
-    if (exifData.dateTaken) combinedMetadata.dateTaken = exifData.dateTaken; // Ensure this is the correct field from your exifData structure
-    // If your exifData.metadata is the object to merge, adjust accordingly
     if (exifData.metadata) { // Assuming exifData.metadata holds the fields
-        if (exifData.metadata.cameraModel) combinedMetadata.cameraModel = exifData.metadata.cameraModel;
-        if (exifData.metadata.dateTaken) combinedMetadata.dateTaken = exifData.metadata.dateTaken;
-        // Add other relevant EXIF fields from exifData.metadata to combinedMetadata
+      if (exifData.metadata.cameraModel) combinedMetadata.cameraModel = exifData.metadata.cameraModel;
+      if (exifData.metadata.dateTaken) combinedMetadata.dateTaken = exifData.metadata.dateTaken;
+      if (exifData.metadata.imageWidth) combinedMetadata.imageWidth = exifData.metadata.imageWidth;
+      if (exifData.metadata.imageHeight) combinedMetadata.imageHeight = exifData.metadata.imageHeight;
+      if (exifData.metadata.aspectRatio) combinedMetadata.aspectRatio = exifData.metadata.aspectRatio;
+      if (exifData.metadata.megapixels) combinedMetadata.megapixels = exifData.metadata.megapixels;
+      
+      // GPS coordinates - all three values
+      if (typeof exifData.metadata.gpsLatitude === 'number') {
+        combinedMetadata.gpsLatitude = exifData.metadata.gpsLatitude;
+      }
+      if (typeof exifData.metadata.gpsLongitude === 'number') {
+        combinedMetadata.gpsLongitude = exifData.metadata.gpsLongitude;
+      }
+      if (typeof exifData.metadata.gpsAltitude === 'number') {
+        combinedMetadata.gpsAltitude = exifData.metadata.gpsAltitude;
+      }
+      
+      // Camera settings
+      if (exifData.metadata.cameraSettings) {
+        combinedMetadata.cameraSettings = exifData.metadata.cameraSettings;
+      }
+      
+      // Technical notes
+      if (exifData.metadata.technicalNotes) {
+        combinedMetadata.technicalNotes = exifData.metadata.technicalNotes;
+      }
     }
     combinedMetadata.processingStage = Config.PROCESSING_STAGE_EXIF;
   }
@@ -509,7 +649,8 @@ ns.extractMetadata = function(fileDetails, accessToken) {
   combinedMetadata.processingVersion = Config.PROCESSING_VERSION_ENHANCED; // Or dynamically set based on what was successful
   combinedMetadata.buildNumber = Config.getCurrentBuild();
 
-  return combinedMetadata;
+  // Apply sanitization and return
+  return ns.sanitizeMetadataForBox(combinedMetadata);
 };
  /**
    * Enhances metadata with AI-driven insights from Vision API.

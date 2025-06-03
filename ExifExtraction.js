@@ -49,6 +49,7 @@ function extractMetadata(fileId, accessToken, filename) {
     return { hasExif: false, fileInfo: {filename: fileDisplayName}, error: error.toString() };
   }
 }
+
 /**
  * Fallback basic EXIF extraction for compatibility.
  * @param {string} fileId Box file ID
@@ -126,6 +127,16 @@ function convertBasicExifToBoxFormat(basicExif) {
     boxMetadata.megapixels = Math.round((basicExif.imageWidth * basicExif.imageHeight) / 1000000 * 10) / 10;
   }
   
+  // GPS data - all three coordinates if available
+  if (basicExif.gpsLatitude && basicExif.gpsLongitude) {
+    boxMetadata.gpsLatitude = basicExif.gpsLatitude;
+    boxMetadata.gpsLongitude = basicExif.gpsLongitude;
+  }
+  
+  if (typeof basicExif.gpsAltitude === 'number') {
+    boxMetadata.gpsAltitude = basicExif.gpsAltitude;
+  }
+  
   // Technical details
   var technicalDetails = [];
   if (basicExif.fNumber) technicalDetails.push('f/' + basicExif.fNumber);
@@ -160,7 +171,10 @@ function parseBasicExif(imageBytes) {
     exposureTime: null,
     iso: null,
     focalLength: null,
-    flash: null
+    flash: null,
+    gpsLatitude: null,
+    gpsLongitude: null,
+    gpsAltitude: null
   };
   
   try {

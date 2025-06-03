@@ -238,7 +238,7 @@ function testBasicProcessingWorkflow() {
 /**
  * Test enhanced processing features (EXIF and Vision API).
  */
-function testFeatures() {
+function testEnhancedProcessingFeatures() {
   Logger.log('=== Testing Enhanced Processing Features ===\n');
   
   try {
@@ -277,8 +277,38 @@ function testFeatures() {
       if (exifResult) {
         Logger.log('✅ EXIF extraction completed');
         Logger.log('   Has EXIF: ' + exifResult.hasExif);
-        if (exifResult.hasExif && exifResult.metadata && exifResult.metadata.cameraModel) {
-          Logger.log('   Camera: ' + exifResult.metadata.cameraModel);
+        
+        if (exifResult.hasExif && exifResult.metadata) {
+          if (exifResult.metadata.cameraModel) {
+            Logger.log('   Camera: ' + exifResult.metadata.cameraModel);
+          }
+          if (exifResult.metadata.imageWidth && exifResult.metadata.imageHeight) {
+            Logger.log('   Dimensions: ' + exifResult.metadata.imageWidth + 'x' + exifResult.metadata.imageHeight);
+          }
+          if (exifResult.metadata.dateTaken) {
+            Logger.log('   Date Taken: ' + exifResult.metadata.dateTaken);
+          }
+          
+          // Test GPS data extraction
+          var gpsFound = false;
+          if (typeof exifResult.metadata.gpsLatitude === 'number') {
+            Logger.log('   GPS Latitude: ' + exifResult.metadata.gpsLatitude);
+            gpsFound = true;
+          }
+          if (typeof exifResult.metadata.gpsLongitude === 'number') {
+            Logger.log('   GPS Longitude: ' + exifResult.metadata.gpsLongitude);
+            gpsFound = true;
+          }
+          if (typeof exifResult.metadata.gpsAltitude === 'number') {
+            Logger.log('   GPS Altitude: ' + exifResult.metadata.gpsAltitude + 'm');
+            gpsFound = true;
+          }
+          
+          if (gpsFound) {
+            Logger.log('✅ GPS coordinate extraction working');
+          } else {
+            Logger.log('   No GPS data found in this image (normal for many photos)');
+          }
         }
       } else {
         Logger.log('⚠️ EXIF extraction returned null (normal for non-JPEG files)');
@@ -330,6 +360,26 @@ function testFeatures() {
         const enhancedMetadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
         Logger.log('✅ Enhanced processing test completed');
         Logger.log('   Final stage: ' + enhancedMetadata.processingStage);
+        
+        // Test GPS data in enhanced metadata
+        var enhancedGpsFound = false;
+        if (typeof enhancedMetadata.gpsLatitude === 'number') {
+          Logger.log('   Enhanced GPS Latitude: ' + enhancedMetadata.gpsLatitude);
+          enhancedGpsFound = true;
+        }
+        if (typeof enhancedMetadata.gpsLongitude === 'number') {
+          Logger.log('   Enhanced GPS Longitude: ' + enhancedMetadata.gpsLongitude);
+          enhancedGpsFound = true;
+        }
+        if (typeof enhancedMetadata.gpsAltitude === 'number') {
+          Logger.log('   Enhanced GPS Altitude: ' + enhancedMetadata.gpsAltitude + 'm');
+          enhancedGpsFound = true;
+        }
+        
+        if (enhancedGpsFound) {
+          Logger.log('✅ GPS data successfully passed through enhanced processing');
+        }
+        
       } else {
         Logger.log('❌ Could not get file details for enhanced processing');
       }
@@ -439,7 +489,7 @@ function testCompleteSetup() {
     testBasicProcessingWorkflow();
     
     Logger.log('\n3. Testing enhanced processing...');
-    testFeatures();
+    testEnhancedProcessingFeatures();
     
     Logger.log('\n4. Testing summary functions...');
     getImageProcessingSummary();
@@ -568,7 +618,7 @@ function diagnoseFolderAccess() {
 }
 
 /**
- * Comprehensive test of both EXIF and Vision API.
+ * Comprehensive test of both EXIF and Vision API with GPS data focus.
  * @param {string} testFileId Optional specific file ID to test
  */
 function testComprehensiveMetadataExtraction(testFileId) {
@@ -592,8 +642,8 @@ function testComprehensiveMetadataExtraction(testFileId) {
       Logger.log(`Testing with: ${testImages[0].name}\n`);
     }
     
-    // Test 1: EXIF Extraction
-    Logger.log("1. Testing EXIF Extraction...");
+    // Test 1: EXIF Extraction with GPS focus
+    Logger.log("1. Testing EXIF Extraction (including GPS data)...");
     const exifResult = extractMetadata(testFileId, accessToken);
     
     if (exifResult && exifResult.hasExif) {
@@ -610,6 +660,28 @@ function testComprehensiveMetadataExtraction(testFileId) {
         }
         if (metadata.aspectRatio) Logger.log(`     Aspect Ratio: ${metadata.aspectRatio}`);
         if (metadata.dateTaken) Logger.log(`     Date Taken: ${metadata.dateTaken}`);
+        
+        // Detailed GPS testing
+        Logger.log("   GPS Coordinate Testing:");
+        var gpsDataFound = false;
+        if (typeof metadata.gpsLatitude === 'number') {
+          Logger.log(`     ✅ GPS Latitude: ${metadata.gpsLatitude}°`);
+          gpsDataFound = true;
+        }
+        if (typeof metadata.gpsLongitude === 'number') {
+          Logger.log(`     ✅ GPS Longitude: ${metadata.gpsLongitude}°`);
+          gpsDataFound = true;
+        }
+        if (typeof metadata.gpsAltitude === 'number') {
+          Logger.log(`     ✅ GPS Altitude: ${metadata.gpsAltitude}m`);
+          gpsDataFound = true;
+        }
+        
+        if (gpsDataFound) {
+          Logger.log("     🌍 Complete GPS coordinate data successfully extracted!");
+        } else {
+          Logger.log("     📍 No GPS data in this image (normal for many photos)");
+        }
       }
     } else {
       Logger.log("⚠️ No EXIF data found (normal for some file types)");
@@ -668,6 +740,7 @@ function testComprehensiveMetadataExtraction(testFileId) {
     
     Logger.log("\n💡 Features provide:");
     Logger.log("• Comprehensive EXIF parsing with technical details");
+    Logger.log("• Complete GPS coordinate extraction (lat/lng/altitude)");
     Logger.log("• Intelligent categorization of Vision API results");
     Logger.log("• Better scene descriptions and object detection");
     Logger.log("• Enhanced error handling and retry logic");
@@ -768,4 +841,9 @@ function verifyVisionApiSetup() {
     Logger.log(`❌ Exception during Vision API verification: ${error.toString()}`);
     return false;
   }
+}
+
+// Alias for compatibility
+function testEnhancedProcessingFeatures() {
+  return testEnhancedProcessingFeatures();
 }

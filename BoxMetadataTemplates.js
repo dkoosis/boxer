@@ -99,6 +99,11 @@ function createOptimalImageMetadataTemplate(accessToken) {
       { key: 'extractedText', displayName: 'Extracted Text', type: 'string', description: 'Text found in image (OCR)' },
       { key: 'dominantColors', displayName: 'Dominant Colors', type: 'string', description: 'Primary colors in the image (comma-separated RGB values)' },
       
+      // === GPS/LOCATION DATA ===
+      { key: 'gpsLatitude', displayName: 'GPS Latitude', type: 'float', description: 'GPS Latitude coordinate' },
+      { key: 'gpsLongitude', displayName: 'GPS Longitude', type: 'float', description: 'GPS Longitude coordinate' },
+      { key: 'gpsAltitude', displayName: 'GPS Altitude', type: 'float', description: 'GPS Altitude in meters' },
+      
       // === BUSINESS METADATA ===
       { key: 'usageRights', displayName: 'Usage Rights', type: 'enum', description: 'Permissions for image usage',
         options: [
@@ -294,11 +299,8 @@ function getOrCreateImageTemplate(accessToken) {
   return template;
 }
 
-// Add this function to your BoxMetadataTemplates.gs file
-
 /**
  * Fetches and logs the schema (structure) of ALL metadata templates within a given scope.
- *
  * @param {string} scope Optional. The scope of the metadata templates (e.g., 'enterprise'). 
  * Defaults to Config.BOX_METADATA_SCOPE.
  */
@@ -361,7 +363,6 @@ function showAllMetadataTemplateSchemas(scope) {
 
 /**
  * Helper function to fetch and log a single template's schema.
- * (This is similar to the 'showMetadataTemplateSchema' function provided earlier but adapted for internal use here)
  * @param {string} templateKey
  * @param {string} scope
  * @param {string} accessToken
@@ -419,9 +420,5 @@ function fetchAndLogSingleTemplateSchema(templateKey, scope, accessToken) {
 }
 
 function runTestShowAllTemplateSchemas() {
-  // You can optionally specify a scope if it's different from your Config.BOX_METADATA_SCOPE
-  // const specificScope = 'global'; // for example, if you wanted to see global templates
-  // showAllMetadataTemplateSchemas(specificScope); 
-  
-  showAllMetadataTemplateSchemas(); // This will use the default scope from Config.gs
+  showAllMetadataTemplateSchemas();
 }

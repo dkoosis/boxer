@@ -221,7 +221,7 @@ var OptimizedProcessing = (function() {
   };
   
   /**
-   * Process file only if it needs processing
+   * Process file only if it needs processing - FIXED VERSION
    */
   ns.processFileIfNeeded = function(file, accessToken) {
     try {
@@ -240,7 +240,9 @@ var OptimizedProcessing = (function() {
       
       if (response.getResponseCode() === 200) {
         var fileDetails = JSON.parse(response.getContentText());
-        var metadata = MetadataExtraction.extractComprehensiveMetadata(fileDetails);
+        
+        // Use enhanced metadata extraction (includes EXIF, Vision API, and sanitization)
+        var metadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
         
         var success = BoxFileOperations.applyMetadata(file.id, metadata, accessToken);
         
@@ -539,7 +541,7 @@ function setupOptimizedProcessing() {
 }
 
 /**
- * Process all images in test folder using corrected search
+ * Process all images in test folder using enhanced processing - FIXED VERSION
  */
 function processAllTestFolderImages() {
   const accessToken = getValidAccessToken();
@@ -564,6 +566,7 @@ function processAllTestFolderImages() {
       });
       const fileDetails = JSON.parse(detailsResponse.getContentText());
       
+      // Use enhanced metadata extraction (includes sanitization)
       const metadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
       BoxFileOperations.applyMetadata(image.id, metadata, accessToken);
       

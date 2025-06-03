@@ -582,6 +582,15 @@ var EnhancedExifParser = (function() {
         }
       }
       
+      // Process GPS altitude if available
+      if (result.location.gpsaltitude && typeof result.location.gpsaltitude === 'number') {
+        result.location.altitude = result.location.gpsaltitude;
+        // Check altitude reference (0 = above sea level, 1 = below sea level)
+        if (result.location.gpsaltituderef === 1) {
+          result.location.altitude = -result.location.altitude;
+        }
+      }
+      
       // Calculate useful derived values
       if (result.image.imagewidth && result.image.imagelength) {
         result.image.aspectRatio = calculateAspectRatio_(result.image.imagewidth, result.image.imagelength);
@@ -625,9 +634,7 @@ var EnhancedExifParser = (function() {
    * @param {object} metadata Organized metadata
    * @returns {object} Box-compatible metadata
    */
-// In EnhancedExifParser.js
-
-function convertToBoxFormat_(metadata) { // metadata is the object from organizeMetadata_ or extractOtherFormatMetadata_
+function convertToBoxFormat_(metadata) {
   var boxMetadata = {
     // Initialize with defaults, but consider what's appropriate if no EXIF found
     processingStage: metadata.hasExif ? Config.PROCESSING_STAGE_EXIF : Config.PROCESSING_STAGE_BASIC,
@@ -642,6 +649,17 @@ function convertToBoxFormat_(metadata) { // metadata is the object from organize
     }
 
     // Image dimensions
+// In convertToBoxFormat_, ensure numeric fields are numbers:
+if (metadata.image && metadata.image.imagewidth) {
+  boxMetadata.imageWidth = Number(metadata.image.imagewidth);
+  boxMetadata.imageHeight = Number(metadata.image.imagelength);
+}
+if (typeof metadata.location.latitude === 'number') {
+  boxMetadata.gpsLatitude = Number(metadata.location.latitude);
+}
+
+
+
     if (metadata.image && metadata.image.imagewidth && metadata.image.imagelength) {
       boxMetadata.imageWidth = metadata.image.imagewidth;
       boxMetadata.imageHeight = metadata.image.imagelength;
@@ -651,24 +669,51 @@ function convertToBoxFormat_(metadata) { // metadata is the object from organize
       // Fallback to basicInfo if available (e.g., from PNG header parsing in extractBasicFileInfo_)
       boxMetadata.imageWidth = metadata.fileInfo.width;
       boxMetadata.imageHeight = metadata.fileInfo.height;
-      // Ensure calculateAspectRatio_ is accessible here or defined in this file if used
-      // For simplicity, you might skip aspect/megapixels if not from EXIF image object
     }
 
     // Date taken
-  if (metadata.datetime && metadata.datetime.datetimeoriginal) {
-  // Ensure proper ISO format
+// In EXIFParser.js, fix the date conversion:
+if (metadata.datetime && metadata.datetime.datetimeoriginal) {
   const dateValue = metadata.datetime.datetimeoriginal;
   if (typeof dateValue === 'string') {
-    // Convert EXIF date format (YYYY:MM:DD HH:MM:SS) to ISO
-    const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-    boxMetadata.dateTaken = new Date(isoDate).toISOString();
+    try {
+      const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+      const parsedDate = new Date(isoDate);
+      if (!isNaN(parsedDate.getTime())) {
+        boxMetadata.dateTaken = parsedDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      }
+    } catch (e) {
+      // Skip invalid dates
+    }
+  }
+}
+
+
+ if (metadata.datetime && metadata.datetime.datetimeoriginal) {
+  const dateValue = metadata.datetime.datetimeoriginal;
+  if (typeof dateValue === 'string') {
+    try {
+      const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+      const parsedDate = new Date(isoDate);
+      if (!isNaN(parsedDate.getTime())) {
+        boxMetadata.dateTaken = parsedDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      }
+    } catch (e) {
+      // Skip invalid dates
+    }
   }
 } else if (metadata.datetime && metadata.datetime.datetime) {
   const dateValue = metadata.datetime.datetime;
   if (typeof dateValue === 'string') {
-    const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-    boxMetadata.dateTaken = new Date(isoDate).toISOString();
+    try {
+      const isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+      const parsedDate = new Date(isoDate);
+      if (!isNaN(parsedDate.getTime())) {
+        boxMetadata.dateTaken = parsedDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+      }
+    } catch (e) {
+      // Skip invalid dates
+    }
   }
 }
 
@@ -688,22 +733,23 @@ function convertToBoxFormat_(metadata) { // metadata is the object from organize
         }
     }
 
-    // GPS coordinates
-    if (metadata.location && metadata.location.latitude && metadata.location.longitude) {
-      boxMetadata.gpsLatitude = metadata.location.latitude;
-      boxMetadata.gpsLongitude = metadata.location.longitude;
+    // GPS coordinates - ALL THREE VALUES
+    if (metadata.location) {
+      if (metadata.location.latitude && metadata.location.longitude) {
+        boxMetadata.gpsLatitude = metadata.location.latitude;
+        boxMetadata.gpsLongitude = metadata.location.longitude;
+      }
+      
+      // GPS altitude
+      if (typeof metadata.location.altitude === 'number') {
+        boxMetadata.gpsAltitude = metadata.location.altitude;
+      }
     }
 
     // File format
     if (metadata.fileInfo && metadata.fileInfo.format) {
       boxMetadata.fileFormat = metadata.fileInfo.format;
     }
-    // else if (metadata.fileInfo && metadata.fileInfo.filename) { // Redundant if basicInfo.format is always set
-    //     const parts = metadata.fileInfo.filename.split('.');
-    //     if (parts.length > 1) {
-    //         boxMetadata.fileFormat = parts.pop().toUpperCase();
-    //     }
-    // }
 
     // Technical notes
     var notes = [];
@@ -723,7 +769,8 @@ function convertToBoxFormat_(metadata) { // metadata is the object from organize
   }
 
   return boxMetadata;
-}  
+}
+  
   /**
    * Main extraction function - comprehensive metadata extraction from image files
    * @param {string} fileId Box file ID
