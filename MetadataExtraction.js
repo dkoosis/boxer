@@ -764,31 +764,39 @@ var MetadataExtraction = (function() {
     }
 
     // Analyze with Vision API, passing filename for logging
-    var visionAnalysis = analyzeImageWithVisionImproved(fileId, accessToken, filename);
-
-    if (visionAnalysis && !visionAnalysis.error) {
-      combinedMetadata.aiDetectedObjects = visionAnalysis.objects ? 
-        visionAnalysis.objects.map(function(obj) { return obj.name + ' (' + obj.confidence + ')'; }).join('; ') : '';
-      combinedMetadata.aiSceneDescription = visionAnalysis.sceneDescription || '';
-      combinedMetadata.extractedText = visionAnalysis.text ? 
-        visionAnalysis.text.replace(/\n/g, ' ').substring(0, Config.MAX_TEXT_EXTRACTION_LENGTH) : '';
-      combinedMetadata.dominantColors = visionAnalysis.dominantColors ? 
-        visionAnalysis.dominantColors.map(function(c) { return c.rgb + ' (' + c.score + ', ' + c.pixelFraction + ')'; }).join('; ') : '';
-      combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
-      combinedMetadata.processingStage = Config.PROCESSING_STAGE_AI;
-
-      // Apply AI-driven content enhancements
-      var aiEnhancements = ns.enhanceContentAnalysisWithAI(combinedMetadata, visionAnalysis, filename, combinedMetadata.folderPath);
-      Object.keys(aiEnhancements).forEach(function(key) {
-        combinedMetadata[key] = aiEnhancements[key];
-      });
-
-    } else if (visionAnalysis && visionAnalysis.error) {
-      Logger.log('  Vision API error for ' + filename + ': ' + (visionAnalysis.message || visionAnalysis.error));
+// Analyze with Vision API - skip HEIC/HEIF (not supported)
+    var skipVisionFormats = ['HEIC', 'HEIF', 'TIFF'];
+    
+    if (skipVisionFormats.indexOf(combinedMetadata.fileFormat) !== -1) {
+      Logger.log('⏭️ Skipping Vision API for ' + combinedMetadata.fileFormat + ' format: ' + filename);
       combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
-        'Vision API Error: ' + (visionAnalysis.message || visionAnalysis.error);
-    }
+        'Vision API skipped - ' + combinedMetadata.fileFormat + ' format not supported';
+    } else {
+      var visionAnalysis = analyzeImageWithVisionImproved(fileId, accessToken, filename);
 
+      if (visionAnalysis && !visionAnalysis.error) {
+        combinedMetadata.aiDetectedObjects = visionAnalysis.objects ? 
+          visionAnalysis.objects.map(function(obj) { return obj.name + ' (' + obj.confidence + ')'; }).join('; ') : '';
+        combinedMetadata.aiSceneDescription = visionAnalysis.sceneDescription || '';
+        combinedMetadata.extractedText = visionAnalysis.text ? 
+          visionAnalysis.text.replace(/\n/g, ' ').substring(0, Config.MAX_TEXT_EXTRACTION_LENGTH) : '';
+        combinedMetadata.dominantColors = visionAnalysis.dominantColors ? 
+          visionAnalysis.dominantColors.map(function(c) { return c.rgb + ' (' + c.score + ', ' + c.pixelFraction + ')'; }).join('; ') : '';
+        combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
+        combinedMetadata.processingStage = Config.PROCESSING_STAGE_AI;
+
+        // Apply AI-driven content enhancements
+        var aiEnhancements = ns.enhanceContentAnalysisWithAI(combinedMetadata, visionAnalysis, filename, combinedMetadata.folderPath);
+        Object.keys(aiEnhancements).forEach(function(key) {
+          combinedMetadata[key] = aiEnhancements[key];
+        });
+
+      } else if (visionAnalysis && visionAnalysis.error) {
+        Logger.log('  Vision API error for ' + filename + ': ' + (visionAnalysis.message || visionAnalysis.error));
+        combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
+          'Vision API Error: ' + (visionAnalysis.message || visionAnalysis.error);
+      }
+    }
     // Finalize processing metadata
     combinedMetadata.lastProcessedDate = new Date().toISOString(); // Use current timestamp
     combinedMetadata.processingVersion = Config.PROCESSING_VERSION_ENHANCED;
