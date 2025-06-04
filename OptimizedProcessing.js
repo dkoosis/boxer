@@ -147,107 +147,8 @@ var OptimizedProcessing = (function() {
     }
   };
   
-  /**
-   * Fallback Strategy: Processes only files that appear to be unprocessed.
-   * Searches for common image types and checks if they lack metadata.
-   * Limited by PROCESSING_BATCH_SIZE to ensure it finishes quickly.
-   */
-  ns.processUnprocessedFilesOnly = function() {
-    Logger.log("=== Fallback Strategy: Processing Unprocessed Files Only (Quick Scan) ===\n");
-    
-    var startTime = Date.now();
-    var accessToken = getValidAccessToken();
-    if (!accessToken) {
-        Logger.log("❌ No valid access token. Aborting unprocessed files scan.");
-        return;
-    }
-    var stats = { processed: 0, skipped_up_to_date: 0, errors: 0, files_considered: 0 };
-    var filesToPotentiallyProcess = [];
 
-    try {
-      // Define common image types for a broad search
-      var searchQueries = [
-        'type:file .jpg', 'type:file .jpeg', 'type:file .png', 
-        'type:file .heic', 'type:file .heif', 'type:file .tiff'
-        // Add more if needed, but keep it manageable for a quick scan
-      ];
-      
-      var filesFoundFromSearch = [];
-      for (var i = 0; i < searchQueries.length; i++) {
-        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS / 2) { // Shorter time for search phase
-          Logger.log("⏰ Approaching time limit during search phase, stopping search.");
-          break;
-        }
-        var query = searchQueries[i];
-        Logger.log(`Searching for potentially unprocessed files: "${query}" (limit ${PROCESSING_BATCH_SIZE * 2})`);
-        // Fetch more than batch size to account for already processed ones
-        var searchResults = ns.searchBoxFiles(query, accessToken, PROCESSING_BATCH_SIZE * 2); 
-        filesFoundFromSearch = filesFoundFromSearch.concat(searchResults);
-        Utilities.sleep(200); // Pause between searches
-      }
-      
-      // Deduplicate found files
-      var uniqueFiles = [];
-      var seenIds = {};
-      filesFoundFromSearch.forEach(function(file) {
-        if (!seenIds[file.id]) {
-          uniqueFiles.push(file);
-          seenIds[file.id] = true;
-        }
-      });
-      Logger.log(`Found ${uniqueFiles.length} unique files across searches.`);
-
-      // Filter down to files that actually lack metadata, up to PROCESSING_BATCH_SIZE
-      for (var j = 0; j < uniqueFiles.length; j++) {
-        if (filesToPotentiallyProcess.length >= PROCESSING_BATCH_SIZE) break; // Limit how many we attempt to process
-        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS * 0.75) { // Ensure time for actual processing
-            Logger.log("⏰ Approaching time limit before processing, stopping check.");
-            break;
-        }
-        var file = uniqueFiles[j];
-        if (!BoxFileOperations.hasExistingMetadata(file.id, accessToken, Config.BOX_METADATA_TEMPLATE_KEY)) {
-          filesToPotentiallyProcess.push(file);
-        }
-        if (j % 10 === 0) Utilities.sleep(100); // Small delay during metadata check loop
-      }
-      
-      Logger.log(`Identified ${filesToPotentiallyProcess.length} files lacking metadata for processing.`);
-      stats.files_considered = filesToPotentiallyProcess.length;
-
-      for (var k = 0; k < filesToPotentiallyProcess.length; k++) {
-        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
-          Logger.log("⏰ Time limit reached during processing of unprocessed files.");
-          break;
-        }
-        
-        var fileToProcess = filesToPotentiallyProcess[k];
-        Logger.log(`Processing new/unprocessed file: ${fileToProcess.name} (${fileToProcess.id})`);
-        var result = ns.processFileIfNeeded(fileToProcess, accessToken);
-        
-        if (result === 'processed') stats.processed++;
-        else if (result === 'skipped') stats.skipped_up_to_date++; // Should be rare here as we filtered by no metadata
-        else stats.errors++;
-        
-        Utilities.sleep(200); // Delay between processing
-      }
-      
-      ns.updateProcessingStats(stats, 'search_unprocessed_quick_scan');
-      
-    } catch (error) {
-      Logger.log("❌ CRITICAL Error in processing unprocessed files: " + error.toString() + (error.stack ? "\nStack: " + error.stack : ""));
-      stats.errors++;
-      ns.updateProcessingStats(stats, 'search_unprocessed_critical_error');
-    } finally {
-      Logger.log("\n📊 Unprocessed Files Scan Summary:");
-      Logger.log(`  Considered (lacking metadata): ${stats.files_considered}`);
-      Logger.log(`  Processed: ${stats.processed}`);
-      Logger.log(`  Skipped (unexpected): ${stats.skipped_up_to_date}`);
-      Logger.log(`  Errors: ${stats.errors}`);
-      Logger.log(`  Execution Time: ${(Date.now() - startTime) / 1000}s`);
-    }
-  };
-  
-  /**
+/**
    * Core logic to process a single file if it needs processing based on its metadata.
    * This version implements the "retry failed on new build" and "reprocess complete on new build" logic.
    * @param {object} file A file object from Box API (must include at least id and name).
@@ -276,17 +177,19 @@ var OptimizedProcessing = (function() {
                 Logger.log(`⏭️ Skipping FAILED file ${file.name} (ID: ${file.id}). Already failed under current build version (${fileBuildNumber}).`);
                 return 'skipped_failed_same_build';
             }
-        } else if (stage === Config.PROCESSING_STAGE_COMPLETE) {
+        } else if (stage === Config.PROCESSING_STAGE_COMPLETE || 
+                   stage === Config.PROCESSING_STAGE_AI || 
+                   stage === Config.PROCESSING_STAGE_REVIEW) {
+            // Consider AI_ANALYZED and HUMAN_REVIEWED as "complete enough" - only reprocess on build changes
             if (Config.shouldReprocessForBuild(fileBuildNumber)) {
-                Logger.log(`🔁 Reprocessing COMPLETE file ${file.name} (ID: ${file.id}) due to new build. (File build: ${fileBuildNumber}, Script build: ${currentScriptBuild})`);
+                Logger.log(`🔁 Reprocessing ${stage.toUpperCase()} file ${file.name} (ID: ${file.id}) due to new build. (File build: ${fileBuildNumber}, Script build: ${currentScriptBuild})`);
                 // Proceed to processing
             } else {
-                Logger.log(`⏭️ Skipped COMPLETE file ${file.name} (ID: ${file.id}). Processed by current build version (${fileBuildNumber}).`);
-                return 'skipped'; // Standard skip for up-to-date files
+                Logger.log(`⏭️ Skipped ${stage.toUpperCase()} file ${file.name} (ID: ${file.id}). Processed by current build version (${fileBuildNumber}).`);
+                return stage === Config.PROCESSING_STAGE_COMPLETE ? 'skipped' : 'skipped'; // All considered "complete enough"
             }
         } else {
-            // Any other stage (e.g., 'unprocessed', 'basic_extracted', 'ai_analyzed') that isn't 'failed' or 'complete'
-            // should generally be processed or re-processed to try and reach 'complete'.
+            // Only UNPROCESSED, BASIC_EXTRACTED, EXIF_EXTRACTED should continue processing
             Logger.log(`▶️ Processing file ${file.name} (ID: ${file.id}) with current stage: ${stage || 'None'}, file build: ${fileBuildNumber || 'None'}.`);
         }
     } else {
@@ -324,7 +227,9 @@ var OptimizedProcessing = (function() {
                 Logger.log(`✅ Successfully processed and applied metadata for ${file.name} with build ${metadataPayload.buildNumber || currentScriptBuild}. Stage: ${metadataPayload.processingStage}`);
                 // Determine if it was a retry of a failed/complete item
                 if (currentMetadata && currentMetadata.processingStage === Config.PROCESSING_STAGE_FAILED) return 'retried_failed_new_build';
-                if (currentMetadata && currentMetadata.processingStage === Config.PROCESSING_STAGE_COMPLETE) return 'retried_complete_new_build';
+                if (currentMetadata && (currentMetadata.processingStage === Config.PROCESSING_STAGE_COMPLETE || 
+                                      currentMetadata.processingStage === Config.PROCESSING_STAGE_AI ||
+                                      currentMetadata.processingStage === Config.PROCESSING_STAGE_REVIEW)) return 'retried_complete_new_build';
                 return 'processed';
             } else {
                 Logger.log(`❌ Failed to apply metadata for ${file.name} after extraction.`);
@@ -343,8 +248,143 @@ var OptimizedProcessing = (function() {
         BoxFileOperations.markFileAsFailed(file.id, accessToken, criticalErrorMsg.substring(0,250), currentScriptBuild);
         return 'error';
     }
+  };  
+
+// In dkoosis/boxer/boxer-dd651257104aaa36c00b667749eff28460a5de08/OptimizedProcessing.js
+
+  // ... other parts of OptimizedProcessing namespace ...
+
+  /**
+   * Fallback Strategy: Processes only files that appear to be unprocessed.
+   * Searches for common image types using a consolidated query and checks if they lack metadata.
+   * Limited by PROCESSING_BATCH_SIZE to ensure it finishes quickly.
+   */
+  ns.processUnprocessedFilesOnly = function() {
+    Logger.log("=== Fallback Strategy: Processing Unprocessed Files Only (Quick Scan with Consolidated Search) ===\n");
+    
+    var startTime = Date.now();
+    var accessToken = getValidAccessToken(); // Assumes this function is globally available (from BoxAuth.gs)
+    if (!accessToken) {
+        Logger.log("❌ No valid access token. Aborting unprocessed files scan.");
+        return;
+    }
+    var stats = { processed: 0, skipped_up_to_date: 0, errors: 0, files_considered: 0 };
+    var filesFoundFromSearch = []; // Initialize here
+
+    try {
+      // Define desired image extensions for a single, consolidated search
+      var imageExtensions = ['jpg', 'jpeg', 'png', 'heic', 'heif', 'tiff', 'gif', 'bmp', 'webp']; // Add or remove as needed
+      var extensionsString = imageExtensions.join(',');
+      var searchLimit = PROCESSING_BATCH_SIZE * 2; // How many initial candidates to fetch
+      
+      Logger.log(`Searching for potentially unprocessed files with extensions: "${extensionsString}" (limit ${searchLimit})`);
+
+      // Construct the URL for a single search query using file_extensions
+      // The Box API search endpoint. No 'query' parameter is strictly needed if 'file_extensions' is used as the primary filter.
+      // We include 'type=file' to ensure we only get files.
+      var searchUrl = Config.BOX_API_BASE_URL + '/search' +
+                     '?file_extensions=' + encodeURIComponent(extensionsString) +
+                     '&limit=' + searchLimit +
+                     '&type=file' + // Crucial to ensure we only get files
+                     '&fields=id,name,size,created_at,modified_at,parent,path_collection,mime_type';
+                     // Note: If Box API strictly requires a 'query' param even with file_extensions, 
+                     // you might need to add '&query=' (empty) or a generic one like '&query=*'
+                     // but typically file_extensions should suffice as a filter.
+
+      if (Date.now() - startTime <= MAX_EXECUTION_TIME_MS / 2) { // Check time before making the API call
+        var response = UrlFetchApp.fetch(searchUrl, { // Using UrlFetchApp directly for this custom call
+          headers: { 'Authorization': 'Bearer ' + accessToken },
+          muteHttpExceptions: true
+        });
+
+        var responseCode = response.getResponseCode();
+        if (responseCode === 200) {
+          var data = JSON.parse(response.getContentText());
+          // The data.entries should already be files of the specified extensions.
+          // A redundant check for item.type === 'file' is okay.
+          filesFoundFromSearch = (data.entries || []).filter(function(item) {
+            return item.type === 'file'; 
+          });
+        } else {
+          Logger.log(`Consolidated search failed. Code: ${responseCode}. URL: ${searchUrl}. Response: ${response.getContentText().substring(0,200)}`);
+          // filesFoundFromSearch will remain empty, and the function will proceed gracefully.
+        }
+      } else {
+         Logger.log("⏰ Approaching time limit before consolidated search phase could complete. Stopping search.");
+      }
+      
+      // Deduplicate found files (Box should return unique entries, but good for safety)
+      var uniqueFiles = [];
+      var seenIds = {};
+      filesFoundFromSearch.forEach(function(file) {
+        if (!seenIds[file.id]) {
+          uniqueFiles.push(file);
+          seenIds[file.id] = true;
+        }
+      });
+      Logger.log(`Found ${uniqueFiles.length} unique file(s) from consolidated search.`);
+
+      var filesToPotentiallyProcess = [];
+      // Filter down to files that actually lack metadata, up to PROCESSING_BATCH_SIZE
+      for (var j = 0; j < uniqueFiles.length; j++) {
+        if (filesToPotentiallyProcess.length >= PROCESSING_BATCH_SIZE) break;
+        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS * 0.75) { 
+            Logger.log("⏰ Approaching time limit before processing, stopping file check.");
+            break;
+        }
+        var file = uniqueFiles[j];
+        // Assuming BoxFileOperations.hasExistingMetadata is reliable now
+        if (!BoxFileOperations.hasExistingMetadata(file.id, accessToken, Config.BOX_METADATA_TEMPLATE_KEY)) {
+          filesToPotentiallyProcess.push(file);
+        }
+        if (j > 0 && j % 10 === 0) Utilities.sleep(100); // Small delay during metadata check loop, if checking many
+      }
+      
+      Logger.log(`Identified ${filesToPotentiallyProcess.length} files lacking metadata for processing.`);
+      stats.files_considered = filesToPotentiallyProcess.length;
+
+      for (var k = 0; k < filesToPotentiallyProcess.length; k++) {
+        // ... (rest of the processing loop for filesToPotentiallyProcess remains the same) ...
+        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
+          Logger.log("⏰ Time limit reached during processing of unprocessed files.");
+          break;
+        }
+        
+        var fileToProcess = filesToPotentiallyProcess[k];
+        Logger.log(`Processing new/unprocessed file: ${fileToProcess.name} (${fileToProcess.id})`);
+        var result = ns.processFileIfNeeded(fileToProcess, accessToken); // This calls the core logic
+        
+        if (result === 'processed' || result === 'retried_failed_new_build' || result === 'retried_complete_new_build') {
+            stats.processed++;
+        } else if (result === 'skipped' || result === 'skipped_failed_same_build') {
+            stats.skipped_up_to_date++; // Simplified skip counting for this summary
+        } else {
+            stats.errors++;
+        }
+        
+        Utilities.sleep(200); // Delay between processing
+      }
+      
+      ns.updateProcessingStats(stats, 'search_unprocessed_consolidated'); // Updated strategy name for stats
+      
+    } catch (error) {
+      Logger.log("❌ CRITICAL Error in processing unprocessed files (consolidated search): " + error.toString() + (error.stack ? "\nStack: " + error.stack : ""));
+      stats.errors++;
+      ns.updateProcessingStats(stats, 'search_unprocessed_consolidated_critical_error');
+    } finally {
+      Logger.log("\n📊 Unprocessed Files Scan Summary (Consolidated Search):");
+      Logger.log(`  Considered (initially found matching extensions): ${uniqueFiles ? uniqueFiles.length : 'N/A'}`);
+      Logger.log(`  Identified as lacking metadata: ${stats.files_considered}`);
+      Logger.log(`  Processed (or retried due to new build): ${stats.processed}`);
+      Logger.log(`  Skipped (up-to-date or failed on same build): ${stats.skipped_up_to_date}`);
+      Logger.log(`  Errors: ${stats.errors}`);
+      Logger.log(`  Execution Time: ${(Date.now() - startTime) / 1000}s`);
+    }
   };
-  
+
+// ... rest of OptimizedProcessing.js ...
+
+
   /**
    * Search Box for files matching a query.
    * @param {string} query The Box search query string.
@@ -434,7 +474,7 @@ var OptimizedProcessing = (function() {
     Config.SCRIPT_PROPERTIES.setProperty(CHECKPOINT_PROPERTY, JSON.stringify(checkpoint));
     Logger.log("Checkpoint saved: " + JSON.stringify(checkpoint));
   };
-    
+  
   ns.updateProcessingStats = function(runStats, strategyName) {
     var statsProperty = Config.SCRIPT_PROPERTIES.getProperty(STATS_PROPERTY);
     var allStats = statsProperty ? JSON.parse(statsProperty) : [];

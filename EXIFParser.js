@@ -10,7 +10,7 @@ var EnhancedExifParser = (function() {
   'use strict';
   
   var ns = {};
-  var utils_ = null;
+  var utils_ = null; // For cUseful library
   
   // Enhanced file format signatures
   var FILE_SIGNATURES = {
@@ -62,7 +62,7 @@ var EnhancedExifParser = (function() {
     0xA40A: 'Sharpness',
     
     // Advanced camera info
-    0xA002: 'PixelXDimension', 0xA003: 'PixelYDimension',
+    0xA002: 'PixelXDimension', 0xA003: 'PixelYDimension', // EXIF specific dimensions
     0xA430: 'CameraOwnerName', 0xA431: 'BodySerialNumber',
     0xA433: 'LensMake', 0xA434: 'LensModel', 0xA435: 'LensSerialNumber',
     
@@ -73,7 +73,7 @@ var EnhancedExifParser = (function() {
     
     // Maker notes and metadata
     0x927C: 'MakerNote', 0x9286: 'UserComment', 0x83BB: 'IPTC',
-    0x8773: 'ICC_Profile', 0x02BC: 'XMLPacket'
+    0x8773: 'ICC_Profile', 0x02BC: 'XMLPacket' // XMP
   };
   
   // Value interpretations for specific tags
@@ -95,81 +95,49 @@ var EnhancedExifParser = (function() {
     0xA001: { // ColorSpace
       1: 'sRGB', 0xFFFF: 'Uncalibrated'
     }
+    // Add more interpretations as needed
   };
   
-  /**
-   * Initialize cUseful utilities
-   * @private
-   */
   function initUtils_() {
     if (!utils_) {
       try {
         utils_ = cUseful;
-        Logger.log('ℹ️ ExifParser: cUseful library initialized');
+        Logger.log('ℹ️ EnhancedExifParser: cUseful library initialized.');
       } catch (e) {
-        Logger.log('❌ ERROR: EnhancedExifParser - cUseful library not available');
-        throw new Error('cUseful library is required but not available');
+        Logger.log('❌ ERROR: EnhancedExifParser - cUseful library not available: ' + e.toString());
+        throw new Error('cUseful library is required but not available.');
       }
     }
     return utils_;
   }
   
-  /**
-   * Enhanced file format detection with multiple signatures
-   * @param {Uint8Array} bytes Image data
-   * @returns {string|null} Detected format
-   */
   function detectFileFormat_(bytes) {
     if (!bytes || bytes.length < 12) return null;
-    
     try {
-      // JPEG
       if (bytes[0] === 0xFF && bytes[1] === 0xD8) return 'JPEG';
-      
-      // PNG
       if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return 'PNG';
-      
-      // WebP (RIFF + WEBP)
       if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
           bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return 'WEBP';
-      
-      // HEIC/HEIF (check ftyp box)
       if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
         var brand = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
-        if (['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs', 'mif1'].indexOf(brand) !== -1) {
-          return 'HEIC';
-        }
-        if (brand === 'avif') return 'AVIF';
+        if (['heic', 'heix', 'hevc', 'hevx', 'heim', 'heis', 'hevm', 'hevs', 'mif1', 'msf1', 'iso8'].indexOf(brand.toLowerCase()) !== -1) return 'HEIC';
+        if (brand.toLowerCase() === 'avif') return 'AVIF';
       }
-      
-      // GIF
       if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return 'GIF';
-      
-      // TIFF
       if ((bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2A && bytes[3] === 0x00) ||
           (bytes[0] === 0x4D && bytes[1] === 0x4D && bytes[2] === 0x00 && bytes[3] === 0x2A)) return 'TIFF';
-      
-      // BMP
       if (bytes[0] === 0x42 && bytes[1] === 0x4D) return 'BMP';
-      
       return null;
     } catch (error) {
       Logger.log('Error detecting file format: ' + error.toString());
       return null;
     }
   }
-  
-  /**
-   * Safe buffer view creation with enhanced error handling
-   * @param {Uint8Array} bytes Raw byte data
-   * @param {boolean} littleEndian Endianness flag
-   * @returns {object} Buffer view object
-   */
+
   function createSafeBufferView_(bytes, littleEndian) {
     if (!bytes || bytes.length === 0) {
       throw new Error('Invalid or empty byte array');
     }
-    
     try {
       var dataView = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       return {
@@ -177,35 +145,30 @@ var EnhancedExifParser = (function() {
         dataView: dataView,
         littleEndian: littleEndian || false,
         byteLength: bytes.length,
-        
         safeGetUint8: function(offset) {
           if (offset < 0 || offset >= this.byteLength) return null;
           try { return this.dataView.getUint8(offset); } catch (e) { return null; }
         },
-        
         safeGetUint16: function(offset) {
           if (offset < 0 || offset + 1 >= this.byteLength) return null;
           try { return this.dataView.getUint16(offset, this.littleEndian); } catch (e) { return null; }
         },
-        
         safeGetUint32: function(offset) {
           if (offset < 0 || offset + 3 >= this.byteLength) return null;
           try { return this.dataView.getUint32(offset, this.littleEndian); } catch (e) { return null; }
         },
-        
         safeGetString: function(offset, length) {
           if (offset < 0 || offset + length > this.byteLength || length <= 0) return '';
           try {
             var chars = [];
             for (var i = 0; i < length; i++) {
               var charCode = this.bytes[offset + i];
-              if (charCode === 0) break;
+              if (charCode === 0) break; 
               if (charCode >= 32 && charCode <= 126) chars.push(String.fromCharCode(charCode));
             }
             return chars.join('');
           } catch (e) { return ''; }
         },
-        
         safeGetBytes: function(offset, length) {
           if (offset < 0 || offset + length > this.byteLength || length <= 0) return new Uint8Array(0);
           try { return this.bytes.slice(offset, offset + length); } catch (e) { return new Uint8Array(0); }
@@ -215,580 +178,447 @@ var EnhancedExifParser = (function() {
       throw new Error('Failed to create buffer view: ' + error.toString());
     }
   }
-  
-  /**
-   * Find EXIF segment in JPEG with enhanced error handling
-   * @param {Uint8Array} imageBytes JPEG image data
-   * @returns {Uint8Array|null} EXIF data segment
-   */
+
   function findExifSegment_(imageBytes) {
     if (!imageBytes || imageBytes.length < 20) return null;
-    
     try {
-      var offset = 2; // Skip SOI marker
-      var maxSearchOffset = Math.min(imageBytes.length - 4, 65536); // Search in first 64KB
-      
+      var offset = 2; 
+      var maxSearchOffset = Math.min(imageBytes.length - 4, 65536); 
       while (offset < maxSearchOffset) {
         if (imageBytes[offset] === 0xFF) {
           var markerType = imageBytes[offset + 1];
-          
-          if (markerType === 0xE1) { // APP1 marker
+          if (markerType === 0xE1) { 
             var segmentLength = (imageBytes[offset + 2] << 8) | imageBytes[offset + 3];
+            if (segmentLength < 8) { 
+               if (offset + 2 < imageBytes.length) { // Check if we can read the length for next segment
+                 offset += ((imageBytes[offset+2] << 8) | imageBytes[offset+3]) + 2;
+               } else { break; }
+               continue;
+            }
             var exifHeaderOffset = offset + 4;
-            
-            // Check for "Exif\0\0" header
             if (exifHeaderOffset + 6 <= imageBytes.length &&
                 imageBytes[exifHeaderOffset] === 0x45 && imageBytes[exifHeaderOffset + 1] === 0x78 &&
                 imageBytes[exifHeaderOffset + 2] === 0x69 && imageBytes[exifHeaderOffset + 3] === 0x66 &&
                 imageBytes[exifHeaderOffset + 4] === 0x00 && imageBytes[exifHeaderOffset + 5] === 0x00) {
-              
               var tiffDataStart = exifHeaderOffset + 6;
-              var tiffDataLength = segmentLength - 8; // Subtract APP1 header and "Exif\0\0"
-              
-              if (tiffDataStart + tiffDataLength <= imageBytes.length) {
+              var tiffDataLength = segmentLength - 2 - 6; 
+              if (tiffDataLength > 0 && tiffDataStart + tiffDataLength <= imageBytes.length) {
                 return imageBytes.slice(tiffDataStart, tiffDataStart + tiffDataLength);
               }
             }
           }
-          
-          // Move to next segment
-          if (offset + 2 < imageBytes.length) {
+          if (offset + 3 < imageBytes.length) {
             var segLength = (imageBytes[offset + 2] << 8) | imageBytes[offset + 3];
+            if (segLength < 2) { offset++; continue;}
             offset += segLength + 2;
           } else {
-            break;
+            break; 
           }
         } else {
-          offset++;
+          offset++; 
         }
       }
-      
       return null;
     } catch (error) {
       Logger.log('Error finding EXIF segment: ' + error.toString());
       return null;
     }
   }
-  
-  /**
-   * Parse TIFF structure with comprehensive error handling
-   * @param {Uint8Array} tiffData TIFF/EXIF data
-   * @returns {object|null} Parsed TIFF structure
-   */
+
   function parseTiffStructure_(tiffData) {
     if (!tiffData || tiffData.length < 8) return null;
-    
     try {
-      var byteOrder = (tiffData[0] << 8) | tiffData[1];
-      var littleEndian = byteOrder === 0x4949;
-      
-      if (byteOrder !== 0x4949 && byteOrder !== 0x4D4D) {
-        Logger.log('Invalid TIFF byte order: ' + byteOrder.toString(16));
+      var byteOrderMarker = (tiffData[0] << 8) | tiffData[1];
+      var littleEndian = byteOrderMarker === 0x4949; 
+      if (byteOrderMarker !== 0x4949 && byteOrderMarker !== 0x4D4D) {
+        Logger.log('Invalid TIFF byte order marker: 0x' + byteOrderMarker.toString(16));
         return null;
       }
-      
       var view = createSafeBufferView_(tiffData, littleEndian);
-      var magic = view.safeGetUint16(2);
-      
-      if (magic !== 42) {
-        Logger.log('Invalid TIFF magic number: ' + magic);
+      var tiffMagicNumber = view.safeGetUint16(2); 
+      if (tiffMagicNumber !== 42) {
+        Logger.log('Invalid TIFF magic number: ' + tiffMagicNumber);
         return null;
       }
-      
       var ifd0Offset = view.safeGetUint32(4);
-      if (!ifd0Offset || ifd0Offset >= tiffData.length) {
+      if (ifd0Offset === null || ifd0Offset === 0 || ifd0Offset >= tiffData.length) { // IFD0 offset cannot be 0
         Logger.log('Invalid IFD0 offset: ' + ifd0Offset);
         return null;
       }
-      
       var parsedData = {
         littleEndian: littleEndian,
-        ifd0: {},
-        exif: {},
-        gps: {}
+        ifd0: {}, exif: {}, gps: {}
       };
-      
-      // Parse IFD0
       parsedData.ifd0 = parseIFD_(view, ifd0Offset, 'IFD0');
-      
-      // Parse EXIF IFD if present
-      var exifOffset = parsedData.ifd0[0x8769];
-      if (exifOffset && exifOffset < tiffData.length) {
-        parsedData.exif = parseIFD_(view, exifOffset, 'ExifIFD');
+      var exifOffsetTag = parsedData.ifd0[0x8769]; 
+      if (typeof exifOffsetTag === 'number' && exifOffsetTag > 0 && exifOffsetTag < tiffData.length) {
+        parsedData.exif = parseIFD_(view, exifOffsetTag, 'ExifIFD');
       }
-      
-      // Parse GPS IFD if present
-      var gpsOffset = parsedData.ifd0[0x8825];
-      if (gpsOffset && gpsOffset < tiffData.length) {
-        parsedData.gps = parseIFD_(view, gpsOffset, 'GPSIFD');
+      var gpsOffsetTag = parsedData.ifd0[0x8825]; 
+      if (typeof gpsOffsetTag === 'number' && gpsOffsetTag > 0 && gpsOffsetTag < tiffData.length) {
+        parsedData.gps = parseIFD_(view, gpsOffsetTag, 'GPSIFD');
       }
-      
       return parsedData;
-      
     } catch (error) {
       Logger.log('Error parsing TIFF structure: ' + error.toString());
       return null;
     }
   }
-  
-  /**
-   * Parse IFD with enhanced error handling
-   * @param {object} view Buffer view
-   * @param {number} offset IFD offset
-   * @param {string} ifdName IFD name for logging
-   * @returns {object} Parsed tags
-   */
-  function parseIFD_(view, offset, ifdName) {
+
+  function parseIFD_(view, ifdOffset, ifdName) {
     var tags = {};
-    
     try {
-      var entryCount = view.safeGetUint16(offset);
-      if (!entryCount || entryCount > 1000) { // Reasonable limit
-        Logger.log('Invalid entry count for ' + ifdName + ': ' + entryCount);
+      var entryCount = view.safeGetUint16(ifdOffset);
+      if (entryCount === null || entryCount > 500) { // Max reasonable entries
+        Logger.log('Invalid or excessive entry count for ' + ifdName + ': ' + entryCount);
         return tags;
       }
-      
-      offset += 2;
-      
+      var currentOffset = ifdOffset + 2; 
       for (var i = 0; i < entryCount; i++) {
-        if (offset + 12 > view.byteLength) break;
-        
-        var tagId = view.safeGetUint16(offset);
-        var type = view.safeGetUint16(offset + 2);
-        var count = view.safeGetUint32(offset + 4);
-        var valueDataOffset = offset + 8;
-        
-        if (!tagId || !type || type > 12 || !count || count > 100000) {
-          offset += 12;
+        if (currentOffset + 12 > view.byteLength) {
+          Logger.log('Error parsing ' + ifdName + ': Not enough data for directory entry ' + (i + 1));
+          break;
+        }
+        var tagId = view.safeGetUint16(currentOffset);
+        var type = view.safeGetUint16(currentOffset + 2);
+        var count = view.safeGetUint32(currentOffset + 4);
+        var valueDataBytes = view.safeGetBytes(currentOffset + 8, 4); 
+
+        if (tagId === null || type === null || count === null || valueDataBytes.length < 4 || type === 0 || type > 12) {
+          Logger.log('Error parsing ' + ifdName + ': Invalid tag field(s) for entry ' + (i+1) + 
+                      ' TagID: ' + tagId + ' Type: ' + type + ' Count: ' + count);
+          currentOffset += 12;
           continue;
         }
-        
-        var typeSize = TYPE_SIZES[type] || 1;
+        var typeSize = TYPE_SIZES[type];
         var totalValueBytes = typeSize * count;
-        var actualValueOffset = valueDataOffset;
-        
+        var valueBuffer;
+        var actualValueOffsetInItsBuffer = 0;
+
         if (totalValueBytes > 4) {
-          actualValueOffset = view.safeGetUint32(valueDataOffset);
-          if (!actualValueOffset || actualValueOffset + totalValueBytes > view.byteLength) {
-            offset += 12;
+          var offsetFromTiffStart = createSafeBufferView_(valueDataBytes, view.littleEndian).safeGetUint32(0);
+          if (offsetFromTiffStart === null || offsetFromTiffStart + totalValueBytes > view.bytes.length) { // Check against main view's original byte array length
+            Logger.log('Error parsing ' + ifdName + ': Invalid offset 0x' + (offsetFromTiffStart !== null ? offsetFromTiffStart.toString(16) : 'null') + ' for tag 0x' + tagId.toString(16) + ' (totalValueBytes: ' + totalValueBytes + ')');
+            currentOffset += 12;
             continue;
           }
+          valueBuffer = view.bytes.slice(offsetFromTiffStart, offsetFromTiffStart + totalValueBytes);
+        } else {
+          valueBuffer = valueDataBytes.slice(0, totalValueBytes); // Use only necessary bytes
         }
         
-        var value = parseTagValue_(view, type, actualValueOffset, count, tagId);
+        var valueView = createSafeBufferView_(valueBuffer, view.littleEndian);
+        var value = parseTagValue_(valueView, type, actualValueOffsetInItsBuffer, count, tagId);
+        
         if (value !== null) {
-          var tagName = EXIF_TAGS[tagId] || ('Tag0x' + tagId.toString(16));
+          var tagName = EXIF_TAGS[tagId] || ('Tag0x' + tagId.toString(16).toUpperCase());
           tags[tagName] = value;
-          tags[tagId] = value; // Also store by ID
+          tags[tagId] = value; 
         }
-        
-        offset += 12;
+        currentOffset += 12; 
       }
     } catch (error) {
-      Logger.log('Error parsing ' + ifdName + ': ' + error.toString());
+      Logger.log('Exception parsing ' + ifdName + ': ' + error.toString());
     }
-    
     return tags;
   }
-  
-  /**
-   * Parse tag value with enhanced type handling
-   * @param {object} view Buffer view
-   * @param {number} type Data type
-   * @param {number} offset Value offset
-   * @param {number} count Value count
-   * @param {number} tagId Tag identifier
-   * @returns {*} Parsed value
-   */
+
   function parseTagValue_(view, type, offset, count, tagId) {
     try {
       var values = [];
-      
-      switch (type) {
-        case EXIF_TYPES.BYTE:
-        case EXIF_TYPES.UNDEFINED:
-          if (count > 1000) return null; // Reasonable limit
-          for (var i = 0; i < count; i++) {
-            var val = view.safeGetUint8(offset + i);
-            if (val !== null) values.push(val);
-          }
-          break;
-          
-        case EXIF_TYPES.ASCII:
-          return view.safeGetString(offset, Math.min(count, 1000));
-          
-        case EXIF_TYPES.SHORT:
-          if (count > 500) return null;
-          for (var i = 0; i < count; i++) {
-            var val = view.safeGetUint16(offset + i * 2);
-            if (val !== null) values.push(val);
-          }
-          break;
-          
-        case EXIF_TYPES.LONG:
-          if (count > 250) return null;
-          for (var i = 0; i < count; i++) {
-            var val = view.safeGetUint32(offset + i * 4);
-            if (val !== null) values.push(val);
-          }
-          break;
-          
-        case EXIF_TYPES.RATIONAL:
-          if (count > 125) return null;
-          for (var i = 0; i < count; i++) {
-            var num = view.safeGetUint32(offset + i * 8);
-            var den = view.safeGetUint32(offset + i * 8 + 4);
-            if (num !== null && den !== null) {
-              values.push(den === 0 ? 0 : num / den);
-            }
-          }
-          break;
-          
-        default:
-          return null;
+      var typeSize = TYPE_SIZES[type];
+      if (!typeSize) return null; 
+
+      for (var i = 0; i < count; i++) {
+        var currentValOffset = offset + (i * typeSize);
+        var val = null;
+        if (currentValOffset + typeSize > view.byteLength) {
+          Logger.log('Error parsing tag 0x' + tagId.toString(16) + ': Attempt to read past buffer for value ' + (i+1));
+          break; 
+        }
+        switch (type) {
+          case EXIF_TYPES.BYTE:       val = view.safeGetUint8(currentValOffset); break;
+          case EXIF_TYPES.UNDEFINED:  val = view.safeGetUint8(currentValOffset); break;
+          case EXIF_TYPES.ASCII:      return view.safeGetString(offset, count); 
+          case EXIF_TYPES.SHORT:      val = view.safeGetUint16(currentValOffset); break;
+          case EXIF_TYPES.LONG:       val = view.safeGetUint32(currentValOffset); break;
+          case EXIF_TYPES.RATIONAL:
+             if (currentValOffset + 8 <= view.byteLength) {
+                var num = view.safeGetUint32(currentValOffset);
+                var den = view.safeGetUint32(currentValOffset + 4);
+                if (num !== null && den !== null) val = (den === 0) ? 0 : num / den;
+             }
+            break;
+          default: Logger.log('Unsupported EXIF type ' + type + ' for tag 0x' + tagId.toString(16)); return null;
+        }
+        if (val !== null) values.push(val);
+        else if (type !== EXIF_TYPES.RATIONAL) break; 
       }
-      
-      return count === 1 ? (values[0] || 0) : values;
-      
+      if (values.length === 0 && type !== EXIF_TYPES.ASCII) return null; // ASCII can be empty string
+      if (type === EXIF_TYPES.ASCII) return values.join(""); // Should be handled by safeGetString already
+      return count === 1 && values.length === 1 ? values[0] : values;
     } catch (error) {
-      Logger.log('Error parsing tag value: ' + error.toString());
+      Logger.log('Error parsing value for tag 0x' + tagId.toString(16) + ', type ' + type + ': ' + error.toString());
       return null;
     }
   }
   
-  /**
-   * Extract basic file information
-   * @param {Uint8Array} imageBytes Image data
-   * @returns {object} Basic file info
-   */
   function extractBasicFileInfo_(imageBytes) {
     var info = {
       fileSize: imageBytes.length,
       format: detectFileFormat_(imageBytes),
-      width: null,
-      height: null,
-      hasMetadata: false
+      width: null, height: null,
+      hasMetadata: false 
     };
-    
     try {
-      // Try to extract basic dimensions based on format
       if (info.format === 'PNG' && imageBytes.length >= 24) {
-        var view = new DataView(imageBytes.buffer, imageBytes.byteOffset, imageBytes.byteLength);
-        info.width = view.getUint32(16);
-        info.height = view.getUint32(20);
+        var pngView = new DataView(imageBytes.buffer, imageBytes.byteOffset + 16, 8); 
+        info.width = pngView.getUint32(0, false); 
+        info.height = pngView.getUint32(4, false);
       } else if (info.format === 'GIF' && imageBytes.length >= 10) {
-        var view = new DataView(imageBytes.buffer, imageBytes.byteOffset, imageBytes.byteLength);
-        info.width = view.getUint16(6, true); // Little endian
-        info.height = view.getUint16(8, true);
+        var gifView = new DataView(imageBytes.buffer, imageBytes.byteOffset + 6, 4);
+        info.width = gifView.getUint16(0, true); 
+        info.height = gifView.getUint16(2, true);
       } else if (info.format === 'BMP' && imageBytes.length >= 26) {
-        var view = new DataView(imageBytes.buffer, imageBytes.byteOffset, imageBytes.byteLength);
-        info.width = view.getUint32(18, true);
-        info.height = view.getUint32(22, true);
+        var bmpView = new DataView(imageBytes.buffer, imageBytes.byteOffset + 18, 8);
+        info.width = bmpView.getInt32(0, true); 
+        info.height = Math.abs(bmpView.getInt32(4, true)); // Height can be negative for top-down bitmaps
       }
     } catch (error) {
-      Logger.log('Error extracting basic file info: ' + error.toString());
+      Logger.log('Error extracting basic file info (dimensions): ' + error.toString());
     }
-    
     return info;
   }
-  
-  /**
-   * Organize extracted EXIF data into useful categories
-   * @param {object} tiffStructure Parsed TIFF structure
-   * @param {object} basicInfo Basic file information
-   * @returns {object} Organized metadata
-   */
+
+  function convertDMSToDD_(dms, ref) {
+    if (!Array.isArray(dms) || dms.length === 0) return null;
+    var degrees = Number(dms[0]) || 0;
+    var minutes = dms.length > 1 ? (Number(dms[1]) || 0) : 0;
+    var seconds = dms.length > 2 ? (Number(dms[2]) || 0) : 0;
+    if (isNaN(degrees) || isNaN(minutes) || isNaN(seconds)) return null;
+    var dd = degrees + (minutes / 60) + (seconds / 3600);
+    if (ref === 'S' || ref === 'W') dd = -dd;
+    return dd;
+  }
+
+  function calculateAspectRatio_(width, height) {
+    if (!width || !height || width <= 0 || height <= 0) return null;
+    var gcd = function(a, b) { return b === 0 ? a : gcd(b, a % b); };
+    var divisor = gcd(Math.round(width), Math.round(height));
+    return (Math.round(width) / divisor) + ':' + (Math.round(height) / divisor);
+  }
+
   function organizeMetadata_(tiffStructure, basicInfo) {
     var result = {
-      hasExif: false,
-      fileInfo: basicInfo,
-      camera: {},
-      settings: {},
-      image: {},
-      datetime: {},
-      location: {},
-      technical: {},
-      other: {}
+      hasExif: false, fileInfo: basicInfo, camera: {}, settings: {}, image: {},
+      datetime: {}, location: {}, technical: {}, other: {}
     };
-    
-    if (!tiffStructure) return result;
-    
+    if (!tiffStructure) {
+      Logger.log("organizeMetadata_: No TIFF structure provided.");
+      return result;
+    }
     result.hasExif = true;
-    
     try {
-      // Combine all tags
       var allTags = {};
-      Object.keys(tiffStructure.ifd0 || {}).forEach(function(key) {
-        allTags[key] = tiffStructure.ifd0[key];
-      });
-      Object.keys(tiffStructure.exif || {}).forEach(function(key) {
-        allTags[key] = tiffStructure.exif[key];
-      });
-      Object.keys(tiffStructure.gps || {}).forEach(function(key) {
-        allTags[key] = tiffStructure.gps[key];
-      });
-      
-      // Organize by category
+      Object.keys(tiffStructure.ifd0 || {}).forEach(function(key) { allTags[key] = tiffStructure.ifd0[key]; });
+      Object.keys(tiffStructure.exif || {}).forEach(function(key) { if(!allTags[key]) allTags[key] = tiffStructure.exif[key]; });
+      Object.keys(tiffStructure.gps || {}).forEach(function(key) { if(!allTags[key]) allTags[key] = tiffStructure.gps[key]; });
+
       Object.keys(allTags).forEach(function(key) {
         var value = allTags[key];
-        var tagName = EXIF_TAGS[parseInt(key)] || key;
-        
-        // Camera information
-        if (['Make', 'Model', 'Software', 'LensMake', 'LensModel', 'CameraOwnerName', 'BodySerialNumber'].indexOf(tagName) !== -1) {
-          result.camera[tagName.toLowerCase()] = value;
-        }
-        // Camera settings
-        else if (['ExposureTime', 'FNumber', 'ISOSpeedRatings', 'FocalLength', 'Flash', 'MeteringMode', 'ExposureProgram', 'WhiteBalance'].indexOf(tagName) !== -1) {
-          result.settings[tagName.toLowerCase()] = value;
-          // Add interpreted values
-          var tagId = parseInt(key);
-          if (TAG_INTERPRETATIONS[tagId] && TAG_INTERPRETATIONS[tagId][value]) {
-            result.settings[tagName.toLowerCase() + 'Desc'] = TAG_INTERPRETATIONS[tagId][value];
+        var tagIdNum = parseInt(key);
+        var tagName = (EXIF_TAGS[tagIdNum] && !isNaN(tagIdNum)) ? EXIF_TAGS[tagIdNum] : key;
+        var lowerTagName = tagName.toLowerCase();
+
+        if (['make', 'model', 'software', 'lensmake', 'lensmodel', 'cameraownername', 'bodyserialnumber', 'artist', 'copyright'].indexOf(lowerTagName) !== -1) {
+          result.camera[lowerTagName] = value;
+        } else if (['exposuretime', 'fnumber', 'isospeedratings', 'focallength', 'flash', 'meteringmode', 'exposureprogram', 'whitebalance', 'shutterspeedvalue', 'aperturevalue', 'exposurebiasvalue', 'lightsource', 'focallengthin35mmfilm', 'exposuremode', 'scenecapturetype', 'contrast', 'saturation', 'sharpness'].indexOf(lowerTagName) !== -1) {
+          result.settings[lowerTagName] = value;
+          if (TAG_INTERPRETATIONS[tagIdNum] && TAG_INTERPRETATIONS[tagIdNum][value] !== undefined) {
+            result.settings[lowerTagName + 'desc'] = TAG_INTERPRETATIONS[tagIdNum][value];
           }
-        }
-        // Image properties
-        else if (['ImageWidth', 'ImageLength', 'Orientation', 'ColorSpace', 'PixelXDimension', 'PixelYDimension'].indexOf(tagName) !== -1) {
-          result.image[tagName.toLowerCase()] = value;
-          if (tagName === 'Orientation' && TAG_INTERPRETATIONS[0x0112] && TAG_INTERPRETATIONS[0x0112][value]) {
-            result.image.orientationDesc = TAG_INTERPRETATIONS[0x0112][value];
+        } else if (['imagewidth', 'imagelength', 'orientation', 'colorspace', 'pixelxdimension', 'pixelydimension', 'bitspersample'].indexOf(lowerTagName) !== -1) {
+          result.image[lowerTagName] = value;
+          if (lowerTagName === 'orientation' && TAG_INTERPRETATIONS[0x0112] && TAG_INTERPRETATIONS[0x0112][value] !== undefined) {
+            result.image.orientationdesc = TAG_INTERPRETATIONS[0x0112][value];
           }
-        }
-        // Date/time
-        else if (['DateTime', 'DateTimeOriginal', 'DateTimeDigitized'].indexOf(tagName) !== -1) {
-          result.datetime[tagName.toLowerCase()] = value;
-        }
-        // GPS/location
-        else if (tagName.startsWith('GPS')) {
-          result.location[tagName.toLowerCase()] = value;
-        }
-        // Technical details
-        else if (['XResolution', 'YResolution', 'ResolutionUnit', 'Compression', 'PhotometricInterpretation'].indexOf(tagName) !== -1) {
-          result.technical[tagName.toLowerCase()] = value;
-        }
-        // Everything else
-        else {
-          result.other[tagName.toLowerCase()] = value;
+        } else if (['datetime', 'datetimeoriginal', 'datetimedigitized'].indexOf(lowerTagName) !== -1) {
+          result.datetime[lowerTagName] = value;
+        } else if (tagName.startsWith('GPS')) { 
+          result.location[lowerTagName] = value;
+        } else if (['xresolution', 'yresolution', 'resolutionunit', 'compression', 'photometricinterpretation'].indexOf(lowerTagName) !== -1) {
+          result.technical[lowerTagName] = value;
+        } else {
+          result.other[lowerTagName] = value;
         }
       });
-      
-      // Process GPS coordinates if available
-      if (result.location.gpslatitude && result.location.gpslatituderef && 
+
+      if (result.location.gpslatitude && result.location.gpslatituderef &&
           result.location.gpslongitude && result.location.gpslongituderef) {
-        try {
-          result.location.latitude = convertDMSToDD_(result.location.gpslatitude, result.location.gpslatituderef);
-          result.location.longitude = convertDMSToDD_(result.location.gpslongitude, result.location.gpslongituderef);
-        } catch (e) {
-          Logger.log('Error converting GPS coordinates: ' + e.toString());
-        }
+        result.location.latitude = convertDMSToDD_(result.location.gpslatitude, result.location.gpslatituderef);
+        result.location.longitude = convertDMSToDD_(result.location.gpslongitude, result.location.gpslongituderef);
       }
-      
-      // Process GPS altitude if available
-      if (result.location.gpsaltitude && typeof result.location.gpsaltitude === 'number') {
-        result.location.altitude = result.location.gpsaltitude;
-        // Check altitude reference (0 = above sea level, 1 = below sea level)
-        if (result.location.gpsaltituderef === 1) {
-          result.location.altitude = -result.location.altitude;
-        }
+      if (result.location.gpsaltitude && (typeof result.location.gpsaltitude === 'number' || (Array.isArray(result.location.gpsaltitude) && result.location.gpsaltitude.length > 0))) {
+        var altValue = Array.isArray(result.location.gpsaltitude) ? result.location.gpsaltitude[0] : result.location.gpsaltitude;
+        result.location.altitude = Number(altValue) * (result.location.gpsaltituderef === 1 ? -1 : 1);
       }
+
+      var w = null, h = null;
+      if (typeof result.image.pixelxdimension === 'number' && result.image.pixelxdimension > 0) w = result.image.pixelxdimension;
+      else if (typeof result.image.imagewidth === 'number' && result.image.imagewidth > 0) w = result.image.imagewidth;
+      if (typeof result.image.pixelydimension === 'number' && result.image.pixelydimension > 0) h = result.image.pixelydimension;
+      else if (typeof result.image.imagelength === 'number' && result.image.imagelength > 0) h = result.image.imagelength;
       
-      // Calculate useful derived values
-      if (result.image.imagewidth && result.image.imagelength) {
-        result.image.aspectRatio = calculateAspectRatio_(result.image.imagewidth, result.image.imagelength);
-        result.image.megapixels = Math.round(result.image.imagewidth * result.image.imagelength / 1000000 * 10) / 10;
+      if (w && h) {
+        result.image.finalWidth = Number(w);
+        result.image.finalHeight = Number(h);
+        result.image.aspectRatio = calculateAspectRatio_(Number(w), Number(h));
+        result.image.megapixels = Math.round((Number(w) * Number(h)) / 1000000 * 10) / 10;
       }
-      
     } catch (error) {
-      Logger.log('Error organizing metadata: ' + error.toString());
+      Logger.log('Error in organizeMetadata_: ' + error.toString());
     }
-    
     return result;
   }
-  
-  /**
-   * Convert DMS (Degrees, Minutes, Seconds) to decimal degrees
-   * @param {Array} dms DMS array [degrees, minutes, seconds]
-   * @param {string} ref Reference (N/S for latitude, E/W for longitude)
-   * @returns {number} Decimal degrees
-   */
-  function convertDMSToDD_(dms, ref) {
-    if (!Array.isArray(dms) || dms.length < 3) return 0;
-    var dd = dms[0] + dms[1] / 60 + dms[2] / 3600;
-    return (ref === 'S' || ref === 'W') ? -dd : dd;
-  }
-  
-  /**
-   * Calculate aspect ratio
-   * @param {number} width Image width
-   * @param {number} height Image height
-   * @returns {string} Aspect ratio as string
-   */
-  function calculateAspectRatio_(width, height) {
-    if (!width || !height) return null;
-    var gcd = function(a, b) { return b === 0 ? a : gcd(b, a % b); };
-    var divisor = gcd(width, height);
-    return (width / divisor) + ':' + (height / divisor);
-  }
-  
-  /**
-   * Convert metadata to Box-compatible format - FIXED VERSION
-   * @param {object} metadata Organized metadata
-   * @returns {object} Box-compatible metadata
-   */
+
   function convertToBoxFormat_(metadata) {
     var boxMetadata = {
-      // Initialize with defaults, but consider what's appropriate if no EXIF found
-      processingStage: metadata.hasExif ? Config.PROCESSING_STAGE_EXIF : Config.PROCESSING_STAGE_BASIC,
+      processingStage: metadata.hasExif ? (Config.PROCESSING_STAGE_EXIF || 'exif_extracted') : (Config.PROCESSING_STAGE_BASIC || 'basic_extracted'),
       lastProcessedDate: new Date().toISOString(),
-      processingVersion: metadata.hasExif ? Config.PROCESSING_VERSION_ENHANCED : Config.PROCESSING_VERSION_BASIC 
+      processingVersion: metadata.hasExif ? (Config.PROCESSING_VERSION_ENHANCED || 'v_enh_exif') : (Config.PROCESSING_VERSION_BASIC || 'v_basic')
     };
 
     try {
-      // Camera and technical info
-      if (metadata.camera && (metadata.camera.make || metadata.camera.model)) {
-        boxMetadata.cameraModel = [metadata.camera.make, metadata.camera.model].filter(Boolean).join(' ');
+      if (metadata.fileInfo) {
+        if (metadata.fileInfo.filename) boxMetadata.originalFilename = String(metadata.fileInfo.filename);
+        if (metadata.fileInfo.format) boxMetadata.fileFormat = String(metadata.fileInfo.format);
       }
 
-      // Image dimensions
-      if (metadata.image && metadata.image.imagewidth) {
-        boxMetadata.imageWidth = Number(metadata.image.imagewidth);
-        boxMetadata.imageHeight = Number(metadata.image.imagelength);
-        if (metadata.image.aspectRatio) boxMetadata.aspectRatio = metadata.image.aspectRatio;
-        if (metadata.image.megapixels) boxMetadata.megapixels = metadata.image.megapixels;
-      } else if (metadata.fileInfo && metadata.fileInfo.width && metadata.fileInfo.height) {
-        // Fallback to basicInfo if available
+      if (metadata.camera) {
+        var make = metadata.camera.make || '';
+        var model = metadata.camera.model || '';
+        if (make || model) boxMetadata.cameraModel = (String(make) + ' ' + String(model)).trim();
+        if (metadata.camera.software) boxMetadata.software = String(metadata.camera.software);
+        if (metadata.camera.artist) boxMetadata.photographer = String(metadata.camera.artist);
+        if (metadata.camera.copyright) boxMetadata.copyright = String(metadata.camera.copyright);
+      }
+
+      if (metadata.image) {
+        if (typeof metadata.image.finalWidth === 'number' && metadata.image.finalWidth > 0) {
+          boxMetadata.imageWidth = metadata.image.finalWidth;
+        }
+        if (typeof metadata.image.finalHeight === 'number' && metadata.image.finalHeight > 0) {
+          boxMetadata.imageHeight = metadata.image.finalHeight;
+        }
+        if (metadata.image.aspectRatio) {
+          boxMetadata.aspectRatio = metadata.image.aspectRatio;
+        }
+        if (typeof metadata.image.megapixels === 'number') {
+          boxMetadata.megapixels = metadata.image.megapixels;
+        }
+        var techNotesOrientation = metadata.image.orientationdesc ? 'Orientation: ' + metadata.image.orientationdesc : '';
+      }
+      
+      if ((!boxMetadata.imageWidth || boxMetadata.imageWidth <= 0) && metadata.fileInfo && metadata.fileInfo.width > 0) {
         boxMetadata.imageWidth = metadata.fileInfo.width;
+      }
+      if ((!boxMetadata.imageHeight || boxMetadata.imageHeight <= 0) && metadata.fileInfo && metadata.fileInfo.height > 0) {
         boxMetadata.imageHeight = metadata.fileInfo.height;
       }
+      if (boxMetadata.imageWidth && boxMetadata.imageHeight && boxMetadata.imageWidth > 0 && boxMetadata.imageHeight > 0) {
+        if (!boxMetadata.aspectRatio) boxMetadata.aspectRatio = calculateAspectRatio_(boxMetadata.imageWidth, boxMetadata.imageHeight);
+        if (typeof boxMetadata.megapixels !== 'number') boxMetadata.megapixels = Math.round((boxMetadata.imageWidth * boxMetadata.imageHeight) / 1000000 * 10) / 10;
+      }
 
-      // Date taken - ensure proper ISO format
-      if (metadata.datetime && metadata.datetime.datetimeoriginal) {
-        var dateValue = metadata.datetime.datetimeoriginal;
-        if (typeof dateValue === 'string') {
+      if (metadata.datetime) {
+        var dateTakenStr = metadata.datetime.datetimeoriginal || metadata.datetime.datetime || metadata.datetime.datetimedigitized;
+        if (dateTakenStr && typeof dateTakenStr === 'string') {
           try {
-            var isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-            var parsedDate = new Date(isoDate);
-            if (!isNaN(parsedDate.getTime())) {
-              boxMetadata.dateTaken = parsedDate.toISOString(); // Full ISO string for Box date fields
-            }
-          } catch (e) {
-            // Skip invalid dates
-          }
-        }
-      } else if (metadata.datetime && metadata.datetime.datetime) {
-        var dateValue = metadata.datetime.datetime;
-        if (typeof dateValue === 'string') {
-          try {
-            var isoDate = dateValue.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
-            var parsedDate = new Date(isoDate);
-            if (!isNaN(parsedDate.getTime())) {
-              boxMetadata.dateTaken = parsedDate.toISOString(); // Full ISO string for Box date fields
-            }
-          } catch (e) {
-            // Skip invalid dates
-          }
+            var isoDateStr = dateTakenStr.substring(0, 10).replace(/:/g, '-') + dateTakenStr.substring(10);
+            var parsedDate = new Date(isoDateStr);
+            if (!isNaN(parsedDate.getTime())) boxMetadata.dateTaken = parsedDate.toISOString();
+          } catch (e) { Logger.log('Error parsing dateTaken string: ' + dateTakenStr + ' - ' + e.toString()); }
         }
       }
 
-      // Camera settings summary
+      var settingsSummaryParts = [];
       if (metadata.settings) {
-        var settings = [];
-        if (metadata.settings.fnumber) settings.push('f/' + metadata.settings.fnumber);
-        if (metadata.settings.exposuretime) {
+        if (metadata.settings.fnumber) settingsSummaryParts.push('f/' + metadata.settings.fnumber);
+        if (typeof metadata.settings.exposuretime === 'number') {
           var et = metadata.settings.exposuretime;
-          settings.push((et > 0.25 ? et + 's' : '1/' + Math.round(1/et) + 's'));
+          settingsSummaryParts.push((et >= 0.25 ? et.toFixed(2) + 's' : '1/' + Math.round(1 / et) + 's'));
         }
-        if (metadata.settings.isospeedratings) settings.push('ISO ' + metadata.settings.isospeedratings);
-        if (metadata.settings.focallength) settings.push(metadata.settings.focallength + 'mm');
-        
-        if (settings.length > 0) {
-          boxMetadata.cameraSettings = settings.join(', ');
-        }
+        if (metadata.settings.isospeedratings) settingsSummaryParts.push('ISO ' + (Array.isArray(metadata.settings.isospeedratings) ? metadata.settings.isospeedratings[0] : metadata.settings.isospeedratings));
+        if (metadata.settings.focallength) settingsSummaryParts.push(metadata.settings.focallength + 'mm');
+        if (metadata.settings.flash !== undefined && metadata.settings.flash !== null) settingsSummaryParts.push('Flash: ' + metadata.settings.flash);
+        if (metadata.settings.exposureprogramdesc) settingsSummaryParts.push(metadata.settings.exposureprogramdesc);
+         if (metadata.settings.whitebalancedesc) settingsSummaryParts.push('WB: ' + metadata.settings.whitebalancedesc); // Added WhiteBalanceDesc
+         if (metadata.settings.meteringmodedesc) settingsSummaryParts.push('Metering: ' + metadata.settings.meteringmodedesc); // Added MeteringModeDesc
+      }
+       if (settingsSummaryParts.length > 0) boxMetadata.cameraSettings = settingsSummaryParts.join(', ');
+
+
+      if (metadata.location) {
+        if (typeof metadata.location.latitude === 'number') boxMetadata.gpsLatitude = metadata.location.latitude;
+        if (typeof metadata.location.longitude === 'number') boxMetadata.gpsLongitude = metadata.location.longitude;
+        if (typeof metadata.location.altitude === 'number') boxMetadata.gpsAltitude = metadata.location.altitude;
       }
 
-      // GPS coordinates - FIXED with proper null checking
-      if (metadata.location && typeof metadata.location === 'object') {
-        if (typeof metadata.location.latitude === 'number' && typeof metadata.location.longitude === 'number') {
-          boxMetadata.gpsLatitude = metadata.location.latitude;
-          boxMetadata.gpsLongitude = metadata.location.longitude;
-        }
-        
-        // GPS altitude
-        if (typeof metadata.location.altitude === 'number') {
-          boxMetadata.gpsAltitude = metadata.location.altitude;
-        }
+      var technicalNotesParts = [];
+      if (techNotesOrientation) technicalNotesParts.push(techNotesOrientation);
+      // Add other technical notes from metadata.technical if needed for your Box template
+      if (metadata.technical && metadata.technical.xresolution) technicalNotesParts.push(`XRes: ${metadata.technical.xresolution}`);
+      if (metadata.technical && metadata.technical.yresolution) technicalNotesParts.push(`YRes: ${metadata.technical.yresolution}`);
+      if (metadata.technical && metadata.technical.resolutionunit) {
+           const resUnitMap = {1: 'None', 2: 'Inch', 3: 'cm'};
+           technicalNotesParts.push(`ResUnit: ${resUnitMap[metadata.technical.resolutionunit] || metadata.technical.resolutionunit}`);
       }
 
-      // File format
-      if (metadata.fileInfo && metadata.fileInfo.format) {
-        boxMetadata.fileFormat = metadata.fileInfo.format;
-      }
-
-      // Technical notes
-      var notes = [];
-      if (metadata.image && metadata.image.orientationDesc) notes.push('Orientation: ' + metadata.image.orientationDesc);
-      if (metadata.settings && metadata.settings.exposureprogramdesc) notes.push('Mode: ' + metadata.settings.exposureprogramdesc);
-      if (metadata.settings && metadata.settings.whitebalancedesc) notes.push('WB: ' + metadata.settings.whitebalancedesc);
-      
-      if (notes.length > 0) {
-        boxMetadata.technicalNotes = notes.join('; ');
+      if (technicalNotesParts.length > 0) {
+        boxMetadata.technicalNotes = (boxMetadata.technicalNotes ? boxMetadata.technicalNotes + "; " : "") + technicalNotesParts.join('; ');
       }
 
     } catch (error) {
-      // Log the error but don't crash the processing
-      Logger.log('Error during convertToBoxFormat_: ' + error.toString() + ' - Metadata from parser: ' + JSON.stringify(metadata));
-      // Don't add error details to metadata as it would break Box API
+      Logger.log('Error during convertToBoxFormat_: ' + error.toString() + '\nInput Metadata: ' + JSON.stringify(metadata).substring(0, 500));
     }
-
     return boxMetadata;
   }
   
-  /**
-   * Main extraction function - comprehensive metadata extraction from image files
-   * @param {string} fileId Box file ID
-   * @param {string} accessToken Valid Box access token
-   * @param {string} filename Optional filename for logging
-   * @returns {object|null} Comprehensive metadata or null on error
-   */
   ns.extractMetadata = function(fileId, accessToken, filename) {
     var fileDisplayName = filename || fileId;
-
     if (!fileId || !accessToken) {
       Logger.log('ERROR: EnhancedExifParser.extractMetadata requires fileId and accessToken');
       return null;
     }
-
     var utils = initUtils_();
-
+    var imageBytes; // Define higher to be in scope for catch block
     try {
       Logger.log(' > Parsing file structure for EXIF data from ' + fileDisplayName + '...');
-
-      var downloadUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/content';
+      var downloadUrl = (Config.BOX_API_BASE_URL || 'https://api.box.com/2.0') + '/files/' + fileId + '/content';
       var response = utils.rateLimitExpBackoff(function() {
         return UrlFetchApp.fetch(downloadUrl, {
           headers: { 'Authorization': 'Bearer ' + accessToken },
           muteHttpExceptions: true
         });
       });
-
       if (response.getResponseCode() !== 200) {
-        Logger.log('    Failed to download ' + fileDisplayName + ' for metadata extraction. HTTP Code: ' + response.getResponseCode());
+        Logger.log('    Failed to download ' + fileDisplayName + ' for metadata extraction. HTTP Code: ' + response.getResponseCode() + " Response: " + response.getContentText().substring(0,200));
         return null;
       }
-
       var imageBlob = response.getBlob();
-      var imageBytes = new Uint8Array(imageBlob.getBytes());
-
+      imageBytes = new Uint8Array(imageBlob.getBytes()); // Now imageBytes is assigned
       var basicInfo = extractBasicFileInfo_(imageBytes);
-      basicInfo.filename = fileDisplayName;
-      Logger.log(' > Format detected: ' + (basicInfo.format || 'Unknown') + ' for ' + fileDisplayName + '.');
+      basicInfo.filename = fileDisplayName; 
+      Logger.log(' > Format detected: ' + (basicInfo.format || 'Unknown') + ' for ' + fileDisplayName + '. Size: ' + imageBytes.length + ' bytes.');
 
       var metadataFromParser = null;
-
-      if (basicInfo.format === 'JPEG') {
-        metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
-      } else if (['PNG', 'WEBP', 'HEIC', 'AVIF', 'TIFF'].indexOf(basicInfo.format) !== -1) {
-        metadataFromParser = extractOtherFormatMetadata_(imageBytes, basicInfo);
-      } else {
+      if (basicInfo.format === 'JPEG' || basicInfo.format === 'TIFF') { // TIFF can contain EXIF directly
+        metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo); // findExifSegment_ works for TIFF structure too
+      } else if (['PNG', 'WEBP', 'HEIC', 'AVIF'].indexOf(basicInfo.format) !== -1) {
+        // These formats might embed EXIF in different ways (e.g., 'exif' chunk in PNG/WebP)
+        // For now, this parser primarily handles EXIF in JPEG/TIFF structure.
+        metadataFromParser = extractOtherFormatMetadata_(imageBytes, basicInfo); 
+      } else { // Fallback for unknown or other formats, try to find EXIF anyway
         metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
         if (!metadataFromParser || !metadataFromParser.hasExif) {
           metadataFromParser = { hasExif: false, fileInfo: basicInfo };
@@ -796,108 +626,110 @@ var EnhancedExifParser = (function() {
       }
 
       if (metadataFromParser) {
-        Logger.log(' > File parsed and EXIF structure processed for ' + fileDisplayName + '.');
+        Logger.log(' > File parsed. EXIF found: ' + metadataFromParser.hasExif + ' for ' + fileDisplayName + '.');
         return convertToBoxFormat_(metadataFromParser);
       } else {
-        Logger.log(' ⚠️ No processable EXIF structure found in ' + fileDisplayName + '.');
+        Logger.log(' ⚠️ No processable EXIF structure identified in ' + fileDisplayName + '. Returning basic info.');
         return convertToBoxFormat_({ hasExif: false, fileInfo: basicInfo });
       }
-
     } catch (error) {
-      Logger.log('    ERROR: Parsing EXIF from ' + fileDisplayName + ' failed: ' + error.toString());
-      var errorBasicInfo = { filename: fileDisplayName, fileSize: imageBytes ? imageBytes.length : 0, format: 'unknown' };
+      Logger.log('    ERROR: Parsing EXIF from ' + fileDisplayName + ' failed: ' + error.toString() + (error.stack ? '\nStack: ' + error.stack : ''));
+      var errorBasicInfo = { filename: fileDisplayName, fileSize: (imageBytes ? imageBytes.length : 0), format: 'unknown' };
       var boxErrorFormat = convertToBoxFormat_({ hasExif: false, fileInfo: errorBasicInfo });
-      boxErrorFormat.technicalNotes = (boxErrorFormat.technicalNotes || '') + ' EXIF Parsing Error: ' + error.message;
+      // Ensure technicalNotes exists before appending
+      boxErrorFormat.technicalNotes = (boxErrorFormat.technicalNotes || '') + ' EXIF Parsing Error: ' + String(error.message || error).substring(0,100);
       return boxErrorFormat;
     }
   };
 
-  /**
-   * Extract metadata from JPEG files
-   * @param {Uint8Array} imageBytes Image data
-   * @param {object} basicInfo Basic file info
-   * @returns {object|null} Extracted metadata
-   */
   function extractJpegMetadata_(imageBytes, basicInfo) {
     try {
-      var exifData = findExifSegment_(imageBytes);
-      if (!exifData) {
-        Logger.log(' ⚠️ No EXIF data found in JPEG');
+      var exifDataSegment = findExifSegment_(imageBytes); // This is the TIFF-structured EXIF data
+      if (!exifDataSegment) {
+        Logger.log(' ⚠️ No EXIF APP1 segment found in JPEG/TIFF structure for ' + basicInfo.filename);
         return { hasExif: false, fileInfo: basicInfo };
       }
-      
-      var tiffStructure = parseTiffStructure_(exifData);
+      var tiffStructure = parseTiffStructure_(exifDataSegment);
       return organizeMetadata_(tiffStructure, basicInfo);
-      
     } catch (error) {
-      Logger.log('Error extracting JPEG metadata: ' + error.toString());
+      Logger.log('Error extracting JPEG/TIFF EXIF metadata for ' + basicInfo.filename + ': ' + error.toString());
       return { hasExif: false, fileInfo: basicInfo };
     }
   }
   
-  /**
-   * Extract metadata from other formats (basic implementation)
-   * @param {Uint8Array} imageBytes Image data
-   * @param {object} basicInfo Basic file info
-   * @returns {object} Basic metadata
-   */
   function extractOtherFormatMetadata_(imageBytes, basicInfo) {
-    // For now, return basic file info
-    // TODO: Implement format-specific metadata extraction for PNG, WEBP, etc.
-    Logger.log(' ⚠️ Format-specific extraction not yet implemented for ' + basicInfo.format);
+    // Placeholder: For PNG, WebP, HEIC, one would need to find specific chunks ('eXIf' for PNG/WebP)
+    // and then pass that chunk's data (after removing chunk header) to parseTiffStructure_.
+    // This is a simplified version.
+    Logger.log(' ⚠️ Advanced EXIF extraction for ' + basicInfo.format + ' not fully implemented. Checking for common patterns.');
+    // Try a generic search for TIFF header within the first part of the file as a fallback
+    // This is speculative and might not be standard for these formats.
+    const searchLimit = Math.min(imageBytes.length, 2048); // Search in first 2KB
+    for (let i = 0; i < searchLimit - 8; i++) {
+        if ((imageBytes[i] === 0x49 && imageBytes[i+1] === 0x49 && imageBytes[i+2] === 0x2A && imageBytes[i+3] === 0x00) ||
+            (imageBytes[i] === 0x4D && imageBytes[i+1] === 0x4D && imageBytes[i+2] === 0x00 && imageBytes[i+3] === 0x2A)) {
+            Logger.log('Found potential TIFF header in ' + basicInfo.format + ' at offset ' + i);
+            // Be careful with the length of data to pass to parseTiffStructure_
+            // This part is highly experimental and likely needs proper chunk parsing for these formats
+            const potentialTiffData = imageBytes.slice(i); 
+            const tiffStructure = parseTiffStructure_(potentialTiffData);
+            if (tiffStructure && (Object.keys(tiffStructure.ifd0).length > 0 || Object.keys(tiffStructure.exif).length > 0)) {
+                return organizeMetadata_(tiffStructure, basicInfo);
+            }
+        }
+    }
     return { hasExif: false, fileInfo: basicInfo };
   }
   
-  /**
-   * Comprehensive test function
-   * @param {string} testFileId Optional test file ID
-   */
   ns.testMetadataExtraction = function(testFileId) {
     Logger.log("=== Comprehensive Metadata Extraction Test ===");
-    
-    var accessToken = getValidAccessToken();
+    var accessToken = getValidAccessToken(); // Assumes getValidAccessToken is available globally
     if (!accessToken) {
-      Logger.log("❌ No access token available");
+      Logger.log("❌ No access token available for test.");
       return;
     }
-    
     try {
-      if (!testFileId) {
-        var testImages = BoxFileOperations.findAllImageFiles(Config.ACTIVE_TEST_FOLDER_ID, accessToken);
+      var fileToTest = testFileId;
+      var fileNameToTest = "testFile"; // Default if no ID
+
+      if (!fileToTest && typeof BoxFileOperations !== 'undefined' && BoxFileOperations.findAllImageFiles) {
+        // Attempt to find a test file if BoxFileOperations is available
+        var testImages = BoxFileOperations.findAllImageFiles(Config.ACTIVE_TEST_FOLDER_ID || '0', accessToken);
         if (testImages.length === 0) {
-          Logger.log("❌ No test images found");
+          Logger.log("❌ No test images found in default test folder. Provide a fileId or ensure test folder has images.");
           return;
         }
-        testFileId = testImages[0].id;
-        Logger.log("Testing with: " + testImages[0].name);
+        fileToTest = testImages[0].id;
+        fileNameToTest = testImages[0].name;
+        Logger.log("Testing with file: " + fileNameToTest + " (ID: " + fileToTest + ")");
+      } else if (!fileToTest) {
+         Logger.log("❌ No testFileId provided and BoxFileOperations not available to find one. Aborting test.");
+         return;
       }
       
-      var result = ns.extractMetadata(testFileId, accessToken);
+      var result = ns.extractMetadata(fileToTest, accessToken, fileNameToTest);
       
       if (result) {
-        Logger.log("✅ Extraction successful!");
-        Logger.log("Extracted metadata:");
-        Object.keys(result).forEach(function(key) {
-          if (typeof result[key] !== 'object') {
-            Logger.log("  " + key + ": " + result[key]);
-          }
-        });
+        Logger.log("✅ Extraction completed for " + fileNameToTest + "!");
+        Logger.log("Extracted Box-formatted metadata keys: " + Object.keys(result).join(', '));
+        // Log some key values if they exist
+        if(result.cameraModel) Logger.log("  Camera Model: " + result.cameraModel);
+        if(result.imageWidth && result.imageHeight) Logger.log("  Dimensions: " + result.imageWidth + "x" + result.imageHeight);
+        if(result.dateTaken) Logger.log("  Date Taken: " + result.dateTaken);
+        if(result.gpsLatitude && result.gpsLongitude) Logger.log("  GPS: " + result.gpsLatitude + ", " + result.gpsLongitude);
+
       } else {
-        Logger.log("❌ No metadata extracted");
+        Logger.log("❌ No metadata extracted or extraction failed for " + fileNameToTest);
       }
-      
     } catch (error) {
-      Logger.log("❌ Test failed: " + error.toString());
+      Logger.log("❌ Test failed for " + fileNameToTest + ": " + error.toString() + (error.stack ? "\nStack: " + error.stack : ""));
     }
   };
   
-  // Legacy function for compatibility
-  ns.extractComprehensiveExif = function(imageBytes) {
-    if (!imageBytes) return { hasExif: false };
-    
+  ns.extractComprehensiveExif = function(imageBytes) { // Kept for potential internal use or legacy
+    if (!imageBytes || imageBytes.length === 0) return { hasExif: false, fileInfo: {fileSize: 0, format: null} };
     var basicInfo = extractBasicFileInfo_(imageBytes);
-    var metadata = extractJpegMetadata_(imageBytes, basicInfo);
-    
+    var metadata = extractJpegMetadata_(imageBytes, basicInfo); // Assumes JPEG/TIFF like structure
     return metadata || { hasExif: false, fileInfo: basicInfo };
   };
   

@@ -166,6 +166,13 @@ var BoxFileOperations = (function() {
    * @param {string} templateKey Metadata template key
    * @returns {boolean} True if metadata exists
    */
+/**
+   * Checks if a file has existing metadata with robust error handling.
+   * @param {string} fileId Box file ID
+   * @param {string} accessToken Valid Box access token
+   * @param {string} templateKey Metadata template key
+   * @returns {boolean} True if metadata exists
+   */
   ns.hasExistingMetadata = function(fileId, accessToken, templateKey) {
     const currentConfig = (typeof Config !== 'undefined') ? Config : { BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', BOX_METADATA_SCOPE: 'enterprise', BOX_API_BASE_URL: 'https://api.box.com/2.0' };
     templateKey = templateKey || currentConfig.BOX_METADATA_TEMPLATE_KEY;
@@ -181,21 +188,20 @@ var BoxFileOperations = (function() {
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
-          method: 'HEAD', // More efficient for existence check
+          method: 'GET', // Changed from HEAD to GET - Google Apps Script doesn't support HEAD
           headers: { 'Authorization': 'Bearer ' + accessToken },
           muteHttpExceptions: true
         });
-      }, 'hasExistingMetadata (HEAD) for file ' + fileId);
+      }, 'hasExistingMetadata (GET) for file ' + fileId);
       
       return response.getResponseCode() === 200;
       
     } catch (error) {
-      Logger.log('BoxFileOperations: Exception checking metadata (HEAD) for file ' + 
+      Logger.log('BoxFileOperations: Exception checking metadata (GET) for file ' + 
                 fileId + ': ' + error.toString());
       return false;
     }
-  };
-  
+  };  
   /**
    * Gets current metadata with robust error handling.
    * @param {string} fileId Box file ID
