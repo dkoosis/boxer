@@ -609,3 +609,208 @@ function showCurrentTemplateFields() {
     Logger.log('❌ Could not retrieve template fields');
   }
 }
+
+// Add to BoxMetadataTemplates.js
+
+/**
+ * Enhances existing legalAgreement template with detection and measurement fields
+ * @param {string} accessToken Valid Box access token
+ * @returns {boolean} Success status
+ */
+function enhanceLegalTemplateWithDetection(accessToken) {
+  if (!accessToken) {
+    Logger.log('ERROR: enhanceLegalTemplateWithDetection - accessToken required');
+    return false;
+  }
+  
+  Logger.log('=== Enhancing Legal Agreement Template with Detection Fields ===');
+  
+  try {
+    // Check if template exists
+    const templateKey = 'legalAgreement';
+    const scope = 'enterprise'; // Will resolve to your enterprise scope
+    
+    const existingTemplate = checkTemplateExists(templateKey, accessToken);
+    if (!existingTemplate) {
+      Logger.log('❌ legalAgreement template not found');
+      return false;
+    }
+    
+    Logger.log('✅ Found existing template: ' + existingTemplate.displayName);
+    
+    // Define new detection fields to add
+    const detectionFields = [
+      {
+        op: 'addField',
+        data: {
+          key: 'detectionConfidence',
+          displayName: 'Detection Confidence',
+          type: 'float',
+          description: 'AI confidence score (0-100) that this is a legal document'
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'detectionReviewed',
+          displayName: 'Detection Reviewed',
+          type: 'enum',
+          description: 'Manual verification of AI detection',
+          options: [
+            { key: 'pending', displayName: 'Pending Review' },
+            { key: 'confirmed', displayName: 'Confirmed Legal Document' },
+            { key: 'rejected', displayName: 'Not a Legal Document' }
+          ]
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'detectionVersion',
+          displayName: 'Detection Version',
+          type: 'string',
+          description: 'Algorithm version used for legal document detection'
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'detectionIndicators',
+          displayName: 'Detection Indicators',
+          type: 'string',
+          description: 'Specific indicators that triggered legal document classification'
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'processingStage',
+          displayName: 'Processing Stage',
+          type: 'enum',
+          description: 'Current stage of automated processing',
+          options: [
+            { key: 'detected', displayName: 'Detected' },
+            { key: 'analyzed', displayName: 'Content Analyzed' },
+            { key: 'extracted', displayName: 'Data Extracted' },
+            { key: 'reviewed', displayName: 'Human Reviewed' },
+            { key: 'complete', displayName: 'Processing Complete' }
+          ]
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'lastProcessedDate',
+          displayName: 'Last Processed Date',
+          type: 'date',
+          description: 'When this document was last processed by Boxer'
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'originalFilename',
+          displayName: 'Original Filename',
+          type: 'string',
+          description: 'Original filename when first detected'
+        }
+      },
+      {
+        op: 'addField',
+        data: {
+          key: 'folderPath',
+          displayName: 'Folder Path',
+          type: 'string',
+          description: 'Box folder path where document is located'
+        }
+      }
+    ];
+    
+    // Check which fields already exist
+    const existingFieldKeys = existingTemplate.fields ? 
+      existingTemplate.fields.map(f => f.key) : [];
+    
+    const fieldsToAdd = detectionFields.filter(field => 
+      !existingFieldKeys.includes(field.data.key)
+    );
+    
+    if (fieldsToAdd.length === 0) {
+      Logger.log('ℹ️ All detection fields already exist in template');
+      return true;
+    }
+    
+    Logger.log('➕ Adding ' + fieldsToAdd.length + ' new detection fields');
+    
+    // Update template using Box API
+    const updateUrl = `${Config.BOX_API_BASE_URL}/metadata_templates/${scope}/${templateKey}/schema`;
+    
+    const updateOptions = {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json-patch+json'
+      },
+      payload: JSON.stringify(fieldsToAdd),
+      muteHttpExceptions: true
+    };
+    
+    const response = UrlFetchApp.fetch(updateUrl, updateOptions);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+    
+    if (responseCode === 200) {
+      const updatedTemplate = JSON.parse(responseText);
+      Logger.log('✅ Successfully enhanced legal template!');
+      Logger.log('📊 Template now has ' + updatedTemplate.fields.length + ' total fields');
+      
+      // Log the new fields that were added
+      fieldsToAdd.forEach(field => {
+        Logger.log('  ➕ Added: ' + field.data.displayName + ' (' + field.data.key + ')');
+      });
+      
+      Logger.log('\n💡 Template is now ready for legal document processing');
+      Logger.log('🔧 Update LegalDocumentDetector to use template key: "' + templateKey + '"');
+      
+      return true;
+      
+    } else {
+      Logger.log('❌ Failed to enhance template. HTTP Code: ' + responseCode);
+      Logger.log('Response: ' + responseText);
+      return false;
+    }
+    
+  } catch (error) {
+    Logger.log('❌ Exception enhancing legal template: ' + error.toString());
+    return false;
+  }
+}
+
+/**
+ * Quick test function to run the enhancement
+ */
+function testEnhanceLegalTemplate() {
+  Logger.log('=== Testing Legal Template Enhancement ===');
+  
+  try {
+    const accessToken = getValidAccessToken();
+    if (!accessToken) {
+      Logger.log('❌ No access token available');
+      return;
+    }
+    
+    const success = enhanceLegalTemplateWithDetection(accessToken);
+    
+    if (success) {
+      Logger.log('🎉 Legal template successfully enhanced!');
+      Logger.log('💡 Next steps:');
+      Logger.log('   1. Update LegalDocumentDetector.js to use "legalAgreement" template key');
+      Logger.log('   2. Test legal document detection');
+      Logger.log('   3. Review detected documents for accuracy');
+    } else {
+      Logger.log('❌ Enhancement failed. Check the logs above.');
+    }
+    
+  } catch (error) {
+    Logger.log('❌ Test failed: ' + error.toString());
+  }
+}

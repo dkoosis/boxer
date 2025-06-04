@@ -223,45 +223,85 @@ var OptimizedProcessing = (function() {
   /**
    * Process file only if it needs processing - FIXED VERSION
    */
-  ns.processFileIfNeeded = function(file, accessToken) {
-    try {
-      // Check if already processed
-      if (ns.quickMetadataCheck(file.id, accessToken)) {
+// Inside OptimizedProcessing.gs
+
+// Modify ns.processFileIfNeeded
+ns.processFileIfNeeded = function(file, accessToken) {
+  var currentMetadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
+
+  if (currentMetadata) {
+    const fileBuildNumber = currentMetadata.buildNumber; // Build number when this file was last touched
+    const stage = currentMetadata.processingStage;
+
+    if (stage === Config.PROCESSING_STAGE_FAILED) {
+      if (Config.shouldReprocessForBuild(fileBuildNumber)) {
+        // Current script build is different from the build that marked this file as failed
+        Logger.log(`🔁 Retrying previously FAILED file ${file.name} due to new build version. (File was last processed by build: ${fileBuildNumber}, Current script build: ${Config.getCurrentBuild()})`);
+        // Proceed to processing by falling through
+      } else {
+        // Same build version, don't retry
+        Logger.log(`⏭️ Skipping ${file.name}. It FAILED previously under the current build version (${fileBuildNumber}). No changes to processing logic presumed.`);
+        return 'skipped_failed_same_build'; // New distinct status for logging/stats
+      }
+    } else if (stage === Config.PROCESSING_STAGE_COMPLETE) {
+      if (Config.shouldReprocessForBuild(fileBuildNumber)) {
+        Logger.log(`🔁 Reprocessing COMPLETE file ${file.name} due to new build version. (File was last processed by build: ${fileBuildNumber}, Current script build: ${Config.getCurrentBuild()})`);
+        // Proceed to processing
+      } else {
+        Logger.log(`⏭️ Skipped (already COMPLETE and processed by current build version): ${file.name}`);
         return 'skipped';
       }
+    }
+    // Add other conditions for other stages if needed
+  }
+
+  // If we've reached here, we are proceeding with processing (either new, or retry due to new build)
+  try {
+    var fileDetailsUrl = Config.BOX_API_BASE_URL + '/files/' + file.id +
+                        '?fields=id,name,size,path_collection,created_at,parent';
+    var response = UrlFetchApp.fetch(fileDetailsUrl, {
+      headers: { 'Authorization': 'Bearer ' + accessToken },
+      muteHttpExceptions: true
+    });
+
+    if (response.getResponseCode() === 200) {
+      var fileDetails = JSON.parse(response.getContentText());
       
-      // Get full file details for metadata extraction
-      var fileDetailsUrl = Config.BOX_API_BASE_URL + '/files/' + file.id + 
-                          '?fields=id,name,size,path_collection,created_at,parent';
-      var response = UrlFetchApp.fetch(fileDetailsUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        muteHttpExceptions: true
-      });
+      // This metadata object should include the current build number and new processing stage
+      var metadataPayload = MetadataExtraction.extractMetadata(fileDetails, accessToken); 
       
-      if (response.getResponseCode() === 200) {
-        var fileDetails = JSON.parse(response.getContentText());
-        
-        // Use enhanced metadata extraction (includes EXIF, Vision API, and sanitization)
-        var metadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
-        
-        var success = BoxFileOperations.applyMetadata(file.id, metadata, accessToken);
-        
-        if (success) {
-          Logger.log("✅ Processed: " + file.name);
-          return 'processed';
-        } else {
-          Logger.log("❌ Failed to apply metadata: " + file.name);
-          return 'error';
-        }
+      // Ensure 'buildNumber' and the correct 'processingStage' are part of metadataPayload
+      metadataPayload.buildNumber = Config.getCurrentBuild(); 
+      // extractMetadata should set the appropriate stage, e.g., Config.PROCESSING_STAGE_COMPLETE on success
+
+      var success = BoxFileOperations.applyMetadata(file.id, metadataPayload, accessToken);
+
+      if (success) {
+        Logger.log(`✅ Processed: ${file.name} with build ${Config.getCurrentBuild()}`);
+        // If it was previously failed, the new 'processingStage' (e.g., 'complete') 
+        // and 'buildNumber' in metadataPayload will overwrite the old 'failed' status.
+        // You might also explicitly clear 'lastProcessingError' and 'lastErrorTimestamp' here if desired,
+        // by adding them to metadataPayload with null or empty values.
+        // metadataPayload[Config.METADATA_KEY_LAST_ERROR] = ""; // Example
+        // metadataPayload[Config.METADATA_KEY_LAST_ERROR_TIMESTAMP] = null; // Example (if Box API supports null for date removal)
+        // Then re-apply/update if needed, or ensure applyMetadata handles these clearing operations.
+        return 'processed';
       } else {
+        Logger.log(`❌ Failed to apply metadata for ${file.name} during current processing attempt.`);
+        BoxFileOperations.markFileAsFailed(file.id, accessToken, "Failed to apply metadata post-extraction", Config.getCurrentBuild());
         return 'error';
       }
-    } catch (error) {
-      Logger.log("❌ Error processing file " + file.name + ": " + error.toString());
+    } else {
+      Logger.log(`❌ Failed to download file details for ${file.name}. Code: ${response.getResponseCode()}`);
+      BoxFileOperations.markFileAsFailed(file.id, accessToken, `Download failed: HTTP ${response.getResponseCode()}`, Config.getCurrentBuild());
       return 'error';
     }
-  };
-  
+  } catch (error) {
+    Logger.log(`❌ CRITICAL Error processing file ${file.name}: ${error.toString()}`);
+    BoxFileOperations.markFileAsFailed(file.id, accessToken, error.toString().substring(0,250), Config.getCurrentBuild());
+    return 'error';
+  }
+};  
   /**
    * Search Box for files with query - CORRECTED VERSION
    */

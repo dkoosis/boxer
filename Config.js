@@ -40,6 +40,7 @@ var Config = {
   PROCESSING_STAGE_AI: 'ai_analyzed',
   PROCESSING_STAGE_REVIEW: 'human_reviewed',
   PROCESSING_STAGE_COMPLETE: 'complete',
+  PROCESSING_STAGE_FAILED: 'failed',
   
   // Processing Version Tags
   PROCESSING_VERSION_BASIC: 'v1.0',

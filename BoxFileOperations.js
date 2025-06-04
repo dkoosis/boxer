@@ -21,11 +21,21 @@ var BoxFileOperations = (function() {
   function initUtils_() {
     if (!utils_) {
       try {
-        utils_ = cUseful;
+        utils_ = cUseful; // Assuming cUseful is globally available
         Logger.log('ℹ️ BoxFileOperations: cUseful library initialized');
       } catch (e) {
         Logger.log('ERROR: BoxFileOperations - cUseful library not available: ' + e.toString());
-        throw new Error('cUseful library is required but not available');
+        // Fallback for environments where cUseful might not be linked (e.g. local testing without full setup)
+        // This mock won't provide actual backoff but prevents script from breaking on cUseful calls.
+        if (typeof cUseful === 'undefined') {
+            Logger.log('WARNING: cUseful library not found. Using mock for syntax. Exponential backoff will not work.');
+            utils_ = {
+                rateLimitExpBackoff: function(callback) { return callback(); },
+                TRYAGAIN: 'TRYAGAIN_MOCK_CU' // Distinguish from potential other TRYAGAIN constants
+            };
+        } else {
+             utils_ = cUseful;
+        }
       }
     }
     return utils_;
@@ -35,7 +45,7 @@ var BoxFileOperations = (function() {
    * Makes API calls with Bruce McPherson's exponential backoff pattern.
    * @param {function} apiCall Function that makes the API call
    * @param {string} context Description for logging
-   * @returns {object} API response or throws error
+   * @returns {GoogleAppsScript.URL_Fetch.HTTPResponse} API response or throws error
    * @private
    */
   function makeRobustApiCall_(apiCall, context) {
@@ -46,18 +56,17 @@ var BoxFileOperations = (function() {
         return apiCall();
       } catch (error) {
         Logger.log('BoxFileOperations: API call failed in ' + context + ': ' + error.toString());
-        throw error;
+        throw error; 
       }
     }, undefined, undefined, undefined, undefined, function(result) {
-      // Custom checker for Box API specific retryable errors
       if (result && typeof result.getResponseCode === 'function') {
         var code = result.getResponseCode();
         if (code === 429 || code === 500 || code === 502 || code === 503 || code === 504) {
-          Logger.log('BoxFileOperations: Retryable HTTP error ' + code + ' in ' + context);
-          throw utils.TRYAGAIN; // Bruce's pattern for signaling retry
+          Logger.log('BoxFileOperations: Retryable HTTP error ' + code + ' in ' + context + '. Retrying...');
+          throw utils.TRYAGAIN; 
         }
       }
-      return result;
+      return result; 
     });
   }
   
@@ -68,7 +77,14 @@ var BoxFileOperations = (function() {
    */
   ns.isImageFile = function(filename) {
     if (!filename || typeof filename !== 'string') return false;
-    return Config.isImageFile(filename);
+    // Assuming Config is globally available
+    if (typeof Config !== 'undefined' && typeof Config.isImageFile === 'function') {
+        return Config.isImageFile(filename);
+    }
+    Logger.log('Warning: Config.isImageFile not available. Using fallback image check.');
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic', '.heif'];
+    const lowerFilename = filename.toLowerCase();
+    return imageExtensions.some(ext => lowerFilename.endsWith(ext));
   };
   
   /**
@@ -79,19 +95,18 @@ var BoxFileOperations = (function() {
    * @returns {object[]} Array of image file objects
    */
   ns.findAllImageFiles = function(folderId, accessToken, allImages) {
-    folderId = folderId || Config.DEFAULT_PROCESSING_FOLDER_ID;
+    const currentConfig = (typeof Config !== 'undefined') ? Config : { DEFAULT_PROCESSING_FOLDER_ID: '0', DEFAULT_API_ITEM_LIMIT: 1000, BOX_API_BASE_URL: 'https://api.box.com/2.0' };
+    folderId = folderId || currentConfig.DEFAULT_PROCESSING_FOLDER_ID;
     allImages = allImages || [];
     
     if (!accessToken) {
       throw new Error('BoxFileOperations.findAllImageFiles: accessToken is required');
     }
-    
-    var utils = initUtils_();
-    
+        
     try {
       var fieldsToFetch = 'id,name,type,size,path_collection,created_at,modified_at,parent';
-      var url = Config.BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
-                Config.DEFAULT_API_ITEM_LIMIT + '&fields=' + fieldsToFetch;
+      var url = currentConfig.BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
+                currentConfig.DEFAULT_API_ITEM_LIMIT + '&fields=' + fieldsToFetch;
                 
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -103,7 +118,7 @@ var BoxFileOperations = (function() {
       var responseCode = response.getResponseCode();
       if (responseCode !== 200) {
         Logger.log('BoxFileOperations: Failed to list items in folder ' + folderId + 
-                  '. HTTP Code: ' + responseCode);
+                  '. HTTP Code: ' + responseCode + '. Response: ' + response.getContentText().substring(0,500));
         return allImages;
       }
       
@@ -111,16 +126,15 @@ var BoxFileOperations = (function() {
       
       data.entries.forEach(function(item) {
         if (item.type === 'file' && ns.isImageFile(item.name)) {
-          // Build path string using Bruce's approach to object manipulation
           var pathString = 'All Files';
-          if (item.path_collection && item.path_collection.entries.length > 1) {
+          if (item.path_collection && item.path_collection.entries && item.path_collection.entries.length > 1) {
             pathString = item.path_collection.entries.slice(1)
               .map(function(p) { return p.name; })
               .join('/');
           } else if (item.parent && item.parent.name && item.parent.id !== '0') {
             pathString = item.parent.name;
           } else if (item.parent && item.parent.id === '0') {
-            pathString = '';
+            pathString = ''; 
           }
           
           allImages.push({
@@ -132,7 +146,6 @@ var BoxFileOperations = (function() {
             modified_at: item.modified_at
           });
         } else if (item.type === 'folder') {
-          // Recursive call
           ns.findAllImageFiles(item.id, accessToken, allImages);
         }
       });
@@ -154,7 +167,8 @@ var BoxFileOperations = (function() {
    * @returns {boolean} True if metadata exists
    */
   ns.hasExistingMetadata = function(fileId, accessToken, templateKey) {
-    templateKey = templateKey || Config.BOX_METADATA_TEMPLATE_KEY;
+    const currentConfig = (typeof Config !== 'undefined') ? Config : { BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', BOX_METADATA_SCOPE: 'enterprise', BOX_API_BASE_URL: 'https://api.box.com/2.0' };
+    templateKey = templateKey || currentConfig.BOX_METADATA_TEMPLATE_KEY;
     
     if (!accessToken || !fileId) {
       Logger.log('BoxFileOperations.hasExistingMetadata: fileId and accessToken required');
@@ -162,21 +176,21 @@ var BoxFileOperations = (function() {
     }
     
     try {
-      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                Config.BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
-          method: 'GET',
+          method: 'HEAD', // More efficient for existence check
           headers: { 'Authorization': 'Bearer ' + accessToken },
           muteHttpExceptions: true
         });
-      }, 'hasExistingMetadata for file ' + fileId);
+      }, 'hasExistingMetadata (HEAD) for file ' + fileId);
       
       return response.getResponseCode() === 200;
       
     } catch (error) {
-      Logger.log('BoxFileOperations: Exception checking metadata for file ' + 
+      Logger.log('BoxFileOperations: Exception checking metadata (HEAD) for file ' + 
                 fileId + ': ' + error.toString());
       return false;
     }
@@ -190,7 +204,8 @@ var BoxFileOperations = (function() {
    * @returns {object|null} Metadata object or null
    */
   ns.getCurrentMetadata = function(fileId, accessToken, templateKey) {
-    templateKey = templateKey || Config.BOX_METADATA_TEMPLATE_KEY;
+    const currentConfig = (typeof Config !== 'undefined') ? Config : { BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', BOX_METADATA_SCOPE: 'enterprise', BOX_API_BASE_URL: 'https://api.box.com/2.0' };
+    templateKey = templateKey || currentConfig.BOX_METADATA_TEMPLATE_KEY;
     
     if (!accessToken || !fileId) {
       Logger.log('BoxFileOperations.getCurrentMetadata: fileId and accessToken required');
@@ -198,8 +213,8 @@ var BoxFileOperations = (function() {
     }
     
     try {
-      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                Config.BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -217,7 +232,7 @@ var BoxFileOperations = (function() {
         return null;
       } else {
         Logger.log('BoxFileOperations: Error getting metadata for file ' + fileId + 
-                  '. Code: ' + responseCode);
+                  '. Code: ' + responseCode + '. Response: ' + response.getContentText().substring(0,500));
         return null;
       }
       
@@ -230,6 +245,7 @@ var BoxFileOperations = (function() {
   
   /**
    * Applies metadata with create/update logic and robust error handling.
+   * If metadata instance exists, it delegates to updateMetadata for a JSON Patch update.
    * @param {string} fileId Box file ID
    * @param {object} metadata Metadata to apply
    * @param {string} accessToken Valid Box access token
@@ -237,21 +253,18 @@ var BoxFileOperations = (function() {
    * @returns {boolean} Success status
    */
   ns.applyMetadata = function(fileId, metadata, accessToken, templateKey) {
-    templateKey = templateKey || Config.BOX_METADATA_TEMPLATE_KEY;
+    const currentConfig = (typeof Config !== 'undefined') ? Config : { BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', BOX_METADATA_SCOPE: 'enterprise', BOX_API_BASE_URL: 'https://api.box.com/2.0' };
+    templateKey = templateKey || currentConfig.BOX_METADATA_TEMPLATE_KEY;
     
-    if (!accessToken || !fileId || !metadata) {
-      Logger.log('BoxFileOperations.applyMetadata: all parameters required');
+    if (!accessToken || !fileId || !metadata || typeof metadata !== 'object') {
+      Logger.log('BoxFileOperations.applyMetadata: fileId, accessToken, and a metadata object are required.');
       return false;
     }
     
-    var utils = initUtils_();
-    //Logger.log('BoxFileOperations.applyMetadata: Attempting to apply to fileId: ' + fileId + '. Metadata PAYLOAD to be sent: ' + JSON.stringify(metadata, null, 2));
-
     try {
-      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                Config.BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
       
-      // Try POST first (create)
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
           method: 'POST',
@@ -262,24 +275,24 @@ var BoxFileOperations = (function() {
           payload: JSON.stringify(metadata),
           muteHttpExceptions: true
         });
-      }, 'applyMetadata POST for file ' + fileId);
+      }, 'applyMetadata (POST) for file ' + fileId);
       
       var responseCode = response.getResponseCode();
       
-      if (responseCode === 201) {
+      if (responseCode === 201) { // Successfully created
         return true;
-      } else if (responseCode === 409) {
-        // Conflict - metadata exists, try update
-        return ns.updateMetadata(fileId, metadata, accessToken, templateKey);
+      } else if (responseCode === 409) { // Conflict - metadata instance already exists
+        Logger.log(' > Update existing metadata...');
+        return ns.updateMetadata(fileId, metadata, accessToken, templateKey); // Delegate to updateMetadata
       } else {
         var errorText = response.getContentText();
-        Logger.log('BoxFileOperations: Error applying metadata to ' + fileId + 
+        Logger.log('BoxFileOperations: Error applying (POST) metadata to ' + fileId + 
                   '. Code: ' + responseCode + ', Response: ' + errorText.substring(0, 300));
         return false;
       }
       
     } catch (error) {
-      Logger.log('BoxFileOperations: Exception applying metadata to ' + fileId + 
+      Logger.log('BoxFileOperations: Exception in applyMetadata for file ' + fileId + 
                 ': ' + error.toString());
       return false;
     }
@@ -288,87 +301,150 @@ var BoxFileOperations = (function() {
   /**
    * Updates metadata using JSON Patch operations with robust error handling.
    * @param {string} fileId Box file ID
-   * @param {object} metadataToUpdate Metadata updates
+   * @param {object} metadataToUpdate An object where keys are metadata fields and values are their new values.
    * @param {string} accessToken Valid Box access token
    * @param {string} templateKey Metadata template key
    * @returns {boolean} Success status
    */
   ns.updateMetadata = function(fileId, metadataToUpdate, accessToken, templateKey) {
-    templateKey = templateKey || Config.BOX_METADATA_TEMPLATE_KEY;
+    const currentConfig = (typeof Config !== 'undefined') ? Config : { BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', BOX_METADATA_SCOPE: 'enterprise', BOX_API_BASE_URL: 'https://api.box.com/2.0' };
+    templateKey = templateKey || currentConfig.BOX_METADATA_TEMPLATE_KEY;
     
-    if (!accessToken || !fileId || !metadataToUpdate) {
-      Logger.log('BoxFileOperations.updateMetadata: all parameters required');
+    if (!accessToken || !fileId || !metadataToUpdate || typeof metadataToUpdate !== 'object') {
+      Logger.log('BoxFileOperations.updateMetadata: fileId, accessToken, and metadataToUpdate object are required');
       return false;
     }
     
     try {
       var currentMetadata = ns.getCurrentMetadata(fileId, accessToken, templateKey);
+      // If no current metadata, we can't "update". applyMetadata should handle creation.
+      // However, if applyMetadata calls this, metadataToUpdate is the full payload.
+      // We need to build patch operations relative to what's currently there if currentMetadata is available.
+      // If currentMetadata is null, it means the instance doesn't exist, so this update call might be inappropriate,
+      // or we should attempt a create (though applyMetadata should have done that).
+      // For robustness, if currentMetadata is null, attempt to create it with metadataToUpdate.
       if (!currentMetadata) {
-        Logger.log('BoxFileOperations: Cannot update - no current metadata for file ' + fileId);
-        return false;
+        Logger.log('BoxFileOperations.updateMetadata: No current metadata to update for file ' + fileId + '. Attempting to create with the provided payload.');
+        // This is effectively a create operation if applyMetadata's POST failed for reasons other than 409,
+        // or if updateMetadata is called directly on a file without metadata.
+        // Re-using the POST logic from applyMetadata:
+         var createUrl = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
+        var createResponse = makeRobustApiCall_(function() {
+            return UrlFetchApp.fetch(createUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': 'Bearer ' + accessToken,
+                'Content-Type': 'application/json'
+            },
+            payload: JSON.stringify(metadataToUpdate), // Use the full metadataToUpdate as the creation payload
+            muteHttpExceptions: true
+            });
+        }, 'updateMetadata (attempting create via POST) for file ' + fileId);
+        
+        if (createResponse.getResponseCode() === 201) return true;
+        else {
+            Logger.log('BoxFileOperations.updateMetadata: Failed to create metadata (after finding no current metadata to update) for ' + fileId + 
+                      '. Code: ' + createResponse.getResponseCode() + '. Response: ' + createResponse.getContentText().substring(0,300));
+            return false;
+        }
       }
       
-      var updates = [];
+      var patchOperations = []; // Changed from 'updates' to 'patchOperations' for clarity
       
-      // Build JSON patch operations
       Object.keys(metadataToUpdate).forEach(function(key) {
+        var path = '/' + key; // Assumes keys don't need escaping for JSON Patch path
         if (metadataToUpdate.hasOwnProperty(key)) {
           if (currentMetadata.hasOwnProperty(key)) {
-            // Field exists, check if different
             if (JSON.stringify(currentMetadata[key]) !== JSON.stringify(metadataToUpdate[key])) {
-              updates.push({ 
-                op: 'replace', 
-                path: '/' + key, 
-                value: metadataToUpdate[key] 
-              });
+              patchOperations.push({ op: 'replace', path: path, value: metadataToUpdate[key] });
             }
           } else {
-            // Field doesn't exist, add it
-            updates.push({ 
-              op: 'add', 
-              path: '/' + key, 
-              value: metadataToUpdate[key] 
-            });
+            patchOperations.push({ op: 'add', path: path, value: metadataToUpdate[key] });
           }
         }
       });
       
-      if (updates.length === 0) {
-        return true; // No changes needed
+      if (patchOperations.length === 0) {
+        // Logger.log('BoxFileOperations.updateMetadata: No changes needed for file ' + fileId);
+        return true; 
       }
       
-      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                Config.BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
           method: 'PUT',
           headers: {
             'Authorization': 'Bearer ' + accessToken,
-            'Content-Type': 'application/json-patch+json'
+            'Content-Type': 'application/json-patch+json' // Correct for JSON Patch
           },
-          payload: JSON.stringify(updates),
+          payload: JSON.stringify(patchOperations), // Send the array of patch operations
           muteHttpExceptions: true
         });
-      }, 'updateMetadata PUT for file ' + fileId);
+      }, 'updateMetadata (JSON Patch PUT) for file ' + fileId);
       
       var responseCode = response.getResponseCode();
       
-      if (responseCode === 200 || responseCode === 201) {
+      if (responseCode === 200 || responseCode === 201) { // 200 OK for update
         return true;
       } else {
         var errorText = response.getContentText();
-        Logger.log('BoxFileOperations: Error updating metadata for ' + fileId + 
-                  '. Code: ' + responseCode + ', Response: ' + errorText.substring(0, 300));
+        Logger.log('BoxFileOperations: Error updating metadata (JSON Patch) for ' + fileId + 
+                  '. Code: ' + responseCode + '. Patch: ' + JSON.stringify(patchOperations) +
+                  '. Response: ' + errorText.substring(0, 300));
         return false;
       }
       
     } catch (error) {
-      Logger.log('BoxFileOperations: Exception updating metadata for ' + fileId + 
+      Logger.log('BoxFileOperations: Exception in updateMetadata for file ' + fileId + 
                 ': ' + error.toString());
       return false;
     }
   };
+
+/**
+ * Marks a file's metadata to indicate processing has failed, and records the build number.
+ * @param {string} fileId Box file ID.
+ * @param {string} accessToken Valid Box access token.
+ * @param {string} errorMessage The error message to record (will be truncated).
+ * @param {string} currentBuildNo The current script build number when the failure occurred.
+ * @returns {boolean} True if metadata was successfully updated/applied, false otherwise.
+ */
+ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo) {
+  // Ensure Config object and its properties are accessible
+  const currentConfig = (typeof Config !== 'undefined') ? Config : { 
+      BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', 
+      BOX_METADATA_SCOPE: 'enterprise', 
+      PROCESSING_STAGE_FAILED: 'failed', 
+      METADATA_KEY_LAST_ERROR: 'lastProcessingError',
+      METADATA_KEY_LAST_ERROR_TIMESTAMP: 'lastErrorTimestamp'
+      // Assuming 'buildNumber' is a standard field key, not needing specific METADATA_KEY_ prefix
+  };
+
+  if (!fileId || !accessToken || !currentBuildNo) {
+    Logger.log('BoxFileOperations.markFileAsFailed: fileId, accessToken, and currentBuildNo are required.');
+    return false;
+  }
+
+  try {
+    const metadataUpdatePayload = {};
+    metadataUpdatePayload.processingStage = currentConfig.PROCESSING_STAGE_FAILED;
+    metadataUpdatePayload[currentConfig.METADATA_KEY_LAST_ERROR] = (errorMessage || "Unknown error").substring(0, 250);
+    metadataUpdatePayload[currentConfig.METADATA_KEY_LAST_ERROR_TIMESTAMP] = new Date().toISOString();
+    metadataUpdatePayload.buildNumber = currentBuildNo;
+
+    Logger.log(`Attempting to mark file ${fileId} as FAILED. Error: ${metadataUpdatePayload[currentConfig.METADATA_KEY_LAST_ERROR].substring(0,50)}..., Build: ${currentBuildNo}`);
+
+    // Use applyMetadata which handles POST (create) or PUT (update via patch) if instance exists (due to 409->updateMetadata)
+    return ns.applyMetadata(fileId, metadataUpdatePayload, accessToken, currentConfig.BOX_METADATA_TEMPLATE_KEY);
+    
+  } catch (e) {
+    Logger.log(`BoxFileOperations: Exception while marking file ${fileId} as failed: ${e.toString()}`);
+    return false;
+  }
+};
   
   /**
    * Attaches template to single image with robust retry logic.
@@ -377,23 +453,33 @@ var BoxFileOperations = (function() {
    * @returns {string} Status: 'attached', 'skipped', or 'error'
    */
   ns.attachTemplateToImage = function(imageFile, accessToken) {
-    if (!accessToken || !imageFile || !imageFile.id) {
-      Logger.log('BoxFileOperations.attachTemplateToImage: imageFile and accessToken required');
+    const currentConfig = (typeof Config !== 'undefined') ? Config : { 
+        BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', 
+        BOX_METADATA_SCOPE: 'enterprise', 
+        PROCESSING_STAGE_UNPROCESSED: 'unprocessed',
+        BOX_API_BASE_URL: 'https://api.box.com/2.0'
+    };
+     const currentBuild = (typeof Config !== 'undefined' && typeof Config.getCurrentBuild === 'function') ? Config.getCurrentBuild() : 'unknown_build';
+
+
+    if (!accessToken || !imageFile || !imageFile.id || !imageFile.name) { // Check imageFile.name as well
+      Logger.log('BoxFileOperations.attachTemplateToImage: imageFile (with id and name) and accessToken required');
       return 'error';
     }
     
     try {
-      if (ns.hasExistingMetadata(imageFile.id, accessToken, Config.BOX_METADATA_TEMPLATE_KEY)) {
+      if (ns.hasExistingMetadata(imageFile.id, accessToken, currentConfig.BOX_METADATA_TEMPLATE_KEY)) {
         return 'skipped';
       }
       
       var emptyMetadata = {
-        processingStage: Config.PROCESSING_STAGE_UNPROCESSED,
-        lastProcessedDate: new Date().toISOString()
+        processingStage: currentConfig.PROCESSING_STAGE_UNPROCESSED,
+        lastProcessedDate: new Date().toISOString(),
+        buildNumber: currentBuild // Add current build number when attaching template
       };
       
-      var url = Config.BOX_API_BASE_URL + '/files/' + imageFile.id + '/metadata/' + 
-                Config.BOX_METADATA_SCOPE + '/' + Config.BOX_METADATA_TEMPLATE_KEY;
+      var url = currentConfig.BOX_API_BASE_URL + '/files/' + imageFile.id + '/metadata/' + 
+                currentConfig.BOX_METADATA_SCOPE + '/' + currentConfig.BOX_METADATA_TEMPLATE_KEY;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -405,24 +491,26 @@ var BoxFileOperations = (function() {
           payload: JSON.stringify(emptyMetadata),
           muteHttpExceptions: true
         });
-      }, 'attachTemplateToImage for ' + imageFile.name);
+      }, 'attachTemplateToImage (POST) for ' + imageFile.name);
       
       var responseCode = response.getResponseCode();
       
       if (responseCode === 201) {
         return 'attached';
       } else if (responseCode === 409) {
-        return 'skipped'; // Already exists
+        return 'skipped'; 
       } else {
         Logger.log('BoxFileOperations: Failed to attach template to ' + imageFile.name + 
-                  '. Code: ' + responseCode);
+                  '. Code: ' + responseCode + '. Response: ' + response.getContentText().substring(0,300));
         return 'error';
       }
       
     } catch (error) {
       var errorStr = error.toString();
       if (errorStr.includes('item_already_has_metadata_instance') || 
-          errorStr.includes('constraint_violated')) {
+          errorStr.includes('constraint_violated') ||
+          (error.message && typeof error.message.includes === 'function' && error.message.includes('409'))
+         ) {
         return 'skipped';
       }
       Logger.log('BoxFileOperations: Exception attaching template to ' + imageFile.name + 
@@ -436,88 +524,93 @@ var BoxFileOperations = (function() {
    * @param {string} accessToken Valid Box access token
    */
   ns.attachTemplateToAllImages = function(accessToken) {
+    const currentConfig = (typeof Config !== 'undefined') ? Config : { 
+        DEFAULT_PROCESSING_FOLDER_ID: '0', 
+        METADATA_ATTACHMENT_BATCH_SIZE: 50,
+        METADATA_ATTACHMENT_FILE_DELAY_MS: 100,
+        METADATA_ATTACHMENT_BATCH_DELAY_MS: 2000
+    };
+    const getTemplateFn = (typeof getOrCreateImageTemplate === 'function') ? getOrCreateImageTemplate : function(){ Logger.log("Warning: getOrCreateImageTemplate not available!"); return {displayName: "Mock Template"}; };
+
+
     if (!accessToken) {
       throw new Error('BoxFileOperations.attachTemplateToAllImages: accessToken required');
     }
     
-    var utils = initUtils_();
+    initUtils_(); // Ensure cUseful is available for Utilities.sleep
     
     Logger.log('=== BoxFileOperations: Attaching Template to All Images ===');
     
     try {
-      // Get template first
-      var template = getOrCreateImageTemplate(accessToken);
+      var template = getTemplateFn(accessToken);
       if (!template) {
-        throw new Error('Could not create or find template');
+        Logger.log('ERROR: Could not get or create metadata template. Aborting attachment process.');
+        throw new Error('Failed to ensure metadata template exists.');
       }
-      
       Logger.log('✅ Using template: ' + template.displayName);
       
-      var allImages = ns.findAllImageFiles(Config.DEFAULT_PROCESSING_FOLDER_ID, accessToken);
-      Logger.log('📊 Found ' + allImages.length + ' image files total');
+      var allImages = ns.findAllImageFiles(currentConfig.DEFAULT_PROCESSING_FOLDER_ID, accessToken);
+      Logger.log('📊 Found ' + allImages.length + ' image files total.');
       
       if (allImages.length === 0) {
-        Logger.log('No image files found to process');
+        Logger.log('No image files found to process for template attachment.');
         return;
       }
       
-      var stats = { processed: 0, attached: 0, skipped: 0, errors: 0 };
+      var stats = { processed: 0, attached: 0, skipped: 0, errors: 0, totalFiles: allImages.length };
       
-      // Process in batches
-      for (var i = 0; i < allImages.length; i += Config.METADATA_ATTACHMENT_BATCH_SIZE) {
-        var batch = allImages.slice(i, i + Config.METADATA_ATTACHMENT_BATCH_SIZE);
-        var batchNum = Math.floor(i / Config.METADATA_ATTACHMENT_BATCH_SIZE) + 1;
-        var totalBatches = Math.ceil(allImages.length / Config.METADATA_ATTACHMENT_BATCH_SIZE);
+      for (var i = 0; i < allImages.length; i += currentConfig.METADATA_ATTACHMENT_BATCH_SIZE) {
+        var batch = allImages.slice(i, i + currentConfig.METADATA_ATTACHMENT_BATCH_SIZE);
+        var batchNum = Math.floor(i / currentConfig.METADATA_ATTACHMENT_BATCH_SIZE) + 1;
+        var totalBatches = Math.ceil(allImages.length / currentConfig.METADATA_ATTACHMENT_BATCH_SIZE);
         
         Logger.log('Processing batch ' + batchNum + ' of ' + totalBatches + 
-                  ' (' + batch.length + ' files)');
+                  ' for template attachment (' + batch.length + ' files)');
         
-        batch.forEach(function(image, indexInBatch) {
+        batch.forEach(function(imageFile, indexInBatch) {
+          stats.processed++;
           try {
-            var result = ns.attachTemplateToImage(image, accessToken);
-            stats.processed++;
+            var result = ns.attachTemplateToImage(imageFile, accessToken);
             
             if (result === 'attached') stats.attached++;
             else if (result === 'skipped') stats.skipped++;
             else stats.errors++;
             
-            if (stats.processed % 10 === 0) {
-              Logger.log('Progress: ' + stats.processed + '/' + allImages.length + 
-                        ' (Attached: ' + stats.attached + ', Skipped: ' + stats.skipped + 
+            if ((indexInBatch + 1) % 10 === 0 || (indexInBatch + 1) === batch.length) {
+              Logger.log('Batch ' + batchNum + ' progress: ' + (indexInBatch + 1) + '/' + batch.length + 
+                        ' (Overall: ' + stats.processed + '/' + stats.totalFiles +
+                        ' | Attached: ' + stats.attached + ', Skipped: ' + stats.skipped + 
                         ', Errors: ' + stats.errors + ')');
             }
             
-            // Delay between files
-            if (indexInBatch > 0 && (indexInBatch + 1) % 5 === 0) {
-              Utilities.sleep(Config.METADATA_ATTACHMENT_FILE_DELAY_MS);
+            if (indexInBatch < batch.length - 1) {
+                 Utilities.sleep(currentConfig.METADATA_ATTACHMENT_FILE_DELAY_MS);
             }
             
-          } catch (error) {
-            Logger.log('BoxFileOperations: Error processing ' + image.name + 
-                      ': ' + error.toString());
+          } catch (batchError) { 
+            Logger.log('BoxFileOperations: Critical error processing ' + (imageFile.name || 'unknown file') + 
+                      ' in attachTemplateToAllImages batch: ' + batchError.toString());
             stats.errors++;
-            stats.processed++;
           }
         });
         
-        // Delay between batches
-        if (i + Config.METADATA_ATTACHMENT_BATCH_SIZE < allImages.length) {
-          Logger.log('Pausing ' + (Config.METADATA_ATTACHMENT_BATCH_DELAY_MS / 1000) + 
-                    's between batches...');
-          Utilities.sleep(Config.METADATA_ATTACHMENT_BATCH_DELAY_MS);
+        if (i + currentConfig.METADATA_ATTACHMENT_BATCH_SIZE < allImages.length) {
+          Logger.log('Pausing ' + (currentConfig.METADATA_ATTACHMENT_BATCH_DELAY_MS / 1000) + 
+                    's after batch ' + batchNum + '...');
+          Utilities.sleep(currentConfig.METADATA_ATTACHMENT_BATCH_DELAY_MS);
         }
       }
       
       Logger.log('\n=== Template Attachment Complete ===');
-      Logger.log('📊 Total processed: ' + stats.processed);
-      Logger.log('✅ Successfully attached: ' + stats.attached);
-      Logger.log('⏭️ Skipped (already had template): ' + stats.skipped);
-      Logger.log('❌ Errors: ' + stats.errors);
+      Logger.log('📊 Total files checked: ' + stats.processed + ' (out of ' + stats.totalFiles + ' found)');
+      Logger.log('✅ Templates successfully attached: ' + stats.attached);
+      Logger.log('⏭️ Skipped (template already existed or other skip): ' + stats.skipped);
+      Logger.log('❌ Errors during attachment: ' + stats.errors);
       
-    } catch (error) {
+    } catch (error) { 
       Logger.log('BoxFileOperations: Fatal error in attachTemplateToAllImages: ' + 
                 error.toString());
-      throw error;
+      throw error; 
     }
   };
   
