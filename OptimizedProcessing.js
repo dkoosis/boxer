@@ -1,7 +1,8 @@
 // File: OptimizedProcessing.gs
+// Optimized processing with systematic search strategies
 
 /**
- * OptimizedProcessing namespace - Fixed version (keeping good parts!)
+ * OptimizedProcessing namespace - systematic and efficient file processing
  */
 var OptimizedProcessing = (function() {
   'use strict';
@@ -9,62 +10,192 @@ var OptimizedProcessing = (function() {
   var ns = {};
   
   // Configuration
-  var MAX_EXECUTION_TIME_MS = 5 * 60 * 1000; // 5 minutes (safe margin for 6-minute limit)
-  var BATCH_SIZE = 8; // Process this many files per batch
-  var SEARCH_LIMIT = 200; // How many files to fetch in consolidated search
+  var MAX_EXECUTION_TIME_MS = 5 * 60 * 1000; // 5 minutes
+  var BATCH_SIZE = 8;
+  var SEARCH_LIMIT = 200;
   var CHECKPOINT_PROPERTY = 'BOXER_PROCESSING_CHECKPOINT';
   var STATS_PROPERTY = 'BOXER_PROCESSING_STATS';
+  var COMPREHENSIVE_CACHE_PROPERTY = 'BOXER_COMPREHENSIVE_CACHE';
+  var CACHE_DURATION_HOURS = 6;
   
   /**
-   * Main optimized processing function - simplified but keeps efficient search
+   * Get comprehensive count of all image files using search API
+   */
+  ns.getComprehensiveImageCount = function(accessToken, useCache) {
+    useCache = useCache !== false;
+    
+    // Check cache first
+    if (useCache) {
+      try {
+        var cacheStr = Config.SCRIPT_PROPERTIES.getProperty(COMPREHENSIVE_CACHE_PROPERTY);
+        if (cacheStr) {
+          var cache = JSON.parse(cacheStr);
+          var cacheAge = Date.now() - new Date(cache.timestamp).getTime();
+          var maxAge = CACHE_DURATION_HOURS * 60 * 60 * 1000;
+          
+          if (cacheAge < maxAge) {
+            Logger.log(`Using cached counts (${(cacheAge / (1000 * 60 * 60)).toFixed(1)}h old)`);
+            return cache.data;
+          }
+        }
+      } catch (error) {
+        Logger.log('Error reading cache: ' + error.toString());
+      }
+    }
+    
+    Logger.log('Getting comprehensive count using Search API...');
+    var startTime = Date.now();
+    
+    var counts = {
+      totalImageFiles: 0,
+      filesWithoutMetadata: 0,
+      filesWithMetadata: 0,
+      processingStages: {},
+      executionTime: 0
+    };
+    
+    try {
+      // Use Search API to get total count
+      var searchUrl = Config.BOX_API_BASE_URL + '/search' +
+                     '?query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp' +
+                     '&type=file' +
+                     '&limit=1' +
+                     '&fields=id';
+      
+      var response = UrlFetchApp.fetch(searchUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
+      });
+      
+      if (response.getResponseCode() === 200) {
+        var data = JSON.parse(response.getContentText());
+        counts.totalImageFiles = data.total_count || 0;
+        
+        Logger.log(`Found ${counts.totalImageFiles} total image files`);
+        
+        // Sample files to check metadata status
+        if (counts.totalImageFiles > 0) {
+          var sampleSize = Math.min(500, counts.totalImageFiles);
+          var sampleResponse = UrlFetchApp.fetch(Config.BOX_API_BASE_URL + '/search' +
+            '?query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp' +
+            '&type=file' +
+            '&limit=' + sampleSize +
+            '&fields=id,name', {
+            headers: { 'Authorization': 'Bearer ' + accessToken },
+            muteHttpExceptions: true
+          });
+          
+          if (sampleResponse.getResponseCode() === 200) {
+            var sampleData = JSON.parse(sampleResponse.getContentText());
+            
+            (sampleData.entries || []).forEach(function(file) {
+              if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
+                var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
+                
+                if (metadata) {
+                  counts.filesWithMetadata++;
+                  var stage = metadata.processingStage || 'unknown';
+                  counts.processingStages[stage] = (counts.processingStages[stage] || 0) + 1;
+                } else {
+                  counts.filesWithoutMetadata++;
+                }
+              }
+            });
+            
+            // Extrapolate from sample
+            if (sampleSize < counts.totalImageFiles) {
+              var ratio = counts.totalImageFiles / sampleSize;
+              counts.filesWithMetadata = Math.round(counts.filesWithMetadata * ratio);
+              counts.filesWithoutMetadata = counts.totalImageFiles - counts.filesWithMetadata;
+              
+              Object.keys(counts.processingStages).forEach(function(stage) {
+                counts.processingStages[stage] = Math.round(counts.processingStages[stage] * ratio);
+              });
+            }
+          }
+        }
+        
+      } else {
+        Logger.log(`Search API failed: ${response.getResponseCode()}`);
+        counts.error = 'Search API failed: ' + response.getResponseCode();
+      }
+      
+      counts.executionTime = Date.now() - startTime;
+      
+      // Cache results
+      try {
+        var cacheData = {
+          timestamp: new Date().toISOString(),
+          data: counts
+        };
+        Config.SCRIPT_PROPERTIES.setProperty(COMPREHENSIVE_CACHE_PROPERTY, JSON.stringify(cacheData));
+      } catch (error) {
+        Logger.log('Error caching results: ' + error.toString());
+      }
+      
+      return counts;
+      
+    } catch (error) {
+      Logger.log(`Error getting comprehensive count: ${error.toString()}`);
+      counts.executionTime = Date.now() - startTime;
+      counts.error = error.toString();
+      return counts; // Return without caching
+    }
+  };
+  
+  /**
+   * Main processing function
    */
   ns.processBoxImagesOptimized = function() {
     var startTime = Date.now();
-    Logger.log(`🐕 Boxer starting optimized processing at ${new Date().toISOString()}`);
+    Logger.log(`Boxer starting processing at ${new Date().toISOString()}`);
     
     var accessToken = getValidAccessToken();
     if (!accessToken) {
-      Logger.log("❌ No access token available");
+      Logger.log("No access token available");
       return;
     }
+    
+    // Get overview
+    var comprehensiveCounts = ns.getComprehensiveImageCount(accessToken, true);
+    Logger.log(`Total files: ${comprehensiveCounts.totalImageFiles}, Without metadata: ${comprehensiveCounts.filesWithoutMetadata}`);
     
     var stats = {
       filesFound: 0,
       processed: 0,
       skipped: 0,
       errors: 0,
-      executionTimeMs: 0
+      executionTimeMs: 0,
+      comprehensiveCounts: comprehensiveCounts
     };
     
     try {
-      // Use the ORIGINAL efficient consolidated search (this was actually good!)
-      var candidateFiles = ns.findFilesUsingConsolidatedSearch(accessToken, startTime);
+      // Find files using systematic approach
+      var candidateFiles = ns.findFilesSystematically(accessToken, startTime);
       stats.filesFound = candidateFiles.length;
       
-      Logger.log(`🎯 Found ${candidateFiles.length} image files from consolidated search`);
+      Logger.log(`Found ${candidateFiles.length} candidate files`);
       
       if (candidateFiles.length === 0) {
-        Logger.log("✅ No image files found - Boxer needs more bones to fetch!");
+        Logger.log("No candidates found");
         return;
       }
       
-      // Filter to files that actually need processing
+      // Filter to files needing processing
       var filesToProcess = ns.filterFilesNeedingProcessing(candidateFiles, accessToken, startTime);
-      
-      Logger.log(`🦴 ${filesToProcess.length} files need Boxer's attention`);
+      Logger.log(`${filesToProcess.length} files need processing`);
       
       if (filesToProcess.length === 0) {
-        Logger.log("✅ All files up to date - Boxer is the goodest boy!");
+        Logger.log("All candidates up to date");
         return;
       }
       
-      // Process files in batches until time limit
-      var maxFiles = Math.min(filesToProcess.length, 50); // Don't try to process too many
+      // Process files in batches
+      var maxFiles = Math.min(filesToProcess.length, 30);
       
       for (var i = 0; i < maxFiles; i += BATCH_SIZE) {
-        // Check time limit before each batch
         if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
-          Logger.log("⏰ Time limit reached, Boxer needs a nap");
+          Logger.log("Time limit reached");
           break;
         }
         
@@ -75,56 +206,105 @@ var OptimizedProcessing = (function() {
         stats.skipped += batchResults.skipped;
         stats.errors += batchResults.errors;
         
-        Logger.log(`📦 Batch ${Math.floor(i/BATCH_SIZE) + 1}: Processed ${batchResults.processed}, Skipped ${batchResults.skipped}, Errors ${batchResults.errors}`);
+        Logger.log(`Batch ${Math.floor(i/BATCH_SIZE) + 1}: Processed ${batchResults.processed}, Errors ${batchResults.errors}`);
         
-        // Small delay between batches to be nice to Box API
         Utilities.sleep(500);
       }
       
-      // Save simple checkpoint
+      // Save checkpoint
       ns.saveCheckpoint({
         lastRunTime: new Date().toISOString(),
         filesProcessedThisRun: stats.processed,
-        currentBuild: Config.getCurrentBuild()
+        currentBuild: Config.getCurrentBuild(),
+        totalImageFiles: comprehensiveCounts.totalImageFiles,
+        filesWithoutMetadata: comprehensiveCounts.filesWithoutMetadata
       });
       
     } catch (error) {
-      Logger.log(`❌ Critical error: ${error.toString()}`);
+      Logger.log(`Critical error: ${error.toString()}`);
       stats.errors++;
     } finally {
       stats.executionTimeMs = Date.now() - startTime;
       ns.saveStats(stats);
       
-      Logger.log("\n📊 BOXER'S FETCH REPORT:");
-      Logger.log(`🎾 Files found: ${stats.filesFound}`);
-      Logger.log(`✅ Processed: ${stats.processed}`);
-      Logger.log(`⏭️ Skipped: ${stats.skipped}`);
-      Logger.log(`❌ Errors: ${stats.errors}`);
-      Logger.log(`⏱️ Time: ${(stats.executionTimeMs / 1000).toFixed(1)}s`);
+      Logger.log(`Processed: ${stats.processed}, Errors: ${stats.errors}, Time: ${(stats.executionTimeMs / 1000).toFixed(1)}s`);
       
-      if (stats.processed > 0) {
-        Logger.log("🦴 Good boy Boxer! Files have been organized!");
+      if (comprehensiveCounts.filesWithoutMetadata > 0) {
+        var remaining = Math.max(0, comprehensiveCounts.filesWithoutMetadata - stats.processed);
+        var percentComplete = ((comprehensiveCounts.totalImageFiles - remaining) / comprehensiveCounts.totalImageFiles * 100).toFixed(1);
+        Logger.log(`Progress: ${percentComplete}% complete (${remaining} remaining)`);
       }
     }
   };
   
   /**
-   * Find files using ORIGINAL efficient consolidated search (this was good!)
+   * Systematic file finding using rotating search strategies
    */
-  ns.findFilesUsingConsolidatedSearch = function(accessToken, startTime) {
-    Logger.log("🔍 Using efficient consolidated search for image files...");
+  ns.findFilesSystematically = function(accessToken, startTime) {
+    var checkpoint = ns.getCheckpoint();
+    var lastMethod = checkpoint.lastSearchMethod || 'unprocessed';
+    
+    Logger.log(`Last search method: ${lastMethod}`);
+    
+    var files = [];
+    var method = '';
+    
+    // Rotate through search strategies
+    if (lastMethod === 'unprocessed') {
+      method = 'mdfilter_unprocessed';
+      files = ns.findFilesWithMetadataFilter(accessToken, 'processingStage', 'unprocessed');
+    } else if (lastMethod === 'mdfilter_unprocessed') {
+      method = 'mdfilter_old_builds';
+      files = ns.findFilesWithOldBuildsMetadataFilter(accessToken);
+    } else if (lastMethod === 'mdfilter_old_builds') {
+      method = 'mdfilter_enhanceable';
+      files = ns.findFilesWithMetadataFilter(accessToken, 'processingStage', Config.PROCESSING_STAGE_BASIC || 'basic_extracted');
+    } else if (lastMethod === 'mdfilter_enhanceable') {
+      method = 'search_recent';
+      files = ns.findRecentFilesWithDateRange(accessToken);
+    } else if (lastMethod === 'search_recent') {
+      method = 'search_no_metadata';
+      files = ns.findFilesWithoutMetadata(accessToken);
+    } else if (lastMethod === 'search_no_metadata') {
+      method = 'recent_items';
+      files = ns.findRecentItems(accessToken);
+    } else {
+      method = 'folder_listing';
+      files = ns.findRecentFiles(accessToken);
+    }
+    
+    // Update checkpoint
+    checkpoint.lastSearchMethod = method;
+    ns.saveCheckpoint(checkpoint);
+    
+    Logger.log(`Strategy "${method}" found ${files.length} files`);
+    return files;
+  };
+  
+  /**
+   * Search using metadata filters
+   */
+  ns.findFilesWithMetadataFilter = function(accessToken, metadataField, metadataValue) {
+    var files = [];
     
     try {
-      // ORIGINAL approach - this was actually efficient and correct!
-      var imageExtensions = ['jpg', 'jpeg', 'png', 'heic', 'heif', 'tiff', 'gif', 'bmp', 'webp'];
-      var extensionsString = imageExtensions.join(',');
+      var mdfilters = [{
+        "scope": Config.BOX_METADATA_SCOPE,
+        "templateKey": Config.BOX_METADATA_TEMPLATE_KEY,
+        "filters": {}
+      }];
       
-      var searchUrl = Config.BOX_API_BASE_URL + '/search' +
-                     '?query=' + 
-                     '?file_extensions=' + encodeURIComponent(extensionsString) +
-                     '&limit=' + SEARCH_LIMIT +
-                     '&type=file' +
-                     '&fields=id,name,size,created_at,modified_at,parent,path_collection';
+      mdfilters[0].filters[metadataField] = metadataValue;
+      
+      var searchParams = [
+        'query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp',
+        'type=file',
+        'limit=200',
+        'mdfilters=' + encodeURIComponent(JSON.stringify(mdfilters)),
+        'fields=id,name,size,created_at,modified_at'
+      ];
+      
+      var searchUrl = Config.BOX_API_BASE_URL + '/search?' + searchParams.join('&');
       
       var response = UrlFetchApp.fetch(searchUrl, {
         headers: { 'Authorization': 'Bearer ' + accessToken },
@@ -134,50 +314,249 @@ var OptimizedProcessing = (function() {
       if (response.getResponseCode() === 200) {
         var data = JSON.parse(response.getContentText());
         
-        // Filter and deduplicate (defensive programming)
-        var uniqueFiles = [];
-        var seenIds = new Set();
-        
         (data.entries || []).forEach(function(file) {
-          if (file.type === 'file' && 
-              BoxFileOperations.isImageFile(file.name) && 
-              !seenIds.has(file.id)) {
-            seenIds.add(file.id);
-            uniqueFiles.push(file);
+          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
+            files.push(file);
           }
         });
         
-        Logger.log(`✅ Consolidated search found ${uniqueFiles.length} unique image files`);
-        return uniqueFiles;
-        
       } else {
-        Logger.log(`❌ Consolidated search failed: ${response.getResponseCode()}`);
-        Logger.log(`Response: ${response.getContentText().substring(0, 200)}`);
-        return [];
+        Logger.log(`Metadata filter search failed: ${response.getResponseCode()}`);
       }
       
     } catch (error) {
-      Logger.log(`❌ Exception during consolidated search: ${error.toString()}`);
-      return [];
+      Logger.log(`Error in metadata filter search: ${error.toString()}`);
     }
+    
+    return files;
   };
   
   /**
-   * Filter files to those that actually need processing - this is where the real logic is
+   * Find files with old build numbers
+   */
+  ns.findFilesWithOldBuildsMetadataFilter = function(accessToken) {
+    var files = [];
+    var currentBuild = Config.getCurrentBuild();
+    
+    try {
+      var mdfilters = [{
+        "scope": Config.BOX_METADATA_SCOPE,
+        "templateKey": Config.BOX_METADATA_TEMPLATE_KEY,
+        "filters": {}
+      }];
+      
+      var searchParams = [
+        'query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp',
+        'type=file',
+        'limit=200',
+        'mdfilters=' + encodeURIComponent(JSON.stringify(mdfilters)),
+        'fields=id,name,size,created_at,modified_at'
+      ];
+      
+      var searchUrl = Config.BOX_API_BASE_URL + '/search?' + searchParams.join('&');
+      
+      var response = UrlFetchApp.fetch(searchUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
+      });
+      
+      if (response.getResponseCode() === 200) {
+        var data = JSON.parse(response.getContentText());
+        
+        // Filter client-side for old build numbers
+        for (var i = 0; i < (data.entries || []).length && files.length < 50; i++) {
+          var file = data.entries[i];
+          
+          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
+            var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
+            if (metadata && Config.shouldReprocessForBuild(metadata.buildNumber)) {
+              files.push(file);
+            }
+          }
+        }
+        
+      } else {
+        Logger.log(`Old builds search failed: ${response.getResponseCode()}`);
+      }
+      
+    } catch (error) {
+      Logger.log(`Error finding old builds: ${error.toString()}`);
+    }
+    
+    return files;
+  };
+  
+  /**
+   * Find recent files using date range
+   */
+  ns.findRecentFilesWithDateRange = function(accessToken) {
+    var files = [];
+    
+    try {
+      var thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      var dateRange = thirtyDaysAgo.toISOString();
+      
+      var searchParams = [
+        'query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp',
+        'type=file',
+        'limit=100',
+        'created_at_range=' + encodeURIComponent(dateRange + ','),
+        'sort=modified_at',
+        'fields=id,name,size,created_at,modified_at'
+      ];
+      
+      var searchUrl = Config.BOX_API_BASE_URL + '/search?' + searchParams.join('&');
+      
+      var response = UrlFetchApp.fetch(searchUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
+      });
+      
+      if (response.getResponseCode() === 200) {
+        var data = JSON.parse(response.getContentText());
+        
+        (data.entries || []).forEach(function(file) {
+          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
+            files.push(file);
+          }
+        });
+        
+      } else {
+        Logger.log(`Recent files search failed: ${response.getResponseCode()}`);
+      }
+      
+    } catch (error) {
+      Logger.log(`Error finding recent files: ${error.toString()}`);
+    }
+    
+    return files;
+  };
+  
+  /**
+   * Find recent items using Box API
+   */
+  ns.findRecentItems = function(accessToken) {
+    var recentFiles = [];
+    
+    try {
+      var recentUrl = Config.BOX_API_BASE_URL + '/recent_items' +
+                     '?limit=50' +
+                     '&fields=id,name,size,created_at,modified_at,type';
+      
+      var response = UrlFetchApp.fetch(recentUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
+      });
+      
+      if (response.getResponseCode() === 200) {
+        var data = JSON.parse(response.getContentText());
+        
+        (data.entries || []).forEach(function(item) {
+          var file = item.item || item;
+          
+          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
+            recentFiles.push(file);
+          }
+        });
+      }
+      
+    } catch (error) {
+      Logger.log(`Error finding recent items: ${error.toString()}`);
+    }
+    
+    return recentFiles;
+  };
+  
+  /**
+   * Find files without metadata
+   */
+  ns.findFilesWithoutMetadata = function(accessToken) {
+    var filesWithoutMetadata = [];
+    var searchedCount = 0;
+    var maxToCheck = 300;
+    
+    try {
+      var searchUrl = Config.BOX_API_BASE_URL + '/search' +
+                     '?query=jpg OR jpeg OR png OR heic' +
+                     '&type=file' +
+                     '&limit=150' +
+                     '&fields=id,name,size,created_at';
+      
+      var response = UrlFetchApp.fetch(searchUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
+      });
+      
+      if (response.getResponseCode() === 200) {
+        var data = JSON.parse(response.getContentText());
+        
+        (data.entries || []).forEach(function(file) {
+          if (searchedCount >= maxToCheck) return;
+          
+          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
+            searchedCount++;
+            
+            var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
+            if (!metadata) {
+              filesWithoutMetadata.push(file);
+            }
+          }
+        });
+      }
+      
+    } catch (error) {
+      Logger.log(`Error finding files without metadata: ${error.toString()}`);
+    }
+    
+    return filesWithoutMetadata;
+  };
+  
+  /**
+   * Fallback: simple search for any image files
+   */
+  ns.findRecentFiles = function(accessToken) {
+    var files = [];
+    
+    try {
+      var searchUrl = Config.BOX_API_BASE_URL + '/search' +
+                     '?query=jpg OR jpeg OR png' +
+                     '&type=file' +
+                     '&limit=100' +
+                     '&fields=id,name,size,created_at,modified_at';
+      
+      var response = UrlFetchApp.fetch(searchUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
+      });
+      
+      if (response.getResponseCode() === 200) {
+        var data = JSON.parse(response.getContentText());
+        
+        (data.entries || []).forEach(function(file) {
+          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
+            files.push(file);
+          }
+        });
+      }
+      
+    } catch (error) {
+      Logger.log(`Error in fallback search: ${error.toString()}`);
+    }
+    
+    return files;
+  };
+  
+  /**
+   * Filter files to those needing processing
    */
   ns.filterFilesNeedingProcessing = function(files, accessToken, startTime) {
     var needsProcessing = [];
     var currentBuild = Config.getCurrentBuild();
     
-    Logger.log(`🔎 Checking which files need processing (current build: ${currentBuild})`);
-    
-    // Limit how many files we check metadata for (time management)
-    var maxToCheck = Math.min(files.length, 150);
-    
-    for (var i = 0; i < maxToCheck; i++) {
-      // Check time limit during filtering
-      if (Date.now() - startTime > MAX_EXECUTION_TIME_MS * 0.75) {
-        Logger.log("⏰ Time limit during filtering, stopping filter phase");
+    for (var i = 0; i < files.length; i++) {
+      if (Date.now() - startTime > MAX_EXECUTION_TIME_MS * 0.6) {
+        Logger.log("Time limit during filtering");
         break;
       }
       
@@ -185,86 +564,41 @@ var OptimizedProcessing = (function() {
       var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
       
       var shouldProcess = false;
-      var reason = '';
+      var priority = 999;
       
       if (!metadata) {
-        // No metadata at all - definitely needs processing
         shouldProcess = true;
-        reason = 'no metadata';
+        priority = 0;
       } else {
         var stage = metadata.processingStage;
         var fileBuild = metadata.buildNumber;
         
-        // Check if file needs reprocessing due to build change
         if (Config.shouldReprocessForBuild(fileBuild)) {
           shouldProcess = true;
-          reason = `build update (${fileBuild || 'unknown'} → ${currentBuild})`;
-        } 
-        // Check if processing stage indicates incomplete processing
-        else if (!stage || 
-                 stage === Config.PROCESSING_STAGE_UNPROCESSED ||
-                 stage === Config.PROCESSING_STAGE_BASIC ||
-                 stage === Config.PROCESSING_STAGE_FAILED) {
+          priority = 1;
+        } else if (!stage || 
+                   stage === Config.PROCESSING_STAGE_UNPROCESSED ||
+                   stage === Config.PROCESSING_STAGE_FAILED) {
           shouldProcess = true;
-          reason = `incomplete (${stage || 'unknown'})`;
-        }
-        // Skip files that are already complete and up-to-date
-        else if (stage === Config.PROCESSING_STAGE_COMPLETE ||
-                 stage === Config.PROCESSING_STAGE_AI ||
-                 stage === Config.PROCESSING_STAGE_REVIEW) {
-          shouldProcess = false;
-          reason = `complete (${stage})`;
-        } else {
-          // Unknown stage, better to process it
+          priority = 2;
+        } else if (stage === Config.PROCESSING_STAGE_BASIC) {
           shouldProcess = true;
-          reason = `unknown stage (${stage})`;
+          priority = 3;
         }
       }
       
       if (shouldProcess) {
-        needsProcessing.push({
-          file: file,
-          reason: reason
-        });
+        needsProcessing.push({ file: file, priority: priority });
       }
       
-      // Progress indicator and small delay for large batches
       if (i > 0 && i % 25 === 0) {
-        Logger.log(`  📋 Checked ${i}/${maxToCheck} files, found ${needsProcessing.length} needing processing`);
-        Utilities.sleep(100);
+        Utilities.sleep(50);
       }
     }
     
-    Logger.log(`🎯 ${needsProcessing.length} files need processing`);
-    
-    if (needsProcessing.length > 0) {
-      Logger.log("📋 Reasons breakdown:");
-      var reasonCounts = {};
-      needsProcessing.forEach(function(item) {
-        var reasonType = item.reason.split(' ')[0];
-        reasonCounts[reasonType] = (reasonCounts[reasonType] || 0) + 1;
-      });
-      
-      Object.keys(reasonCounts).forEach(function(reason) {
-        Logger.log(`   ${reason}: ${reasonCounts[reason]} files`);
-      });
-    }
-    
-    // Sort by priority - new files first, then build updates, then incomplete
+    // Sort by priority
     needsProcessing.sort(function(a, b) {
-      var priorityMap = {
-        'no': 0,        // 'no metadata'
-        'incomplete': 1, // 'incomplete (stage)'
-        'build': 2,     // 'build update'
-        'unknown': 3    // 'unknown stage'
-      };
-      
-      var aType = a.reason.split(' ')[0];
-      var bType = b.reason.split(' ')[0];
-      var aPriority = priorityMap[aType] !== undefined ? priorityMap[aType] : 999;
-      var bPriority = priorityMap[bType] !== undefined ? priorityMap[bType] : 999;
-      
-      return aPriority - bPriority;
+      return a.priority - b.priority;
     });
     
     return needsProcessing.map(function(item) { return item.file; });
@@ -288,11 +622,10 @@ var OptimizedProcessing = (function() {
           results.errors++;
         }
         
-        // Small delay between files
         Utilities.sleep(300);
         
       } catch (error) {
-        Logger.log(`❌ Error processing ${file.name}: ${error.toString()}`);
+        Logger.log(`Error processing ${file.name}: ${error.toString()}`);
         results.errors++;
       }
     });
@@ -301,7 +634,7 @@ var OptimizedProcessing = (function() {
   };
   
   /**
-   * Process a single file - simplified version
+   * Process a single file
    */
   ns.processFileIfNeeded = function(file, accessToken) {
     if (!file || !file.id || !file.name) {
@@ -309,9 +642,6 @@ var OptimizedProcessing = (function() {
     }
     
     try {
-      Logger.log(`🐕 Processing: ${file.name}`);
-      
-      // Get full file details
       var fileDetailsUrl = Config.BOX_API_BASE_URL + '/files/' + file.id + 
                           '?fields=id,name,size,path_collection,created_at,modified_at,parent';
       
@@ -321,35 +651,40 @@ var OptimizedProcessing = (function() {
       });
       
       if (response.getResponseCode() !== 200) {
-        Logger.log(`❌ Failed to get file details for ${file.name}`);
+        Logger.log(`Failed to get file details for ${file.name}`);
         return 'error';
       }
       
       var fileDetails = JSON.parse(response.getContentText());
       
-      // Extract enhanced metadata (this includes build number and processing stage)
-      var metadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
+      // Build path string for logging
+      var pathString = '';
+      if (fileDetails.path_collection && fileDetails.path_collection.entries && fileDetails.path_collection.entries.length > 1) {
+        pathString = fileDetails.path_collection.entries.slice(1).map(function(p) { return p.name; }).join('/');
+      } else if (fileDetails.parent && fileDetails.parent.name && fileDetails.parent.id !== '0') {
+        pathString = fileDetails.parent.name;
+      }
+      var pathDisplay = pathString ? ` (${pathString})` : '';
       
-      // Apply metadata
+      Logger.log(`ℹ️ Processing: ${file.name}${pathDisplay}`);
+      
+      var metadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
       var success = BoxFileOperations.applyMetadata(file.id, metadata, accessToken);
       
       if (success) {
-        Logger.log(`✅ Successfully processed: ${file.name} (Stage: ${metadata.processingStage})`);
+        Logger.log(`✅ Successfully processed: ${file.name}${pathDisplay}`);
         return 'processed';
       } else {
-        Logger.log(`❌ Failed to apply metadata for: ${file.name}`);
+        Logger.log(`Failed to apply metadata for: ${file.name}${pathDisplay}`);
         return 'error';
       }
       
     } catch (error) {
-      Logger.log(`❌ Exception processing ${file.name}: ${error.toString()}`);
+      Logger.log(`Exception processing ${file.name}: ${error.toString()}`);
       return 'error';
     }
   };
   
-  /**
-   * Save simple checkpoint
-   */
   ns.saveCheckpoint = function(checkpoint) {
     try {
       Config.SCRIPT_PROPERTIES.setProperty(CHECKPOINT_PROPERTY, JSON.stringify(checkpoint));
@@ -358,9 +693,6 @@ var OptimizedProcessing = (function() {
     }
   };
   
-  /**
-   * Get checkpoint
-   */
   ns.getCheckpoint = function() {
     try {
       var checkpointStr = Config.SCRIPT_PROPERTIES.getProperty(CHECKPOINT_PROPERTY);
@@ -371,9 +703,6 @@ var OptimizedProcessing = (function() {
     }
   };
   
-  /**
-   * Save processing stats
-   */
   ns.saveStats = function(stats) {
     try {
       var allStatsStr = Config.SCRIPT_PROPERTIES.getProperty(STATS_PROPERTY);
@@ -382,7 +711,6 @@ var OptimizedProcessing = (function() {
       stats.timestamp = new Date().toISOString();
       allStats.push(stats);
       
-      // Keep last 10 runs
       if (allStats.length > 10) {
         allStats = allStats.slice(-10);
       }
@@ -401,14 +729,14 @@ function processBoxImagesOptimized() {
   OptimizedProcessing.processBoxImagesOptimized();
 }
 
-// Show recent processing stats
+// Show processing stats
 function showOptimizedProcessingStats() {
-  Logger.log("=== 🐕 Boxer's Recent Performance ===\n");
+  Logger.log("Recent Processing Stats");
   
   try {
     var statsStr = Config.SCRIPT_PROPERTIES.getProperty('BOXER_PROCESSING_STATS');
     if (!statsStr) {
-      Logger.log("No stats available yet - Boxer hasn't run!");
+      Logger.log("No stats available yet");
       return;
     }
     
@@ -417,17 +745,19 @@ function showOptimizedProcessingStats() {
     allStats.forEach(function(run, index) {
       var date = new Date(run.timestamp).toLocaleString();
       Logger.log(`${index + 1}. ${date}`);
-      Logger.log(`   🎾 Found: ${run.filesFound}, ✅ Processed: ${run.processed}`);
-      Logger.log(`   ⏭️ Skipped: ${run.skipped}, ❌ Errors: ${run.errors}`);
-      Logger.log(`   ⏱️ Time: ${(run.executionTimeMs / 1000).toFixed(1)}s`);
-      Logger.log("   " + "─".repeat(40));
+      Logger.log(`   Found: ${run.filesFound}, Processed: ${run.processed}, Errors: ${run.errors}`);
+      Logger.log(`   Time: ${(run.executionTimeMs / 1000).toFixed(1)}s`);
+      
+      if (run.comprehensiveCounts) {
+        Logger.log(`   Total: ${run.comprehensiveCounts.totalImageFiles}, Without metadata: ${run.comprehensiveCounts.filesWithoutMetadata}`);
+      }
     });
     
     var checkpoint = OptimizedProcessing.getCheckpoint();
     if (checkpoint.lastRunTime) {
       var timeSince = ((Date.now() - new Date(checkpoint.lastRunTime).getTime()) / (1000 * 60 * 60)).toFixed(1);
-      Logger.log(`\n🕐 Last run: ${checkpoint.lastRunTime} (${timeSince} hours ago)`);
-      Logger.log(`🔧 Last processed with build: ${checkpoint.currentBuild || 'unknown'}`);
+      Logger.log(`\nLast run: ${timeSince} hours ago`);
+      Logger.log(`Last search method: ${checkpoint.lastSearchMethod || 'unknown'}`);
     }
     
   } catch (error) {
@@ -435,33 +765,42 @@ function showOptimizedProcessingStats() {
   }
 }
 
-// Quick test function
-function testBoxerProcessing() {
-  Logger.log("=== 🐕 Testing Boxer's Fetching Skills ===");
+// Get comprehensive counts without processing  
+function showComprehensiveBoxCounts() {
+  Logger.log("Box Image Analysis");
   
   var accessToken = getValidAccessToken();
   if (!accessToken) {
-    Logger.log("❌ No access token available");
+    Logger.log("No access token available");
     return;
   }
   
-  // Test the consolidated search
-  var startTime = Date.now();
-  var allFiles = OptimizedProcessing.findFilesUsingConsolidatedSearch(accessToken, startTime);
-  Logger.log(`🎾 Consolidated search found ${allFiles.length} image files`);
+  var counts = OptimizedProcessing.getComprehensiveImageCount(accessToken, false);
   
-  if (allFiles.length > 0) {
-    // Test filtering
-    var needsProcessing = OptimizedProcessing.filterFilesNeedingProcessing(allFiles.slice(0, 20), accessToken, startTime);
-    Logger.log(`🎯 Of first 20 files, ${needsProcessing.length} need processing`);
-    
-    if (needsProcessing.length > 0) {
-      Logger.log("📋 Sample files that would be processed:");
-      needsProcessing.slice(0, 3).forEach(function(file, index) {
-        Logger.log(`   ${index + 1}. ${file.name} (${file.id})`);
+  Logger.log(`Total image files: ${counts.totalImageFiles}`);
+  Logger.log(`Without metadata: ${counts.filesWithoutMetadata}`);
+  Logger.log(`With metadata: ${counts.filesWithMetadata}`);
+  
+  if (Object.keys(counts.processingStages).length > 0) {
+    Logger.log("\nProcessing stages:");
+    Object.entries(counts.processingStages)
+      .sort(([,a], [,b]) => b - a)
+      .forEach(([stage, count]) => {
+        var percentage = (count / counts.totalImageFiles * 100).toFixed(1);
+        Logger.log(`   ${stage}: ${count} files (${percentage}%)`);
       });
-    }
+  }
+  
+  if (counts.error) {
+    Logger.log(`\nError: ${counts.error}`);
+  }
+  
+  Logger.log(`\nAnalysis took: ${(counts.executionTime / 1000).toFixed(1)}s`);
+  
+  if (counts.filesWithoutMetadata > 0) {
+    var estimatedRuns = Math.ceil(counts.filesWithoutMetadata / 30);
+    Logger.log(`Estimated ${estimatedRuns} more runs needed`);
   } else {
-    Logger.log("✅ No image files found - check your Box folders!");
+    Logger.log("All files have metadata!");
   }
 }

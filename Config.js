@@ -31,7 +31,7 @@ var Config = {
   
   // Processing Folder Configuration
   DEFAULT_PROCESSING_FOLDER_ID: '0',
-  ACTIVE_TEST_FOLDER_ID: '256585558894',
+  ACTIVE_TEST_FOLDER_ID: '122988400901',
   
   // Processing Stages
   PROCESSING_STAGE_UNPROCESSED: 'unprocessed',

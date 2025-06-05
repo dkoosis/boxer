@@ -349,7 +349,7 @@ var EnhancedExifParser = (function() {
                 if (num !== null && den !== null) val = (den === 0) ? 0 : num / den;
              }
             break;
-          default: Logger.log('Unsupported EXIF type ' + type + ' for tag 0x' + tagId.toString(16)); return null;
+          default: Logger.log(' ⚠️ Unsupported EXIF type ' + type + ' for tag 0x' + tagId.toString(16)); return null;
         }
         if (val !== null) values.push(val);
         else if (type !== EXIF_TYPES.RATIONAL) break; 
