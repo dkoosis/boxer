@@ -196,73 +196,108 @@ var BoxReportManager = (function() {
       }
     }
   };
-  
+
   /**
-   * Parse report CSV content using bmFiddler to extract image files
+   * Parse report CSV content using a robust CSV parser to extract image files.
+   * @param {string} reportContent CSV content string
+   * @returns {object[]} Array of image file objects
+   */
+// File: BoxReportManager.js
+// ... (the rest of the file remains the same until the parseReport function)
+
+  /**
+   * Parse report CSV content using a robust CSV parser to extract image files.
    * @param {string} reportContent CSV content string
    * @returns {object[]} Array of image file objects
    */
   ns.parseReport = function(reportContent) {
-    Logger.log('📊 Parsing report content with bmFiddler...');
+    Logger.log('📊 Parsing report content with robust CSV parser...');
     
     try {
-      // Create a new Fiddler instance with the CSV data
-      var fiddler = new bmFiddler.Fiddler();
+      // Use the robust Utilities.parseCsv() which handles commas inside quoted fields.
+      var csvData = Utilities.parseCsv(reportContent);
       
-      // Parse the CSV content into a 2D array
-      var csvLines = reportContent.split('\n');
-      var csvData = csvLines.map(function(line) {
-        // Simple CSV parsing - could be enhanced for complex cases
-        return line.split(',').map(function(cell) {
-          return cell.replace(/"/g, '').trim();
-        });
-      });
-      
-      // Set the values in the fiddler
-      fiddler.setValues(csvData);
-      
-      if (fiddler.getNumRows() === 0) {
+      if (!csvData || csvData.length < 2) {
         Logger.log('⚠️ No data rows found in report');
         return [];
       }
       
-      Logger.log('📋 Fiddler loaded with ' + fiddler.getNumRows() + ' rows and ' + fiddler.getNumColumns() + ' columns');
-      Logger.log('🏷️ Headers: ' + fiddler.getHeaders().join(', '));
+      var headers = csvData[0].map(function(h) { return h.trim(); });
+      var dataRows = csvData.slice(1);
+      
+      // Find the index of the columns we need
+      var itemNameIndex = headers.indexOf('Item Name');
+      var itemIdIndex = headers.indexOf('Item ID');
+      var pathIndex = headers.indexOf('Path');
+      var metadataIndex = headers.indexOf('Metadata');
+      var pathIdIndex = headers.indexOf('Path ID'); // New: Get Path ID column index
+
+      if (itemNameIndex === -1 || itemIdIndex === -1 || metadataIndex === -1 || pathIdIndex === -1) {
+          Logger.log('❌ Report missing required headers: "Item Name", "Item ID", "Metadata", or "Path ID"');
+          return [];
+      }
+
+      Logger.log('📋 CSV parsed with ' + dataRows.length + ' rows and ' + headers.length + ' columns');
+      Logger.log('🏷️ Headers found: ' + headers.join(', '));
       
       // Filter to only image files
       var imageFiles = [];
-      var data = fiddler.getData();
+      var filesWithMetadataCount = 0;
       
-      data.forEach(function(row) {
-        var itemName = row['Item Name'] || row['item name'] || row['name'] || '';
-        var itemId = row['Item ID'] || row['item id'] || row['id'] || '';
-        var path = row['Path'] || row['path'] || '';
-        var metadata = row['Metadata'] || row['metadata'] || '';
+      dataRows.forEach(function(row) {
+        var itemName = row[itemNameIndex] || '';
+        var itemId = row[itemIdIndex] || '';
+        var path = row[pathIndex] || '';
+        var metadata = row[metadataIndex] || '';
+        var pathId = row[pathIdIndex] || ''; // New: Get Path ID string
         
         // Check if it's an image file and has a valid ID
         if (itemName && itemId && BoxFileOperations.isImageFile(itemName) && /^\d+$/.test(itemId)) {
+          
+          var hasMetadata = metadata && metadata.includes('comprehensiveImageMetadata');
+          if (hasMetadata) {
+            filesWithMetadataCount++;
+          }
+
+          // New: Extract parent folder ID from the path ID string
+          var parentId = null;
+          if (pathId) {
+            var ids = pathId.split('/');
+            // The parent ID is the second to last ID in the path string.
+            // e.g., in "0/123/456", "123" is the parent of the item "456"
+            if (ids.length >= 2) {
+              parentId = ids[ids.length - 2];
+            }
+          }
+          
           imageFiles.push({
             id: itemId,
             name: itemName,
             path: path,
-            hasMetadata: metadata && metadata.includes('comprehensiveImageMetadata'),
-            metadata: metadata
+            hasMetadata: hasMetadata,
+            metadata: metadata,
+            parentId: parentId // New: Add parentId to the file object
           });
         }
       });
       
+      var percentageWithMetadata = 0;
+      if (imageFiles.length > 0) {
+        percentageWithMetadata = (filesWithMetadataCount / imageFiles.length * 100).toFixed(1);
+      }
+      
       Logger.log('✅ Parsed ' + imageFiles.length + ' image files from report');
-      Logger.log('📊 Files with metadata: ' + imageFiles.filter(function(f) { return f.hasMetadata; }).length);
-      Logger.log('📊 Files without metadata: ' + imageFiles.filter(function(f) { return !f.hasMetadata; }).length);
+      Logger.log('📊 Files with metadata: ' + filesWithMetadataCount + ' (' + percentageWithMetadata + '%)');
+      Logger.log('📊 Files without metadata: ' + (imageFiles.length - filesWithMetadataCount));
       
       return imageFiles;
       
     } catch (error) {
-      Logger.log('❌ Exception parsing report with bmFiddler: ' + error.toString());
+      ErrorHandler.reportError(error, 'BoxReportManager.parseReport', { reportContentSample: reportContent.substring(0, 500) });
       return [];
     }
   };
-  
+
   /**
    * Main report processing function - systematically processes files from Box report
    * @returns {object|null} Processing results or null on error

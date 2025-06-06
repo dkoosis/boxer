@@ -847,3 +847,128 @@ function verifyVisionApiSetup() {
 function testEnhancedProcessingFeatures() {
   return testEnhancedProcessingFeatures();
 }
+
+// Test the cache logic to see what's actually broken
+
+function testCacheLogic() {
+  Logger.log('=== Testing Cache Logic ===');
+  
+  const accessToken = getValidAccessToken();
+  if (!accessToken) {
+    Logger.log('❌ No access token');
+    return;
+  }
+  
+  // 1. Check what's currently cached
+  Logger.log('\n1. Current cache state:');
+  const cacheStr = Config.SCRIPT_PROPERTIES.getProperty('BOXER_COMPREHENSIVE_CACHE');
+  if (cacheStr) {
+    Logger.log('✅ Cache exists, length: ' + cacheStr.length);
+    try {
+      const cache = JSON.parse(cacheStr);
+      Logger.log('   Timestamp: ' + cache.timestamp);
+      Logger.log('   Has data: ' + !!cache.data);
+      if (cache.data) {
+        Logger.log('   Total files: ' + cache.data.totalImageFiles);
+      }
+    } catch (e) {
+      Logger.log('❌ Cache parse error: ' + e.toString());
+    }
+  } else {
+    Logger.log('❌ No cache found');
+  }
+  
+  // 2. Test cache age calculation
+  Logger.log('\n2. Testing cache age logic:');
+  if (cacheStr) {
+    const cache = JSON.parse(cacheStr);
+    const cacheTime = new Date(cache.timestamp);
+    const cacheAge = Date.now() - cacheTime.getTime();
+    const maxAge = 6 * 60 * 60 * 1000; // 6 hours
+    const ageHours = cacheAge / (1000 * 60 * 60);
+    
+    Logger.log('   Cache age: ' + ageHours.toFixed(1) + ' hours');
+    Logger.log('   Max age: 6 hours');
+    Logger.log('   Should use cache: ' + (cacheAge < maxAge));
+  }
+  
+  // 3. Test with cache enabled
+  Logger.log('\n3. Testing with cache enabled:');
+  const countsWithCache = OptimizedProcessing.getComprehensiveImageCount(accessToken, true);
+  Logger.log('   Result: ' + JSON.stringify(countsWithCache).substring(0, 100) + '...');
+  
+  // 4. Test with cache disabled  
+  Logger.log('\n4. Testing with cache disabled:');
+  const countsWithoutCache = OptimizedProcessing.getComprehensiveImageCount(accessToken, false);
+  Logger.log('   Result: ' + JSON.stringify(countsWithoutCache).substring(0, 100) + '...');
+  
+  // 5. Check if cache was updated
+  Logger.log('\n5. Cache after fresh call:');
+  const newCacheStr = Config.SCRIPT_PROPERTIES.getProperty('BOXER_COMPREHENSIVE_CACHE');
+  if (newCacheStr !== cacheStr) {
+    Logger.log('✅ Cache was updated');
+  } else {
+    Logger.log('❌ Cache was NOT updated');
+  }
+}
+
+function clearCache() {
+  Config.SCRIPT_PROPERTIES.deleteProperty('BOXER_COMPREHENSIVE_CACHE');
+  Logger.log('Cache cleared');
+}
+
+function showCacheStatus() {
+  const cacheStr = Config.SCRIPT_PROPERTIES.getProperty('BOXER_COMPREHENSIVE_CACHE');
+  if (cacheStr) {
+    const cache = JSON.parse(cacheStr);
+    const ageHours = (Date.now() - new Date(cache.timestamp).getTime()) / (1000 * 60 * 60);
+    Logger.log('Cache age: ' + ageHours.toFixed(1) + ' hours');
+    Logger.log('Total files: ' + (cache.data ? cache.data.totalImageFiles : 'unknown'));
+  } else {
+    Logger.log('No cache');
+  }
+}
+
+function debugFolderListingStrategy() {
+  const accessToken = getValidAccessToken();
+  
+  // Test the exact search that's failing
+  const searchUrl = Config.BOX_API_BASE_URL + '/search' +
+                   '?query=jpg OR jpeg OR png' +
+                   '&type=file' +
+                   '&limit=100' +
+                   '&fields=id,name,size,created_at,modified_at';
+  
+  const response = UrlFetchApp.fetch(searchUrl, {
+    headers: { 'Authorization': 'Bearer ' + accessToken },
+    muteHttpExceptions: true
+  });
+  
+  Logger.log('Search URL: ' + searchUrl);
+  Logger.log('Response code: ' + response.getResponseCode());
+  
+  if (response.getResponseCode() === 200) {
+    const data = JSON.parse(response.getContentText());
+    Logger.log('Raw results: ' + data.entries.length);
+    
+    const imageFiles = data.entries.filter(file => 
+      file.type === 'file' && BoxFileOperations.isImageFile(file.name)
+    );
+    Logger.log('Image files: ' + imageFiles.length);
+  } else {
+    Logger.log('Search failed: ' + response.getContentText());
+  }
+}
+
+function debugStrategyRotation() {
+  const checkpoint = OptimizedProcessing.getCheckpoint();
+  Logger.log('Current checkpoint: ' + JSON.stringify(checkpoint));
+  Logger.log('Last search method: ' + (checkpoint.lastSearchMethod || 'none'));
+  
+  // Test the strategy that should find unprocessed files
+  const accessToken = getValidAccessToken();
+  const unprocessedFiles = OptimizedProcessing.findFilesWithMetadataFilter(
+    accessToken, 'processingStage', 'unprocessed'
+  );
+  Logger.log('Unprocessed files found: ' + unprocessedFiles.length);
+}

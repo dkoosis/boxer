@@ -12,145 +12,11 @@ var OptimizedProcessing = (function() {
   
   // Configuration
   var MAX_EXECUTION_TIME_MS = 5 * 60 * 1000; // 5 minutes
-  var BATCH_SIZE = 8;
-  var CHECKPOINT_PROPERTY = 'BOXER_PROCESSING_CHECKPOINT';
+  var BATCH_SIZE = 8; // This can be adjusted in Config.js if needed
   var STATS_PROPERTY = 'BOXER_PROCESSING_STATS';
-  var COMPREHENSIVE_CACHE_PROPERTY = 'BOXER_COMPREHENSIVE_CACHE';
-  var CACHE_DURATION_HOURS = 6;
   
   /**
-   * Get comprehensive count of all image files using the cached Box report
-   */
-  ns.getComprehensiveImageCount = function(accessToken, useCache) {
-    useCache = useCache !== false;
-    
-    // Check cache first
-    if (useCache) {
-      try {
-        var cacheStr = Config.SCRIPT_PROPERTIES.getProperty(COMPREHENSIVE_CACHE_PROPERTY);
-        if (cacheStr) {
-          var cache = JSON.parse(cacheStr);
-          var cacheAge = Date.now() - new Date(cache.timestamp).getTime();
-          var maxAge = CACHE_DURATION_HOURS * 60 * 60 * 1000;
-          
-          if (cacheAge < maxAge) {
-            Logger.log(`Using cached counts (${(cacheAge / (1000 * 60 * 60)).toFixed(1)}h old)`);
-            return cache.data;
-          }
-        }
-      } catch (error) {
-        Logger.log('Error reading cache: ' + error.toString());
-      }
-    }
-    
-    Logger.log('Getting comprehensive count from Box report...');
-    var startTime = Date.now();
-    
-    var counts = {
-      totalImageFiles: 0,
-      filesWithoutMetadata: 0,
-      filesWithMetadata: 0,
-      processingStages: {},
-      executionTime: 0,
-      reportBased: true
-    };
-    
-    try {
-      // Get the cached report from BoxReportManager
-      var reportData = BoxReportManager.getCachedReportData();
-      
-      if (!reportData || !reportData.files) {
-        Logger.log('No cached report available - falling back to search API');
-        return ns.getComprehensiveImageCountFallback(accessToken);
-      }
-      
-      counts.totalImageFiles = reportData.files.length;
-      Logger.log(`Found ${counts.totalImageFiles} total image files in cached report`);
-      
-      // Analyze metadata status from report
-      reportData.files.forEach(function(file) {
-        if (file.hasMetadata) {
-          counts.filesWithMetadata++;
-          
-          // Try to get more detailed stage info if available
-          var stage = file.processingStage || 'with_metadata';
-          counts.processingStages[stage] = (counts.processingStages[stage] || 0) + 1;
-        } else {
-          counts.filesWithoutMetadata++;
-          counts.processingStages['unprocessed'] = (counts.processingStages['unprocessed'] || 0) + 1;
-        }
-      });
-      
-      counts.executionTime = Date.now() - startTime;
-      
-      // Cache results
-      try {
-        var cacheData = {
-          timestamp: new Date().toISOString(),
-          data: counts
-        };
-        Config.SCRIPT_PROPERTIES.setProperty(COMPREHENSIVE_CACHE_PROPERTY, JSON.stringify(cacheData));
-      } catch (error) {
-        Logger.log('Error caching results: ' + error.toString());
-      }
-      
-      return counts;
-      
-    } catch (error) {
-      Logger.log(`Error getting comprehensive count from report: ${error.toString()}`);
-      counts.executionTime = Date.now() - startTime;
-      counts.error = error.toString();
-      return counts;
-    }
-  };
-  
-  /**
-   * Fallback to search API if report is not available
-   */
-  ns.getComprehensiveImageCountFallback = function(accessToken) {
-    Logger.log('Using search API fallback for comprehensive count...');
-    var startTime = Date.now();
-    
-    var counts = {
-      totalImageFiles: 0,
-      filesWithoutMetadata: 0,
-      filesWithMetadata: 0,
-      processingStages: {},
-      executionTime: 0,
-      reportBased: false
-    };
-    
-    try {
-      var searchUrl = Config.BOX_API_BASE_URL + '/search' +
-                     '?query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp' +
-                     '&type=file' +
-                     '&limit=1' +
-                     '&fields=id';
-      
-      var response = UrlFetchApp.fetch(searchUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        muteHttpExceptions: true
-      });
-      
-      if (response.getResponseCode() === 200) {
-        var data = JSON.parse(response.getContentText());
-        counts.totalImageFiles = data.total_count || 0;
-        Logger.log(`Found ${counts.totalImageFiles} total image files via search`);
-      }
-      
-      counts.executionTime = Date.now() - startTime;
-      return counts;
-      
-    } catch (error) {
-      Logger.log(`Error in fallback count: ${error.toString()}`);
-      counts.executionTime = Date.now() - startTime;
-      counts.error = error.toString();
-      return counts;
-    }
-  };
-  
-  /**
-   * Main processing function - now uses BoxReportManager as file source
+   * Main processing function - refactored to strictly prioritize the test folder.
    */
   ns.processBoxImagesOptimized = function() {
     var startTime = Date.now();
@@ -168,77 +34,121 @@ var OptimizedProcessing = (function() {
       skipped: 0,
       errors: 0,
       executionTimeMs: 0,
-      method: 'report-based',
-      comprehensiveCounts: null
+      method: 'report-based'
     };
     
     try {
-      // Get overview from report or fallback
-      var comprehensiveCounts = ns.getComprehensiveImageCount(accessToken, true);
-      stats.comprehensiveCounts = comprehensiveCounts;
-      Logger.log(`📊 Total files: ${comprehensiveCounts.totalImageFiles}, Without metadata: ${comprehensiveCounts.filesWithoutMetadata}`);
+      // Step 1: Get all candidate files from the report
+      var allCandidateFiles = ns.getFilesFromReport(accessToken, startTime);
+      stats.filesFound = allCandidateFiles.length;
       
-      // Use BoxReportManager to get files systematically
-      var candidateFiles = ns.getFilesFromReport(accessToken, startTime);
-      stats.filesFound = candidateFiles.length;
+      // Step 2: Explicitly partition files into a priority queue and a general queue
+      var priorityQueue = [];
+      var generalQueue = [];
       
-      Logger.log(`📋 Found ${candidateFiles.length} candidate files from report`);
+      allCandidateFiles.forEach(function(file) {
+        if (file.parentId === Config.ACTIVE_TEST_FOLDER_ID) {
+          priorityQueue.push(file);
+        } else {
+          generalQueue.push(file);
+        }
+      });
       
-      if (candidateFiles.length === 0) {
-        Logger.log("ℹ️ No candidates found - may need to refresh report");
-        return stats;
-      }
+      Logger.log(`📁 Found ${priorityQueue.length} files in the priority test folder.`);
+      Logger.log(`📂 Found ${generalQueue.length} files in the general queue.`);
       
-      // Filter to files actually needing processing
-      var filesToProcess = ns.filterFilesNeedingProcessing(candidateFiles, accessToken, startTime);
-      Logger.log(`🔄 ${filesToProcess.length} files need processing`);
+      // Step 3: Filter and sort each queue independently
+      var priorityFilesToProcess = ns.filterAndSortFiles(priorityQueue, accessToken, startTime);
+      var generalFilesToProcess = ns.filterAndSortFiles(generalQueue, accessToken, startTime);
+      
+      // Step 4: Combine the lists, ensuring priority files are always first
+      var filesToProcess = priorityFilesToProcess.concat(generalFilesToProcess);
+      
+      Logger.log(`🔄 ${filesToProcess.length} total files need processing.`);
       
       if (filesToProcess.length === 0) {
-        Logger.log("✅ All candidates are up to date");
+        Logger.log("✅ All candidate files are up to date.");
         return stats;
       }
       
-      // Process files in batches
-      var maxFiles = Math.min(filesToProcess.length, 30);
+      // Step 5: Process files from the final, prioritized queue
+      var maxFilesToProcessInRun = Math.min(filesToProcess.length, 100);
       
-      for (var i = 0; i < maxFiles; i += BATCH_SIZE) {
+      for (var i = 0; i < maxFilesToProcessInRun; i += BATCH_SIZE) {
         if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
-          Logger.log("⏰ Time limit reached");
+          Logger.log("⏰ Time limit reached during processing.");
           break;
         }
         
         var batch = filesToProcess.slice(i, i + BATCH_SIZE);
+        Logger.log(`📦 Processing batch ${Math.floor(i/BATCH_SIZE) + 1} of ${Math.ceil(maxFilesToProcessInRun/BATCH_SIZE)}...`);
         var batchResults = ns.processBatch(batch, accessToken);
         
         stats.processed += batchResults.processed;
         stats.skipped += batchResults.skipped;
         stats.errors += batchResults.errors;
         
-        Logger.log(`📦 Batch ${Math.floor(i/BATCH_SIZE) + 1}: Processed ${batchResults.processed}, Errors ${batchResults.errors}`);
-        
         Utilities.sleep(500);
       }
       
-      // Update BoxReportManager with our progress
-      ns.updateReportProgress(filesToProcess.slice(0, stats.processed + stats.skipped));
-      
     } catch (error) {
-      Logger.log(`❌ Critical error: ${error.toString()}`);
+      ErrorHandler.reportError(error, 'OptimizedProcessing.processBoxImagesOptimized');
       stats.errors++;
     } finally {
       stats.executionTimeMs = Date.now() - startTime;
       ns.saveStats(stats);
-      
-      Logger.log(`📊 Results: Processed ${stats.processed}, Errors ${stats.errors}, Time: ${(stats.executionTimeMs / 1000).toFixed(1)}s`);
-      
-      if (comprehensiveCounts && comprehensiveCounts.filesWithoutMetadata > 0) {
-        var remaining = Math.max(0, comprehensiveCounts.filesWithoutMetadata - stats.processed);
-        var percentComplete = ((comprehensiveCounts.totalImageFiles - remaining) / comprehensiveCounts.totalImageFiles * 100).toFixed(1);
-        Logger.log(`📈 Progress: ${percentComplete}% complete (${remaining} remaining)`);
-      }
+      Logger.log(`📊 Run Complete: Processed ${stats.processed}, Skipped ${stats.skipped}, Errors ${stats.errors}. Time: ${(stats.executionTimeMs / 1000).toFixed(1)}s`);
     }
     
     return stats;
+  };
+  
+  /**
+   * Helper function to filter a list of files that need processing and sort them by date.
+   * @param {Array} files - The array of file objects to filter.
+   * @param {string} accessToken - The Box access token.
+   * @param {number} startTime - The script start time for timeout checks.
+   * @returns {Array} A sorted array of file objects that need processing.
+   */
+  ns.filterAndSortFiles = function(files, accessToken, startTime) {
+      var needsProcessing = [];
+      
+      for (var i = 0; i < files.length; i++) {
+          if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
+              Logger.log("⏰ Time limit reached during filtering stage.");
+              break;
+          }
+          
+          var file = files[i];
+          var shouldProcess = false;
+
+          // If the report says a file has no metadata, it's a primary candidate.
+          if (file.reportFile && !file.hasMetadata) {
+              shouldProcess = true;
+          } else {
+              // Otherwise, check the metadata directly for build version or processing stage.
+              var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
+              if (!metadata || Config.shouldReprocessForBuild(metadata.buildNumber) || 
+                  metadata.processingStage === Config.PROCESSING_STAGE_UNPROCESSED || 
+                  metadata.processingStage === Config.PROCESSING_STAGE_FAILED) {
+                  shouldProcess = true;
+              }
+          }
+
+          if (shouldProcess) {
+              needsProcessing.push({
+                  file: file,
+                  modified_at: file.modified_at || file.created_at || new Date(0).toISOString()
+              });
+          }
+      }
+
+      // Sort the filtered list by modification date (most recent first)
+      needsProcessing.sort(function(a, b) {
+          return new Date(b.modified_at) - new Date(a.modified_at);
+      });
+
+      return needsProcessing.map(function(item) { return item.file; });
   };
   
   /**
@@ -328,7 +238,7 @@ var OptimizedProcessing = (function() {
   };
   
   /**
-   * Filter files to those actually needing processing
+   * Filter files to those actually needing processing, with prioritization for the test folder.
    */
   ns.filterFilesNeedingProcessing = function(files, accessToken, startTime) {
     var needsProcessing = [];
@@ -343,46 +253,58 @@ var OptimizedProcessing = (function() {
       var file = files[i];
       var shouldProcess = false;
       var priority = 999;
+      var reason = 'up_to_date';
       
       // For report-based files, we can use the hasMetadata flag as a first filter
       if (file.reportFile && !file.hasMetadata) {
         shouldProcess = true;
-        priority = 0;
-      } else if (file.reportFile && file.hasMetadata) {
-        // Even if report says it has metadata, check if it needs reprocessing
-        var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
-        if (!metadata || Config.shouldReprocessForBuild(metadata.buildNumber)) {
-          shouldProcess = true;
-          priority = 1;
-        }
+        reason = 'unprocessed';
       } else {
-        // Non-report files - check metadata directly
+        // For other files, or if report shows metadata, check directly
         var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
         
         if (!metadata) {
           shouldProcess = true;
-          priority = 0;
+          reason = 'unprocessed';
         } else {
           var stage = metadata.processingStage;
           var fileBuild = metadata.buildNumber;
           
           if (Config.shouldReprocessForBuild(fileBuild)) {
             shouldProcess = true;
-            priority = 1;
+            reason = 'build_update';
           } else if (!stage || 
                      stage === Config.PROCESSING_STAGE_UNPROCESSED ||
                      stage === Config.PROCESSING_STAGE_FAILED) {
             shouldProcess = true;
-            priority = 2;
-          } else if (stage === Config.PROCESSING_STAGE_BASIC) {
-            shouldProcess = true;
-            priority = 3;
+            reason = 'incomplete';
           }
         }
       }
       
       if (shouldProcess) {
-        needsProcessing.push({ file: file, priority: priority });
+        var isInTestFolder = file.parentId === Config.ACTIVE_TEST_FOLDER_ID;
+
+        // New Priority Scheme:
+        // 0: Unprocessed in Test Folder (Highest Priority)
+        // 1: Other Unprocessed Files
+        // 2: Outdated/Incomplete in Test Folder
+        // 3: Other Outdated/Incomplete Files
+        switch (reason) {
+            case 'unprocessed':
+                priority = isInTestFolder ? 0 : 1;
+                break;
+            case 'build_update':
+            case 'incomplete':
+                priority = isInTestFolder ? 2 : 3;
+                break;
+        }
+        
+        needsProcessing.push({ 
+            file: file, 
+            priority: priority, 
+            modified_at: file.modified_at || file.created_at || new Date(0).toISOString() 
+        });
       }
       
       if (i > 0 && i % 25 === 0) {
@@ -390,14 +312,17 @@ var OptimizedProcessing = (function() {
       }
     }
     
-    // Sort by priority
+    // Sort by new priority first, then by modification date (most recent first)
     needsProcessing.sort(function(a, b) {
-      return a.priority - b.priority;
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority;
+      }
+      return new Date(b.modified_at) - new Date(a.modified_at);
     });
     
     return needsProcessing.map(function(item) { return item.file; });
   };
-  
+
   /**
    * Process a batch of files
    */
