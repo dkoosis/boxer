@@ -1,8 +1,9 @@
 // File: OptimizedProcessing.gs
-// Optimized processing with systematic search strategies
+// Optimized processing using Box CSV reports as the systematic file source
+// Depends on: Config.gs, BoxAuth.gs, BoxFileOperations.gs, BoxReportManager.gs
 
 /**
- * OptimizedProcessing namespace - systematic and efficient file processing
+ * OptimizedProcessing namespace - systematic processing using Box reports
  */
 var OptimizedProcessing = (function() {
   'use strict';
@@ -12,14 +13,13 @@ var OptimizedProcessing = (function() {
   // Configuration
   var MAX_EXECUTION_TIME_MS = 5 * 60 * 1000; // 5 minutes
   var BATCH_SIZE = 8;
-  var SEARCH_LIMIT = 200;
   var CHECKPOINT_PROPERTY = 'BOXER_PROCESSING_CHECKPOINT';
   var STATS_PROPERTY = 'BOXER_PROCESSING_STATS';
   var COMPREHENSIVE_CACHE_PROPERTY = 'BOXER_COMPREHENSIVE_CACHE';
   var CACHE_DURATION_HOURS = 6;
   
   /**
-   * Get comprehensive count of all image files using search API
+   * Get comprehensive count of all image files using the cached Box report
    */
   ns.getComprehensiveImageCount = function(accessToken, useCache) {
     useCache = useCache !== false;
@@ -43,7 +43,7 @@ var OptimizedProcessing = (function() {
       }
     }
     
-    Logger.log('Getting comprehensive count using Search API...');
+    Logger.log('Getting comprehensive count from Box report...');
     var startTime = Date.now();
     
     var counts = {
@@ -51,74 +51,35 @@ var OptimizedProcessing = (function() {
       filesWithoutMetadata: 0,
       filesWithMetadata: 0,
       processingStages: {},
-      executionTime: 0
+      executionTime: 0,
+      reportBased: true
     };
     
     try {
-      // Use Search API to get total count
-      var searchUrl = Config.BOX_API_BASE_URL + '/search' +
-                     '?query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp' +
-                     '&type=file' +
-                     '&limit=1' +
-                     '&fields=id';
+      // Get the cached report from BoxReportManager
+      var reportData = BoxReportManager.getCachedReportData();
       
-      var response = UrlFetchApp.fetch(searchUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        muteHttpExceptions: true
-      });
-      
-      if (response.getResponseCode() === 200) {
-        var data = JSON.parse(response.getContentText());
-        counts.totalImageFiles = data.total_count || 0;
-        
-        Logger.log(`Found ${counts.totalImageFiles} total image files`);
-        
-        // Sample files to check metadata status
-        if (counts.totalImageFiles > 0) {
-          var sampleSize = Math.min(500, counts.totalImageFiles);
-          var sampleResponse = UrlFetchApp.fetch(Config.BOX_API_BASE_URL + '/search' +
-            '?query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp' +
-            '&type=file' +
-            '&limit=' + sampleSize +
-            '&fields=id,name', {
-            headers: { 'Authorization': 'Bearer ' + accessToken },
-            muteHttpExceptions: true
-          });
-          
-          if (sampleResponse.getResponseCode() === 200) {
-            var sampleData = JSON.parse(sampleResponse.getContentText());
-            
-            (sampleData.entries || []).forEach(function(file) {
-              if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
-                var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
-                
-                if (metadata) {
-                  counts.filesWithMetadata++;
-                  var stage = metadata.processingStage || 'unknown';
-                  counts.processingStages[stage] = (counts.processingStages[stage] || 0) + 1;
-                } else {
-                  counts.filesWithoutMetadata++;
-                }
-              }
-            });
-            
-            // Extrapolate from sample
-            if (sampleSize < counts.totalImageFiles) {
-              var ratio = counts.totalImageFiles / sampleSize;
-              counts.filesWithMetadata = Math.round(counts.filesWithMetadata * ratio);
-              counts.filesWithoutMetadata = counts.totalImageFiles - counts.filesWithMetadata;
-              
-              Object.keys(counts.processingStages).forEach(function(stage) {
-                counts.processingStages[stage] = Math.round(counts.processingStages[stage] * ratio);
-              });
-            }
-          }
-        }
-        
-      } else {
-        Logger.log(`Search API failed: ${response.getResponseCode()}`);
-        counts.error = 'Search API failed: ' + response.getResponseCode();
+      if (!reportData || !reportData.files) {
+        Logger.log('No cached report available - falling back to search API');
+        return ns.getComprehensiveImageCountFallback(accessToken);
       }
+      
+      counts.totalImageFiles = reportData.files.length;
+      Logger.log(`Found ${counts.totalImageFiles} total image files in cached report`);
+      
+      // Analyze metadata status from report
+      reportData.files.forEach(function(file) {
+        if (file.hasMetadata) {
+          counts.filesWithMetadata++;
+          
+          // Try to get more detailed stage info if available
+          var stage = file.processingStage || 'with_metadata';
+          counts.processingStages[stage] = (counts.processingStages[stage] || 0) + 1;
+        } else {
+          counts.filesWithoutMetadata++;
+          counts.processingStages['unprocessed'] = (counts.processingStages['unprocessed'] || 0) + 1;
+        }
+      });
       
       counts.executionTime = Date.now() - startTime;
       
@@ -136,29 +97,70 @@ var OptimizedProcessing = (function() {
       return counts;
       
     } catch (error) {
-      Logger.log(`Error getting comprehensive count: ${error.toString()}`);
+      Logger.log(`Error getting comprehensive count from report: ${error.toString()}`);
       counts.executionTime = Date.now() - startTime;
       counts.error = error.toString();
-      return counts; // Return without caching
+      return counts;
     }
   };
   
   /**
-   * Main processing function
+   * Fallback to search API if report is not available
+   */
+  ns.getComprehensiveImageCountFallback = function(accessToken) {
+    Logger.log('Using search API fallback for comprehensive count...');
+    var startTime = Date.now();
+    
+    var counts = {
+      totalImageFiles: 0,
+      filesWithoutMetadata: 0,
+      filesWithMetadata: 0,
+      processingStages: {},
+      executionTime: 0,
+      reportBased: false
+    };
+    
+    try {
+      var searchUrl = Config.BOX_API_BASE_URL + '/search' +
+                     '?query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp' +
+                     '&type=file' +
+                     '&limit=1' +
+                     '&fields=id';
+      
+      var response = UrlFetchApp.fetch(searchUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
+      });
+      
+      if (response.getResponseCode() === 200) {
+        var data = JSON.parse(response.getContentText());
+        counts.totalImageFiles = data.total_count || 0;
+        Logger.log(`Found ${counts.totalImageFiles} total image files via search`);
+      }
+      
+      counts.executionTime = Date.now() - startTime;
+      return counts;
+      
+    } catch (error) {
+      Logger.log(`Error in fallback count: ${error.toString()}`);
+      counts.executionTime = Date.now() - startTime;
+      counts.error = error.toString();
+      return counts;
+    }
+  };
+  
+  /**
+   * Main processing function - now uses BoxReportManager as file source
    */
   ns.processBoxImagesOptimized = function() {
     var startTime = Date.now();
-    Logger.log(`Boxer starting processing at ${new Date().toISOString()}`);
+    Logger.log(`🐕 Boxer starting optimized processing at ${new Date().toISOString()}`);
     
     var accessToken = getValidAccessToken();
     if (!accessToken) {
-      Logger.log("No access token available");
+      Logger.log("❌ No access token available");
       return;
     }
-    
-    // Get overview
-    var comprehensiveCounts = ns.getComprehensiveImageCount(accessToken, true);
-    Logger.log(`Total files: ${comprehensiveCounts.totalImageFiles}, Without metadata: ${comprehensiveCounts.filesWithoutMetadata}`);
     
     var stats = {
       filesFound: 0,
@@ -166,28 +168,34 @@ var OptimizedProcessing = (function() {
       skipped: 0,
       errors: 0,
       executionTimeMs: 0,
-      comprehensiveCounts: comprehensiveCounts
+      method: 'report-based',
+      comprehensiveCounts: null
     };
     
     try {
-      // Find files using systematic approach
-      var candidateFiles = ns.findFilesSystematically(accessToken, startTime);
+      // Get overview from report or fallback
+      var comprehensiveCounts = ns.getComprehensiveImageCount(accessToken, true);
+      stats.comprehensiveCounts = comprehensiveCounts;
+      Logger.log(`📊 Total files: ${comprehensiveCounts.totalImageFiles}, Without metadata: ${comprehensiveCounts.filesWithoutMetadata}`);
+      
+      // Use BoxReportManager to get files systematically
+      var candidateFiles = ns.getFilesFromReport(accessToken, startTime);
       stats.filesFound = candidateFiles.length;
       
-      Logger.log(`Found ${candidateFiles.length} candidate files`);
+      Logger.log(`📋 Found ${candidateFiles.length} candidate files from report`);
       
       if (candidateFiles.length === 0) {
-        Logger.log("No candidates found");
-        return;
+        Logger.log("ℹ️ No candidates found - may need to refresh report");
+        return stats;
       }
       
-      // Filter to files needing processing
+      // Filter to files actually needing processing
       var filesToProcess = ns.filterFilesNeedingProcessing(candidateFiles, accessToken, startTime);
-      Logger.log(`${filesToProcess.length} files need processing`);
+      Logger.log(`🔄 ${filesToProcess.length} files need processing`);
       
       if (filesToProcess.length === 0) {
-        Logger.log("All candidates up to date");
-        return;
+        Logger.log("✅ All candidates are up to date");
+        return stats;
       }
       
       // Process files in batches
@@ -195,7 +203,7 @@ var OptimizedProcessing = (function() {
       
       for (var i = 0; i < maxFiles; i += BATCH_SIZE) {
         if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
-          Logger.log("Time limit reached");
+          Logger.log("⏰ Time limit reached");
           break;
         }
         
@@ -206,321 +214,95 @@ var OptimizedProcessing = (function() {
         stats.skipped += batchResults.skipped;
         stats.errors += batchResults.errors;
         
-        Logger.log(`Batch ${Math.floor(i/BATCH_SIZE) + 1}: Processed ${batchResults.processed}, Errors ${batchResults.errors}`);
+        Logger.log(`📦 Batch ${Math.floor(i/BATCH_SIZE) + 1}: Processed ${batchResults.processed}, Errors ${batchResults.errors}`);
         
         Utilities.sleep(500);
       }
       
-      // Save checkpoint
-      ns.saveCheckpoint({
-        lastRunTime: new Date().toISOString(),
-        filesProcessedThisRun: stats.processed,
-        currentBuild: Config.getCurrentBuild(),
-        totalImageFiles: comprehensiveCounts.totalImageFiles,
-        filesWithoutMetadata: comprehensiveCounts.filesWithoutMetadata
-      });
+      // Update BoxReportManager with our progress
+      ns.updateReportProgress(filesToProcess.slice(0, stats.processed + stats.skipped));
       
     } catch (error) {
-      Logger.log(`Critical error: ${error.toString()}`);
+      Logger.log(`❌ Critical error: ${error.toString()}`);
       stats.errors++;
     } finally {
       stats.executionTimeMs = Date.now() - startTime;
       ns.saveStats(stats);
       
-      Logger.log(`Processed: ${stats.processed}, Errors: ${stats.errors}, Time: ${(stats.executionTimeMs / 1000).toFixed(1)}s`);
+      Logger.log(`📊 Results: Processed ${stats.processed}, Errors ${stats.errors}, Time: ${(stats.executionTimeMs / 1000).toFixed(1)}s`);
       
-      if (comprehensiveCounts.filesWithoutMetadata > 0) {
+      if (comprehensiveCounts && comprehensiveCounts.filesWithoutMetadata > 0) {
         var remaining = Math.max(0, comprehensiveCounts.filesWithoutMetadata - stats.processed);
         var percentComplete = ((comprehensiveCounts.totalImageFiles - remaining) / comprehensiveCounts.totalImageFiles * 100).toFixed(1);
-        Logger.log(`Progress: ${percentComplete}% complete (${remaining} remaining)`);
+        Logger.log(`📈 Progress: ${percentComplete}% complete (${remaining} remaining)`);
       }
     }
+    
+    return stats;
   };
   
   /**
-   * Systematic file finding using rotating search strategies
+   * Get files from the Box report systematically
    */
-  ns.findFilesSystematically = function(accessToken, startTime) {
-    var checkpoint = ns.getCheckpoint();
-    var lastMethod = checkpoint.lastSearchMethod || 'unprocessed';
-    
-    Logger.log(`Last search method: ${lastMethod}`);
-    
-    var files = [];
-    var method = '';
-    
-    // Rotate through search strategies
-    if (lastMethod === 'unprocessed') {
-      method = 'mdfilter_unprocessed';
-      files = ns.findFilesWithMetadataFilter(accessToken, 'processingStage', 'unprocessed');
-    } else if (lastMethod === 'mdfilter_unprocessed') {
-      method = 'mdfilter_old_builds';
-      files = ns.findFilesWithOldBuildsMetadataFilter(accessToken);
-    } else if (lastMethod === 'mdfilter_old_builds') {
-      method = 'mdfilter_enhanceable';
-      files = ns.findFilesWithMetadataFilter(accessToken, 'processingStage', Config.PROCESSING_STAGE_BASIC || 'basic_extracted');
-    } else if (lastMethod === 'mdfilter_enhanceable') {
-      method = 'search_recent';
-      files = ns.findRecentFilesWithDateRange(accessToken);
-    } else if (lastMethod === 'search_recent') {
-      method = 'search_no_metadata';
-      files = ns.findFilesWithoutMetadata(accessToken);
-    } else if (lastMethod === 'search_no_metadata') {
-      method = 'recent_items';
-      files = ns.findRecentItems(accessToken);
-    } else {
-      method = 'folder_listing';
-      files = ns.findRecentFiles(accessToken);
-    }
-    
-    // Update checkpoint
-    checkpoint.lastSearchMethod = method;
-    ns.saveCheckpoint(checkpoint);
-    
-    Logger.log(`Strategy "${method}" found ${files.length} files`);
-    return files;
-  };
-  
-  /**
-   * Search using metadata filters
-   */
-  ns.findFilesWithMetadataFilter = function(accessToken, metadataField, metadataValue) {
-    var files = [];
+  ns.getFilesFromReport = function(accessToken, startTime) {
+    Logger.log('📊 Getting files from cached Box report...');
     
     try {
-      var mdfilters = [{
-        "scope": Config.BOX_METADATA_SCOPE,
-        "templateKey": Config.BOX_METADATA_TEMPLATE_KEY,
-        "filters": {}
-      }];
+      // Get files from BoxReportManager
+      var reportData = BoxReportManager.getCachedReportData();
       
-      mdfilters[0].filters[metadataField] = metadataValue;
-      
-      var searchParams = [
-        'query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp',
-        'type=file',
-        'limit=200',
-        'mdfilters=' + encodeURIComponent(JSON.stringify(mdfilters)),
-        'fields=id,name,size,created_at,modified_at'
-      ];
-      
-      var searchUrl = Config.BOX_API_BASE_URL + '/search?' + searchParams.join('&');
-      
-      var response = UrlFetchApp.fetch(searchUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        muteHttpExceptions: true
-      });
-      
-      if (response.getResponseCode() === 200) {
-        var data = JSON.parse(response.getContentText());
+      if (!reportData || !reportData.files) {
+        Logger.log('⚠️ No cached report data - trying to initialize...');
         
-        (data.entries || []).forEach(function(file) {
-          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
-            files.push(file);
-          }
-        });
-        
-      } else {
-        Logger.log(`Metadata filter search failed: ${response.getResponseCode()}`);
-      }
-      
-    } catch (error) {
-      Logger.log(`Error in metadata filter search: ${error.toString()}`);
-    }
-    
-    return files;
-  };
-  
-  /**
-   * Find files with old build numbers
-   */
-  ns.findFilesWithOldBuildsMetadataFilter = function(accessToken) {
-    var files = [];
-    var currentBuild = Config.getCurrentBuild();
-    
-    try {
-      var mdfilters = [{
-        "scope": Config.BOX_METADATA_SCOPE,
-        "templateKey": Config.BOX_METADATA_TEMPLATE_KEY,
-        "filters": {}
-      }];
-      
-      var searchParams = [
-        'query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp',
-        'type=file',
-        'limit=200',
-        'mdfilters=' + encodeURIComponent(JSON.stringify(mdfilters)),
-        'fields=id,name,size,created_at,modified_at'
-      ];
-      
-      var searchUrl = Config.BOX_API_BASE_URL + '/search?' + searchParams.join('&');
-      
-      var response = UrlFetchApp.fetch(searchUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        muteHttpExceptions: true
-      });
-      
-      if (response.getResponseCode() === 200) {
-        var data = JSON.parse(response.getContentText());
-        
-        // Filter client-side for old build numbers
-        for (var i = 0; i < (data.entries || []).length && files.length < 50; i++) {
-          var file = data.entries[i];
-          
-          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
-            var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
-            if (metadata && Config.shouldReprocessForBuild(metadata.buildNumber)) {
-              files.push(file);
-            }
-          }
+        // Try to run report-based processing to initialize
+        var reportResult = BoxReportManager.runReportBasedProcessing();
+        if (reportResult && reportResult.reportFound) {
+          reportData = BoxReportManager.getCachedReportData();
         }
         
-      } else {
-        Logger.log(`Old builds search failed: ${response.getResponseCode()}`);
+        if (!reportData || !reportData.files) {
+          Logger.log('❌ Could not get report data - falling back to search');
+          return ns.findFilesWithSearch(accessToken);
+        }
       }
       
-    } catch (error) {
-      Logger.log(`Error finding old builds: ${error.toString()}`);
-    }
-    
-    return files;
-  };
-  
-  /**
-   * Find recent files using date range
-   */
-  ns.findRecentFilesWithDateRange = function(accessToken) {
-    var files = [];
-    
-    try {
-      var thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      var dateRange = thirtyDaysAgo.toISOString();
+      // Get unprocessed files from the report
+      var checkpoint = BoxReportManager.getProcessingCheckpoint();
+      var processedIds = new Set(checkpoint.processedFileIds || []);
       
-      var searchParams = [
-        'query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp',
-        'type=file',
-        'limit=100',
-        'created_at_range=' + encodeURIComponent(dateRange + ','),
-        'sort=modified_at',
-        'fields=id,name,size,created_at,modified_at'
-      ];
-      
-      var searchUrl = Config.BOX_API_BASE_URL + '/search?' + searchParams.join('&');
-      
-      var response = UrlFetchApp.fetch(searchUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        muteHttpExceptions: true
+      var unprocessedFiles = reportData.files.filter(function(file) {
+        return !processedIds.has(file.id);
       });
       
-      if (response.getResponseCode() === 200) {
-        var data = JSON.parse(response.getContentText());
-        
-        (data.entries || []).forEach(function(file) {
-          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
-            files.push(file);
-          }
-        });
-        
-      } else {
-        Logger.log(`Recent files search failed: ${response.getResponseCode()}`);
-      }
+      Logger.log(`📋 Report has ${reportData.files.length} total files, ${processedIds.size} processed, ${unprocessedFiles.length} remaining`);
       
-    } catch (error) {
-      Logger.log(`Error finding recent files: ${error.toString()}`);
-    }
-    
-    return files;
-  };
-  
-  /**
-   * Find recent items using Box API
-   */
-  ns.findRecentItems = function(accessToken) {
-    var recentFiles = [];
-    
-    try {
-      var recentUrl = Config.BOX_API_BASE_URL + '/recent_items' +
-                     '?limit=50' +
-                     '&fields=id,name,size,created_at,modified_at,type';
-      
-      var response = UrlFetchApp.fetch(recentUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        muteHttpExceptions: true
+      // Convert to format expected by processing logic
+      return unprocessedFiles.map(function(file) {
+        return {
+          id: file.id,
+          name: file.name,
+          type: 'file',
+          path: file.path,
+          hasMetadata: file.hasMetadata,
+          reportFile: true
+        };
       });
       
-      if (response.getResponseCode() === 200) {
-        var data = JSON.parse(response.getContentText());
-        
-        (data.entries || []).forEach(function(item) {
-          var file = item.item || item;
-          
-          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
-            recentFiles.push(file);
-          }
-        });
-      }
-      
     } catch (error) {
-      Logger.log(`Error finding recent items: ${error.toString()}`);
+      Logger.log(`❌ Error getting files from report: ${error.toString()}`);
+      return ns.findFilesWithSearch(accessToken);
     }
-    
-    return recentFiles;
   };
   
   /**
-   * Find files without metadata
+   * Fallback search method if report is not available
    */
-  ns.findFilesWithoutMetadata = function(accessToken) {
-    var filesWithoutMetadata = [];
-    var searchedCount = 0;
-    var maxToCheck = 300;
+  ns.findFilesWithSearch = function(accessToken) {
+    Logger.log('🔍 Using search fallback to find files...');
     
     try {
       var searchUrl = Config.BOX_API_BASE_URL + '/search' +
-                     '?query=jpg OR jpeg OR png OR heic' +
-                     '&type=file' +
-                     '&limit=150' +
-                     '&fields=id,name,size,created_at';
-      
-      var response = UrlFetchApp.fetch(searchUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
-        muteHttpExceptions: true
-      });
-      
-      if (response.getResponseCode() === 200) {
-        var data = JSON.parse(response.getContentText());
-        
-        (data.entries || []).forEach(function(file) {
-          if (searchedCount >= maxToCheck) return;
-          
-          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
-            searchedCount++;
-            
-            var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
-            if (!metadata) {
-              filesWithoutMetadata.push(file);
-            }
-          }
-        });
-      }
-      
-    } catch (error) {
-      Logger.log(`Error finding files without metadata: ${error.toString()}`);
-    }
-    
-    return filesWithoutMetadata;
-  };
-  
-  /**
-   * Fallback: simple search for any image files
-   */
-  ns.findRecentFiles = function(accessToken) {
-    var files = [];
-    
-    try {
-      var searchUrl = Config.BOX_API_BASE_URL + '/search' +
-                     '?query=jpg OR jpeg OR png' +
+                     '?query=jpg OR jpeg OR png OR heic OR gif OR bmp OR tiff OR webp' +
                      '&type=file' +
                      '&limit=100' +
                      '&fields=id,name,size,created_at,modified_at';
@@ -533,22 +315,20 @@ var OptimizedProcessing = (function() {
       if (response.getResponseCode() === 200) {
         var data = JSON.parse(response.getContentText());
         
-        (data.entries || []).forEach(function(file) {
-          if (file.type === 'file' && BoxFileOperations.isImageFile(file.name)) {
-            files.push(file);
-          }
+        return (data.entries || []).filter(function(file) {
+          return file.type === 'file' && BoxFileOperations.isImageFile(file.name);
         });
       }
       
     } catch (error) {
-      Logger.log(`Error in fallback search: ${error.toString()}`);
+      Logger.log(`❌ Error in search fallback: ${error.toString()}`);
     }
     
-    return files;
+    return [];
   };
   
   /**
-   * Filter files to those needing processing
+   * Filter files to those actually needing processing
    */
   ns.filterFilesNeedingProcessing = function(files, accessToken, startTime) {
     var needsProcessing = [];
@@ -556,34 +336,48 @@ var OptimizedProcessing = (function() {
     
     for (var i = 0; i < files.length; i++) {
       if (Date.now() - startTime > MAX_EXECUTION_TIME_MS * 0.6) {
-        Logger.log("Time limit during filtering");
+        Logger.log("⏰ Time limit during filtering");
         break;
       }
       
       var file = files[i];
-      var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
-      
       var shouldProcess = false;
       var priority = 999;
       
-      if (!metadata) {
+      // For report-based files, we can use the hasMetadata flag as a first filter
+      if (file.reportFile && !file.hasMetadata) {
         shouldProcess = true;
         priority = 0;
-      } else {
-        var stage = metadata.processingStage;
-        var fileBuild = metadata.buildNumber;
-        
-        if (Config.shouldReprocessForBuild(fileBuild)) {
+      } else if (file.reportFile && file.hasMetadata) {
+        // Even if report says it has metadata, check if it needs reprocessing
+        var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
+        if (!metadata || Config.shouldReprocessForBuild(metadata.buildNumber)) {
           shouldProcess = true;
           priority = 1;
-        } else if (!stage || 
-                   stage === Config.PROCESSING_STAGE_UNPROCESSED ||
-                   stage === Config.PROCESSING_STAGE_FAILED) {
+        }
+      } else {
+        // Non-report files - check metadata directly
+        var metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
+        
+        if (!metadata) {
           shouldProcess = true;
-          priority = 2;
-        } else if (stage === Config.PROCESSING_STAGE_BASIC) {
-          shouldProcess = true;
-          priority = 3;
+          priority = 0;
+        } else {
+          var stage = metadata.processingStage;
+          var fileBuild = metadata.buildNumber;
+          
+          if (Config.shouldReprocessForBuild(fileBuild)) {
+            shouldProcess = true;
+            priority = 1;
+          } else if (!stage || 
+                     stage === Config.PROCESSING_STAGE_UNPROCESSED ||
+                     stage === Config.PROCESSING_STAGE_FAILED) {
+            shouldProcess = true;
+            priority = 2;
+          } else if (stage === Config.PROCESSING_STAGE_BASIC) {
+            shouldProcess = true;
+            priority = 3;
+          }
         }
       }
       
@@ -625,7 +419,7 @@ var OptimizedProcessing = (function() {
         Utilities.sleep(300);
         
       } catch (error) {
-        Logger.log(`Error processing ${file.name}: ${error.toString()}`);
+        Logger.log(`❌ Error processing ${file.name}: ${error.toString()}`);
         results.errors++;
       }
     });
@@ -651,7 +445,7 @@ var OptimizedProcessing = (function() {
       });
       
       if (response.getResponseCode() !== 200) {
-        Logger.log(`Failed to get file details for ${file.name}`);
+        Logger.log(`❌ Failed to get file details for ${file.name}`);
         return 'error';
       }
       
@@ -666,7 +460,7 @@ var OptimizedProcessing = (function() {
       }
       var pathDisplay = pathString ? ` (${pathString})` : '';
       
-      Logger.log(`ℹ️ Processing: ${file.name}${pathDisplay}`);
+      Logger.log(`🔄 Processing: ${file.name}${pathDisplay}`);
       
       var metadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
       var success = BoxFileOperations.applyMetadata(file.id, metadata, accessToken);
@@ -675,34 +469,44 @@ var OptimizedProcessing = (function() {
         Logger.log(`✅ Successfully processed: ${file.name}${pathDisplay}`);
         return 'processed';
       } else {
-        Logger.log(`Failed to apply metadata for: ${file.name}${pathDisplay}`);
+        Logger.log(`❌ Failed to apply metadata for: ${file.name}${pathDisplay}`);
         return 'error';
       }
       
     } catch (error) {
-      Logger.log(`Exception processing ${file.name}: ${error.toString()}`);
+      Logger.log(`❌ Exception processing ${file.name}: ${error.toString()}`);
       return 'error';
     }
   };
   
-  ns.saveCheckpoint = function(checkpoint) {
+  /**
+   * Update progress in BoxReportManager
+   */
+  ns.updateReportProgress = function(processedFiles) {
     try {
-      Config.SCRIPT_PROPERTIES.setProperty(CHECKPOINT_PROPERTY, JSON.stringify(checkpoint));
+      if (processedFiles && processedFiles.length > 0) {
+        var checkpoint = BoxReportManager.getProcessingCheckpoint();
+        if (!checkpoint.processedFileIds) {
+          checkpoint.processedFileIds = [];
+        }
+        
+        processedFiles.forEach(function(file) {
+          if (checkpoint.processedFileIds.indexOf(file.id) === -1) {
+            checkpoint.processedFileIds.push(file.id);
+          }
+        });
+        
+        BoxReportManager.updateProcessingCheckpoint(checkpoint);
+        Logger.log(`📍 Updated progress: ${checkpoint.processedFileIds.length} files processed`);
+      }
     } catch (error) {
-      Logger.log(`Error saving checkpoint: ${error.toString()}`);
+      Logger.log(`⚠️ Error updating report progress: ${error.toString()}`);
     }
   };
   
-  ns.getCheckpoint = function() {
-    try {
-      var checkpointStr = Config.SCRIPT_PROPERTIES.getProperty(CHECKPOINT_PROPERTY);
-      return checkpointStr ? JSON.parse(checkpointStr) : {};
-    } catch (error) {
-      Logger.log(`Error getting checkpoint: ${error.toString()}`);
-      return {};
-    }
-  };
-  
+  /**
+   * Save processing statistics
+   */
   ns.saveStats = function(stats) {
     try {
       var allStatsStr = Config.SCRIPT_PROPERTIES.getProperty(STATS_PROPERTY);
@@ -717,26 +521,44 @@ var OptimizedProcessing = (function() {
       
       Config.SCRIPT_PROPERTIES.setProperty(STATS_PROPERTY, JSON.stringify(allStats));
     } catch (error) {
-      Logger.log(`Error saving stats: ${error.toString()}`);
+      Logger.log(`❌ Error saving stats: ${error.toString()}`);
     }
   };
   
   return ns;
 })();
 
-// Main function for triggers
+// Main function for triggers - now integrated with BoxReportManager
 function processBoxImagesOptimized() {
-  OptimizedProcessing.processBoxImagesOptimized();
+  // Try report-based processing first
+  var reportResult = BoxReportManager.runReportBasedProcessing();
+  
+  if (reportResult && reportResult.filesInReport > 0) {
+    Logger.log('✅ Used BoxReportManager for systematic processing');
+    return reportResult;
+  } else {
+    Logger.log('⚠️ BoxReportManager unavailable, falling back to OptimizedProcessing');
+    return OptimizedProcessing.processBoxImagesOptimized();
+  }
 }
 
-// Show processing stats
+// Show processing stats from both systems
 function showOptimizedProcessingStats() {
-  Logger.log("Recent Processing Stats");
+  Logger.log("📊 === Integrated Processing Stats ===");
+  
+  // Show BoxReportManager stats
+  try {
+    BoxReportManager.showProcessingStats();
+  } catch (error) {
+    Logger.log("⚠️ BoxReportManager stats unavailable: " + error.toString());
+  }
+  
+  Logger.log("\n📊 === Legacy OptimizedProcessing Stats ===");
   
   try {
     var statsStr = Config.SCRIPT_PROPERTIES.getProperty('BOXER_PROCESSING_STATS');
     if (!statsStr) {
-      Logger.log("No stats available yet");
+      Logger.log("📋 No legacy stats available");
       return;
     }
     
@@ -744,45 +566,41 @@ function showOptimizedProcessingStats() {
     
     allStats.forEach(function(run, index) {
       var date = new Date(run.timestamp).toLocaleString();
-      Logger.log(`${index + 1}. ${date}`);
+      Logger.log(`${index + 1}. ${date} [${run.method || 'legacy'}]`);
       Logger.log(`   Found: ${run.filesFound}, Processed: ${run.processed}, Errors: ${run.errors}`);
       Logger.log(`   Time: ${(run.executionTimeMs / 1000).toFixed(1)}s`);
       
       if (run.comprehensiveCounts) {
-        Logger.log(`   Total: ${run.comprehensiveCounts.totalImageFiles}, Without metadata: ${run.comprehensiveCounts.filesWithoutMetadata}`);
+        var source = run.comprehensiveCounts.reportBased ? 'report' : 'search';
+        Logger.log(`   Total: ${run.comprehensiveCounts.totalImageFiles} [${source}], Without metadata: ${run.comprehensiveCounts.filesWithoutMetadata}`);
       }
     });
     
-    var checkpoint = OptimizedProcessing.getCheckpoint();
-    if (checkpoint.lastRunTime) {
-      var timeSince = ((Date.now() - new Date(checkpoint.lastRunTime).getTime()) / (1000 * 60 * 60)).toFixed(1);
-      Logger.log(`\nLast run: ${timeSince} hours ago`);
-      Logger.log(`Last search method: ${checkpoint.lastSearchMethod || 'unknown'}`);
-    }
-    
   } catch (error) {
-    Logger.log(`Error showing stats: ${error.toString()}`);
+    Logger.log(`❌ Error showing legacy stats: ${error.toString()}`);
   }
 }
 
-// Get comprehensive counts without processing  
+// Get comprehensive counts using integrated approach
 function showComprehensiveBoxCounts() {
-  Logger.log("Box Image Analysis");
+  Logger.log("📊 === Integrated Box Image Analysis ===");
   
   var accessToken = getValidAccessToken();
   if (!accessToken) {
-    Logger.log("No access token available");
+    Logger.log("❌ No access token available");
     return;
   }
   
   var counts = OptimizedProcessing.getComprehensiveImageCount(accessToken, false);
+  var source = counts.reportBased ? '📊 Box Report' : '🔍 Search API';
   
-  Logger.log(`Total image files: ${counts.totalImageFiles}`);
-  Logger.log(`Without metadata: ${counts.filesWithoutMetadata}`);
-  Logger.log(`With metadata: ${counts.filesWithMetadata}`);
+  Logger.log(`\n${source} Analysis:`);
+  Logger.log(`📁 Total image files: ${counts.totalImageFiles}`);
+  Logger.log(`❌ Without metadata: ${counts.filesWithoutMetadata}`);
+  Logger.log(`✅ With metadata: ${counts.filesWithMetadata}`);
   
   if (Object.keys(counts.processingStages).length > 0) {
-    Logger.log("\nProcessing stages:");
+    Logger.log("\n📈 Processing stages:");
     Object.entries(counts.processingStages)
       .sort(([,a], [,b]) => b - a)
       .forEach(([stage, count]) => {
@@ -792,15 +610,29 @@ function showComprehensiveBoxCounts() {
   }
   
   if (counts.error) {
-    Logger.log(`\nError: ${counts.error}`);
+    Logger.log(`\n❌ Error: ${counts.error}`);
   }
   
-  Logger.log(`\nAnalysis took: ${(counts.executionTime / 1000).toFixed(1)}s`);
+  Logger.log(`\n⏱️ Analysis took: ${(counts.executionTime / 1000).toFixed(1)}s`);
   
   if (counts.filesWithoutMetadata > 0) {
     var estimatedRuns = Math.ceil(counts.filesWithoutMetadata / 30);
-    Logger.log(`Estimated ${estimatedRuns} more runs needed`);
+    Logger.log(`🔄 Estimated ${estimatedRuns} more runs needed`);
   } else {
-    Logger.log("All files have metadata!");
+    Logger.log("🎉 All files have metadata!");
+  }
+  
+  // Show BoxReportManager status
+  Logger.log("\n📍 Report Manager Status:");
+  try {
+    var checkpoint = BoxReportManager.getProcessingCheckpoint();
+    if (checkpoint && checkpoint.boxReportName) {
+      Logger.log(`📊 Active Report: ${checkpoint.boxReportName}`);
+      Logger.log(`✅ Files Processed: ${checkpoint.processedFileIds ? checkpoint.processedFileIds.length : 0}`);
+    } else {
+      Logger.log("📋 No active report checkpoint");
+    }
+  } catch (error) {
+    Logger.log("⚠️ Could not read report status: " + error.toString());
   }
 }

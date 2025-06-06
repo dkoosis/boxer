@@ -1,11 +1,6 @@
 // File: Config.gs
 // Configuration constants for Box Image Metadata Processing System
-// Uses cGoa and cUseful libraries by Bruce McPherson
 
-/**
- * Configuration namespace following Bruce McPherson's patterns.
- * Centralizes all configuration constants.
- */
 var Config = {
   // Script Properties access
   SCRIPT_PROPERTIES: PropertiesService.getScriptProperties(),
@@ -23,6 +18,23 @@ var Config = {
   BOX_METADATA_SCOPE: 'enterprise',
   BOX_METADATA_TEMPLATE_DISPLAY_NAME: 'Comprehensive Image Metadata',
   
+  // --- NEW REPORT & TRACKING CONFIGURATION ---
+
+  // Folder where weekly Box reports are stored
+  REPORTS_FOLDER_ID: '196526595372',
+
+  // Google Sheet for tracking processing status
+  TRACKING_SHEET_ID: '185JyV0hC1r_jiCFw2zLR2Fd1u6JoH0Q_r2vDtUgMkLk',
+  TRACKING_SHEET_NAME: 'ProcessingLog',
+  
+  // (Optional) Google Drive folder to cache the large report file. 
+  // Create a folder in your Drive and put its ID here. If blank, caches in root folder.
+  DRIVE_CACHE_FOLDER_ID: '', 
+
+  // Checkpoint property for report processing state
+  REPORT_PROCESSING_CHECKPOINT: 'BOXER_REPORT_CHECKPOINT',
+
+
   // Google Cloud Vision API Configuration
   VISION_API_ENDPOINT: 'https://vision.googleapis.com/v1/images:annotate',
   VISION_API_KEY_PROPERTY: 'VISION_API_KEY',
