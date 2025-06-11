@@ -1,5 +1,6 @@
 // File: Config.gs
 // Configuration constants for Box Image Metadata Processing System
+// Updated with Airtable Archival Configuration
 
 var Config = {
   // Script Properties access
@@ -18,23 +19,47 @@ var Config = {
   BOX_METADATA_SCOPE: 'enterprise',
   BOX_METADATA_TEMPLATE_DISPLAY_NAME: 'Comprehensive Image Metadata',
   
-  // --- NEW REPORT & TRACKING CONFIGURATION ---
-
-  // Folder where weekly Box reports are stored
+  // Box Reports Configuration
   REPORTS_FOLDER_ID: '196526595372',
-
-  // Google Sheet for tracking processing status
   TRACKING_SHEET_ID: '185JyV0hC1r_jiCFw2zLR2Fd1u6JoH0Q_r2vDtUgMkLk',
   TRACKING_SHEET_NAME: 'ProcessingLog',
-  
-  // (Optional) Google Drive folder to cache the large report file. 
-  // Create a folder in your Drive and put its ID here. If blank, caches in root folder.
-  DRIVE_CACHE_FOLDER_ID: '', 
-
-  // Checkpoint property for report processing state
+  DRIVE_CACHE_FOLDER_ID: '',
   REPORT_PROCESSING_CHECKPOINT: 'BOXER_REPORT_CHECKPOINT',
 
-
+  // === NEW AIRTABLE ARCHIVAL CONFIGURATION ===
+  
+  // Airtable API Configuration
+  AIRTABLE_API_BASE_URL: 'https://api.airtable.com/v0',
+  AIRTABLE_API_KEY_PROPERTY: 'AIRTABLE_API_KEY', // Store in Script Properties
+  
+  // Default Airtable Settings (can be overridden per base)
+  AIRTABLE_DEFAULT_CONFIG: {
+    baseId: 'YOUR_BASE_ID_HERE',           // Replace with your Airtable Base ID
+    tableName: 'YOUR_TABLE_NAME_HERE',     // Replace with your table name
+    viewName: 'Ready for Archiving',       // View that filters unarchived records
+    attachmentFieldName: 'Images',         // Field containing image attachments
+    linkFieldName: 'Archived_Image_Link',  // Field where Box links will be stored
+    notesFieldName: 'Notes'                // Optional: field for additional context
+  },
+  
+  // Box Folder Configuration for Airtable Archives
+  AIRTABLE_ROOT_FOLDER_ID: 'YOUR_BOX_FOLDER_ID_HERE', // Replace with Box folder ID for Airtable archives
+  
+  // Processing Configuration
+  AIRTABLE_BATCH_SIZE: 5,                  // Records to process per run (Roomba-style)
+  AIRTABLE_MAX_EXECUTION_TIME_MS: 4 * 60 * 1000, // 4 minutes safety margin
+  AIRTABLE_DELAY_BETWEEN_RECORDS_MS: 2000, // Delay between processing records
+  AIRTABLE_DELAY_BETWEEN_FILES_MS: 1000,   // Delay between uploading files
+  
+  // File Size Limits
+  AIRTABLE_MAX_FILE_SIZE_BYTES: 50 * 1024 * 1024, // 50MB limit for uploads
+  
+  // State Management
+  AIRTABLE_STATS_PROPERTY: 'BOXER_AIRTABLE_STATS',
+  AIRTABLE_ERROR_LOG_PROPERTY: 'BOXER_AIRTABLE_ERRORS',
+  
+  // === EXISTING CONFIGURATION ===
+  
   // Google Cloud Vision API Configuration
   VISION_API_ENDPOINT: 'https://vision.googleapis.com/v1/images:annotate',
   VISION_API_KEY_PROPERTY: 'VISION_API_KEY',
@@ -99,5 +124,33 @@ var Config = {
    */
   shouldReprocessForBuild: function(fileBuildNumber) {
     return !fileBuildNumber || fileBuildNumber !== this.getCurrentBuild();
+  },
+  
+  /**
+   * Get Airtable API key from Script Properties
+   * @returns {string|null} API key or null if not found
+   */
+  getAirtableApiKey: function() {
+    return this.SCRIPT_PROPERTIES.getProperty(this.AIRTABLE_API_KEY_PROPERTY);
+  },
+  
+  /**
+   * Set Airtable API key in Script Properties
+   * @param {string} apiKey The Airtable API key
+   */
+  setAirtableApiKey: function(apiKey) {
+    this.SCRIPT_PROPERTIES.setProperty(this.AIRTABLE_API_KEY_PROPERTY, apiKey);
+  },
+  
+  /**
+   * Validate Airtable configuration
+   * @param {object} config Configuration object to validate
+   * @returns {boolean} True if configuration is valid
+   */
+  validateAirtableConfig: function(config) {
+    var required = ['baseId', 'tableName', 'viewName', 'attachmentFieldName', 'linkFieldName'];
+    return required.every(function(field) {
+      return config[field] && typeof config[field] === 'string' && config[field].length > 0;
+    });
   }
 };
