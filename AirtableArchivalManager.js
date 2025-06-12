@@ -1,22 +1,47 @@
-// File: AirtableArchivalManager.js
-// Automated Airtable Image Archival System for Box.com
-// "Roomba" style incremental processing
-// Depends on: Config.js, BoxAuth.js
+// File: AirtableArchivalManager.gs - FIXED VERSION
+// Replace your existing AirtableArchivalManager.js with this version
+// Fixes Config loading order issues
 
 /**
  * AirtableArchivalManager - Handles automated migration of images from Airtable to Box.com
- * Operates in "Roomba" mode: incremental, autonomous processing with queue management via Airtable views
+ * Fixed version with defensive Config access
  */
 var AirtableArchivalManager = (function() {
   'use strict';
   
   var ns = {};
   
-  // Processing constants
-  var MAX_EXECUTION_TIME_MS = Config.AIRTABLE_MAX_EXECUTION_TIME_MS;
-  var BATCH_SIZE = Config.AIRTABLE_BATCH_SIZE;
-  var STATS_PROPERTY = Config.AIRTABLE_STATS_PROPERTY;
-  var ERROR_LOG_PROPERTY = Config.AIRTABLE_ERROR_LOG_PROPERTY;
+  /**
+   * Get configuration values safely with fallbacks
+   * @private
+   */
+  function getConfig_() {
+    // Defensive config access with fallbacks
+    if (typeof Config === 'undefined' || !Config) {
+      Logger.log('⚠️ Config object not available, using fallback values');
+      return {
+        AIRTABLE_MAX_EXECUTION_TIME_MS: 4 * 60 * 1000, // 4 minutes
+        AIRTABLE_BATCH_SIZE: 5,
+        AIRTABLE_STATS_PROPERTY: 'BOXER_AIRTABLE_STATS',
+        AIRTABLE_ERROR_LOG_PROPERTY: 'BOXER_AIRTABLE_ERRORS',
+        AIRTABLE_DELAY_BETWEEN_RECORDS_MS: 2000,
+        AIRTABLE_DELAY_BETWEEN_FILES_MS: 1000,
+        AIRTABLE_MAX_FILE_SIZE_BYTES: 50 * 1024 * 1024,
+        AIRTABLE_API_BASE_URL: 'https://api.airtable.com/v0',
+        AIRTABLE_ROOT_FOLDER_ID: '0',
+        BOX_API_BASE_URL: 'https://api.box.com/2.0',
+        AIRTABLE_DEFAULT_CONFIG: {
+          baseId: 'YOUR_BASE_ID_HERE',
+          tableName: 'YOUR_TABLE_NAME_HERE',
+          viewName: 'Ready for Archiving',
+          attachmentFieldName: 'Images',
+          linkFieldName: 'Archived_Image_Link',
+          notesFieldName: 'Notes'
+        }
+      };
+    }
+    return Config;
+  }
   
   /**
    * Main "Roomba" processing function - processes a small batch of records each run
@@ -28,10 +53,11 @@ var AirtableArchivalManager = (function() {
     Logger.log('📦 === Boxer Airtable Archival Started ===');
     Logger.log('⏰ Start time: ' + new Date().toISOString());
     
-    var config = Object.assign({}, Config.AIRTABLE_DEFAULT_CONFIG, customConfig || {});
+    var config = getConfig_();
+    var mergedConfig = Object.assign({}, config.AIRTABLE_DEFAULT_CONFIG, customConfig || {});
     
     // Validate configuration
-    if (!Config.validateAirtableConfig(config)) {
+    if (!ns.validateAirtableConfig(mergedConfig)) {
       Logger.log('❌ Invalid Airtable configuration');
       return { error: 'Invalid configuration' };
     }
@@ -45,20 +71,20 @@ var AirtableArchivalManager = (function() {
       executionTimeMs: 0,
       startTime: new Date().toISOString(),
       config: {
-        baseId: config.baseId,
-        tableName: config.tableName,
-        viewName: config.viewName
+        baseId: mergedConfig.baseId,
+        tableName: mergedConfig.tableName,
+        viewName: mergedConfig.viewName
       }
     };
     
     try {
       // Step 1: Get API credentials
-      var airtableApiKey = Config.getAirtableApiKey();
+      var airtableApiKey = ns.getAirtableApiKey();
       var boxAccessToken = getValidAccessToken();
       
       if (!airtableApiKey) {
         Logger.log('❌ No Airtable API key found in Script Properties');
-        Logger.log('💡 Set it using: Config.setAirtableApiKey("your_api_key_here")');
+        Logger.log('💡 Set it using: setupAirtableApiKey("your_api_key_here")');
         return { error: 'No Airtable API key configured' };
       }
       
@@ -70,7 +96,7 @@ var AirtableArchivalManager = (function() {
       Logger.log('✅ API credentials validated');
       
       // Step 2: Fetch records from Airtable view (Roomba queue)
-      var records = ns.fetchRecordsFromView(config, airtableApiKey);
+      var records = ns.fetchRecordsFromView(mergedConfig, airtableApiKey);
       stats.recordsFound = records.length;
       
       if (records.length === 0) {
@@ -80,21 +106,23 @@ var AirtableArchivalManager = (function() {
         return stats;
       }
       
-      Logger.log('📋 Found ' + records.length + ' records in "' + config.viewName + '" view');
+      Logger.log('📋 Found ' + records.length + ' records in "' + mergedConfig.viewName + '" view');
       
       // Step 3: Process records in small batches (Roomba behavior)
-      var recordsToProcess = records.slice(0, BATCH_SIZE);
+      var batchSize = config.AIRTABLE_BATCH_SIZE || 5;
+      var recordsToProcess = records.slice(0, batchSize);
       Logger.log('🔄 Processing ' + recordsToProcess.length + ' records in this batch...');
       
       for (var i = 0; i < recordsToProcess.length; i++) {
         // Check execution time limit
-        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
+        var maxTime = config.AIRTABLE_MAX_EXECUTION_TIME_MS || (4 * 60 * 1000);
+        if (Date.now() - startTime > maxTime) {
           Logger.log('⏰ Execution time limit reached - stopping processing');
           break;
         }
         
         var record = recordsToProcess[i];
-        var result = ns.processRecord(record, config, airtableApiKey, boxAccessToken);
+        var result = ns.processRecord(record, mergedConfig, airtableApiKey, boxAccessToken);
         
         if (result.success) {
           stats.recordsProcessed++;
@@ -106,12 +134,13 @@ var AirtableArchivalManager = (function() {
         } else {
           stats.recordsErrored++;
           Logger.log('❌ Error processing record: ' + (record.fields.Name || record.id) + ' - ' + result.error);
-          ns.logError(record, result.error, config);
+          ns.logError(record, result.error, mergedConfig);
         }
         
         // Brief pause between records
         if (i < recordsToProcess.length - 1) {
-          Utilities.sleep(Config.AIRTABLE_DELAY_BETWEEN_RECORDS_MS);
+          var delayMs = config.AIRTABLE_DELAY_BETWEEN_RECORDS_MS || 2000;
+          Utilities.sleep(delayMs);
         }
       }
       
@@ -124,8 +153,8 @@ var AirtableArchivalManager = (function() {
       Logger.log('❌ Errors: ' + stats.recordsErrored + ' records');
       Logger.log('⏱️ Execution time: ' + (stats.executionTimeMs / 1000).toFixed(1) + 's');
       
-      if (stats.recordsFound > BATCH_SIZE) {
-        var remaining = stats.recordsFound - BATCH_SIZE;
+      if (stats.recordsFound > batchSize) {
+        var remaining = stats.recordsFound - batchSize;
         Logger.log('🔄 ' + remaining + ' more records remain in queue for next run');
       }
       
@@ -152,10 +181,14 @@ var AirtableArchivalManager = (function() {
     Logger.log('📡 Fetching records from Airtable view: ' + config.viewName);
     
     try {
-      var url = Config.AIRTABLE_API_BASE_URL + '/' + config.baseId + '/' + encodeURIComponent(config.tableName);
+      var configObj = getConfig_();
+      var apiBaseUrl = configObj.AIRTABLE_API_BASE_URL || 'https://api.airtable.com/v0';
+      var batchSize = configObj.AIRTABLE_BATCH_SIZE || 5;
+      
+      var url = apiBaseUrl + '/' + config.baseId + '/' + encodeURIComponent(config.tableName);
       var params = {
         'view': config.viewName,
-        'maxRecords': Math.min(100, BATCH_SIZE * 4), // Get a reasonable number for queue visibility
+        'maxRecords': Math.min(100, batchSize * 4), // Get a reasonable number for queue visibility
         'fields': [config.attachmentFieldName, config.linkFieldName, 'Name'].join(',')
       };
       
@@ -242,12 +275,14 @@ var AirtableArchivalManager = (function() {
       // Step 2: Upload images to Box and collect links
       var uploadResults = [];
       var allUploadSuccessful = true;
+      var configObj = getConfig_();
       
       for (var i = 0; i < imageAttachments.length; i++) {
         var attachment = imageAttachments[i];
         
         // Check file size
-        if (attachment.size > Config.AIRTABLE_MAX_FILE_SIZE_BYTES) {
+        var maxFileSize = configObj.AIRTABLE_MAX_FILE_SIZE_BYTES || (50 * 1024 * 1024);
+        if (attachment.size > maxFileSize) {
           Logger.log('⚠️ Skipping oversized file: ' + attachment.filename + ' (' + (attachment.size / 1024 / 1024).toFixed(1) + 'MB)');
           continue;
         }
@@ -265,7 +300,8 @@ var AirtableArchivalManager = (function() {
         
         // Brief pause between file uploads
         if (i < imageAttachments.length - 1) {
-          Utilities.sleep(Config.AIRTABLE_DELAY_BETWEEN_FILES_MS);
+          var fileDelayMs = configObj.AIRTABLE_DELAY_BETWEEN_FILES_MS || 1000;
+          Utilities.sleep(fileDelayMs);
         }
       }
       
@@ -299,7 +335,8 @@ var AirtableArchivalManager = (function() {
    */
   ns.ensureBoxFolderStructure = function(config, accessToken) {
     try {
-      var rootFolderId = Config.AIRTABLE_ROOT_FOLDER_ID || '0';
+      var configObj = getConfig_();
+      var rootFolderId = configObj.AIRTABLE_ROOT_FOLDER_ID || '0';
       
       // Step 1: Find or create "Airtable" folder
       var airtableFolderId = ns.findOrCreateFolder('Airtable', rootFolderId, accessToken);
@@ -342,8 +379,11 @@ var AirtableArchivalManager = (function() {
    */
   ns.findOrCreateFolder = function(folderName, parentFolderId, accessToken) {
     try {
+      var configObj = getConfig_();
+      var boxApiBase = configObj.BOX_API_BASE_URL || 'https://api.box.com/2.0';
+      
       // First, try to find existing folder
-      var searchUrl = Config.BOX_API_BASE_URL + '/folders/' + parentFolderId + '/items?fields=id,name,type&limit=100';
+      var searchUrl = boxApiBase + '/folders/' + parentFolderId + '/items?fields=id,name,type&limit=100';
       
       var response = UrlFetchApp.fetch(searchUrl, {
         headers: { 'Authorization': 'Bearer ' + accessToken },
@@ -365,7 +405,7 @@ var AirtableArchivalManager = (function() {
       // Folder doesn't exist, create it
       Logger.log('📁 Creating folder: ' + folderName + ' in parent: ' + parentFolderId);
       
-      var createUrl = Config.BOX_API_BASE_URL + '/folders';
+      var createUrl = boxApiBase + '/folders';
       var createPayload = {
         name: folderName,
         parent: { id: parentFolderId }
@@ -471,6 +511,9 @@ var AirtableArchivalManager = (function() {
    */
   ns.addMetadataToBoxFile = function(boxFileId, record, config, accessToken) {
     try {
+      var configObj = getConfig_();
+      var boxApiBase = configObj.BOX_API_BASE_URL || 'https://api.box.com/2.0';
+      
       // Build metadata string from Airtable record
       var metadata = ['=== Airtable Archive ==='];
       metadata.push('Source: ' + config.baseId + ' / ' + config.tableName);
@@ -496,7 +539,7 @@ var AirtableArchivalManager = (function() {
       var metadataText = metadata.join('\n');
       
       // Update Box file description
-      var updateUrl = Config.BOX_API_BASE_URL + '/files/' + boxFileId;
+      var updateUrl = boxApiBase + '/files/' + boxFileId;
       var updatePayload = { description: metadataText };
       
       UrlFetchApp.fetch(updateUrl, {
@@ -524,7 +567,10 @@ var AirtableArchivalManager = (function() {
    */
   ns.createShareableLink = function(boxFileId, accessToken) {
     try {
-      var linkUrl = Config.BOX_API_BASE_URL + '/files/' + boxFileId + '?fields=shared_link';
+      var configObj = getConfig_();
+      var boxApiBase = configObj.BOX_API_BASE_URL || 'https://api.box.com/2.0';
+      
+      var linkUrl = boxApiBase + '/files/' + boxFileId + '?fields=shared_link';
       
       // First check if link already exists
       var checkResponse = UrlFetchApp.fetch(linkUrl, {
@@ -540,7 +586,7 @@ var AirtableArchivalManager = (function() {
       }
       
       // Create new shared link
-      var updateUrl = Config.BOX_API_BASE_URL + '/files/' + boxFileId;
+      var updateUrl = boxApiBase + '/files/' + boxFileId;
       var updatePayload = {
         shared_link: {
           access: 'open',
@@ -585,13 +631,16 @@ var AirtableArchivalManager = (function() {
     try {
       Logger.log('📝 Updating Airtable record with Box links...');
       
+      var configObj = getConfig_();
+      var apiBaseUrl = configObj.AIRTABLE_API_BASE_URL || 'https://api.airtable.com/v0';
+      
       // Create link text with all uploaded files
       var linkTexts = uploadResults.map(function(result) {
         return result.filename + ': ' + result.boxLink;
       });
       var linkText = linkTexts.join('\n');
       
-      var updateUrl = Config.AIRTABLE_API_BASE_URL + '/' + config.baseId + '/' + encodeURIComponent(config.tableName) + '/' + recordId;
+      var updateUrl = apiBaseUrl + '/' + config.baseId + '/' + encodeURIComponent(config.tableName) + '/' + recordId;
       
       var updatePayload = {
         fields: {}
@@ -645,6 +694,9 @@ var AirtableArchivalManager = (function() {
    */
   ns.logError = function(record, error, config) {
     try {
+      var configObj = getConfig_();
+      var errorLogProperty = configObj.AIRTABLE_ERROR_LOG_PROPERTY || 'BOXER_AIRTABLE_ERRORS';
+      
       var errorLog = {
         timestamp: new Date().toISOString(),
         recordId: record.id,
@@ -657,7 +709,8 @@ var AirtableArchivalManager = (function() {
         }
       };
       
-      var existingLogStr = Config.SCRIPT_PROPERTIES.getProperty(ERROR_LOG_PROPERTY);
+      var properties = PropertiesService.getScriptProperties();
+      var existingLogStr = properties.getProperty(errorLogProperty);
       var existingLog = existingLogStr ? JSON.parse(existingLogStr) : [];
       
       existingLog.push(errorLog);
@@ -667,7 +720,7 @@ var AirtableArchivalManager = (function() {
         existingLog = existingLog.slice(-50);
       }
       
-      Config.SCRIPT_PROPERTIES.setProperty(ERROR_LOG_PROPERTY, JSON.stringify(existingLog));
+      properties.setProperty(errorLogProperty, JSON.stringify(existingLog));
       
     } catch (e) {
       Logger.log('❌ Failed to log error: ' + e.toString());
@@ -680,7 +733,11 @@ var AirtableArchivalManager = (function() {
    */
   ns.saveStats = function(stats) {
     try {
-      var allStatsStr = Config.SCRIPT_PROPERTIES.getProperty(STATS_PROPERTY);
+      var configObj = getConfig_();
+      var statsProperty = configObj.AIRTABLE_STATS_PROPERTY || 'BOXER_AIRTABLE_STATS';
+      
+      var properties = PropertiesService.getScriptProperties();
+      var allStatsStr = properties.getProperty(statsProperty);
       var allStats = allStatsStr ? JSON.parse(allStatsStr) : [];
       
       stats.timestamp = new Date().toISOString();
@@ -691,7 +748,7 @@ var AirtableArchivalManager = (function() {
         allStats = allStats.slice(-20);
       }
       
-      Config.SCRIPT_PROPERTIES.setProperty(STATS_PROPERTY, JSON.stringify(allStats));
+      properties.setProperty(statsProperty, JSON.stringify(allStats));
     } catch (error) {
       Logger.log('❌ Error saving processing stats: ' + error.toString());
     }
@@ -704,7 +761,13 @@ var AirtableArchivalManager = (function() {
     Logger.log('📊 === Airtable Archival Statistics ===');
     
     try {
-      var statsStr = Config.SCRIPT_PROPERTIES.getProperty(STATS_PROPERTY);
+      var configObj = getConfig_();
+      var statsProperty = configObj.AIRTABLE_STATS_PROPERTY || 'BOXER_AIRTABLE_STATS';
+      var errorLogProperty = configObj.AIRTABLE_ERROR_LOG_PROPERTY || 'BOXER_AIRTABLE_ERRORS';
+      
+      var properties = PropertiesService.getScriptProperties();
+      var statsStr = properties.getProperty(statsProperty);
+      
       if (!statsStr) {
         Logger.log('📋 No processing stats available yet');
         return;
@@ -729,7 +792,7 @@ var AirtableArchivalManager = (function() {
       });
       
       // Show recent errors
-      var errorLogStr = Config.SCRIPT_PROPERTIES.getProperty(ERROR_LOG_PROPERTY);
+      var errorLogStr = properties.getProperty(errorLogProperty);
       if (errorLogStr) {
         var errorLog = JSON.parse(errorLogStr);
         var recentErrors = errorLog.slice(-5);
@@ -753,8 +816,40 @@ var AirtableArchivalManager = (function() {
    * Clear error log
    */
   ns.clearErrors = function() {
-    Config.SCRIPT_PROPERTIES.deleteProperty(ERROR_LOG_PROPERTY);
-    Logger.log('✅ Error log cleared');
+    try {
+      var configObj = getConfig_();
+      var errorLogProperty = configObj.AIRTABLE_ERROR_LOG_PROPERTY || 'BOXER_AIRTABLE_ERRORS';
+      
+      PropertiesService.getScriptProperties().deleteProperty(errorLogProperty);
+      Logger.log('✅ Error log cleared');
+    } catch (error) {
+      Logger.log('❌ Error clearing error log: ' + error.toString());
+    }
+  };
+  
+  /**
+   * Get Airtable API key from Script Properties
+   * @returns {string|null} API key or null if not found
+   */
+  ns.getAirtableApiKey = function() {
+    try {
+      return PropertiesService.getScriptProperties().getProperty('AIRTABLE_API_KEY');
+    } catch (error) {
+      Logger.log('❌ Error getting Airtable API key: ' + error.toString());
+      return null;
+    }
+  };
+  
+  /**
+   * Validate Airtable configuration
+   * @param {object} config Configuration object to validate
+   * @returns {boolean} True if configuration is valid
+   */
+  ns.validateAirtableConfig = function(config) {
+    var required = ['baseId', 'tableName', 'viewName', 'attachmentFieldName', 'linkFieldName'];
+    return required.every(function(field) {
+      return config[field] && typeof config[field] === 'string' && config[field].length > 0;
+    });
   };
   
   return ns;
@@ -796,6 +891,10 @@ function clearAirtableErrors() {
  * @param {string} apiKey Your Airtable API key
  */
 function setupAirtableApiKey(apiKey) {
-  Config.setAirtableApiKey(apiKey);
-  Logger.log('✅ Airtable API key has been saved to Script Properties');
+  try {
+    PropertiesService.getScriptProperties().setProperty('AIRTABLE_API_KEY', apiKey);
+    Logger.log('✅ Airtable API key has been saved to Script Properties');
+  } catch (error) {
+    Logger.log('❌ Error saving Airtable API key: ' + error.toString());
+  }
 }
