@@ -13,7 +13,9 @@ var OptimizedProcessing = (function() {
   // Configuration
   var MAX_EXECUTION_TIME_MS = 5 * 60 * 1000; // 5 minutes
   var BATCH_SIZE = 8; // This can be adjusted in Config.js if needed
-  var STATS_PROPERTY = 'BOXER_PROCESSING_STATS';
+  // dk FIXME
+  Logger.log("FIXME no idea why GAS is choking here.")
+  //var STATS_PROPERTY = 'BOXER_PROCESSING_STATS'; // restore when issue resolved
   
   /**
    * Main processing function - refactored to strictly prioritize the test folder.

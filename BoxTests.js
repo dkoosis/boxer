@@ -959,7 +959,47 @@ function debugFolderListingStrategy() {
     Logger.log('Search failed: ' + response.getContentText());
   }
 }
+function testPropertiesService() {
+  const ps = PropertiesService.getScriptProperties();
+  const key = 'myManualTestProperty';
+  const value = 'Hello, world! ' + new Date().toISOString();
 
+  try {
+    Logger.log('--- Testing Properties Service Directly ---');
+
+    // 1. Read before writing to see the initial state
+    const initialValue = ps.getProperty(key);
+    Logger.log('Initial value of "' + key + '": ' + initialValue);
+
+    // 2. Write a new value
+    Logger.log('Attempting to set property...');
+    ps.setProperty(key, value);
+    Logger.log('setProperty() executed without error.');
+
+    // 3. Read the value back immediately to confirm the write
+    const newValue = ps.getProperty(key);
+    Logger.log('Value read back: ' + newValue);
+    if (newValue === value) {
+      Logger.log('✅ SUCCESS: Property was written and read back correctly via code.');
+    } else {
+      Logger.log('❌ FAILURE: Value read back does not match value written.');
+    }
+
+    // 4. Delete the property
+    Logger.log('Attempting to delete property...');
+    ps.deleteProperty(key);
+    Logger.log('deleteProperty() executed without error.');
+    const finalValue = ps.getProperty(key);
+    if (finalValue === null) {
+      Logger.log('✅ SUCCESS: Property was deleted correctly via code.');
+    } else {
+      Logger.log('❌ FAILURE: Property still exists after deletion.');
+    }
+
+  } catch (e) {
+    Logger.log('💥 An exception occurred during the test: ' + e.toString());
+  }
+}
 function debugStrategyRotation() {
   const checkpoint = OptimizedProcessing.getCheckpoint();
   Logger.log('Current checkpoint: ' + JSON.stringify(checkpoint));

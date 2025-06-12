@@ -1,4 +1,4 @@
-// File: SimpleHealthCheck.gs
+// File: BoxerHealthCheck.gs
 // Simple health check that aborts processing if Google Services are down
 // Add this to your project
 

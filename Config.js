@@ -131,6 +131,9 @@ var Config = {
    * @returns {string|null} API key or null if not found
    */
   getAirtableApiKey: function() {
+    //dk FIXME
+    Logger.log("FIXME: GAS is having get/set problems with script properties...")
+    return "patWSZ6NjaXeF1uRd.7343a7c4c2abef4e4e6c05adc79c664a82d3f9e685ab7d30805e7ee86af1bc80"
     return this.SCRIPT_PROPERTIES.getProperty(this.AIRTABLE_API_KEY_PROPERTY);
   },
   

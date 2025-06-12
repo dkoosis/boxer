@@ -298,192 +298,130 @@ var BoxReportManager = (function() {
     }
   };
 
-  /**
-   * Main report processing function - systematically processes files from Box report
-   * @returns {object|null} Processing results or null on error
-   */
-  ns.runReportBasedProcessing = function() {
-    var startTime = Date.now();
-    Logger.log('🐕 === Boxer Report-Based Processing Started ===');
-    Logger.log('⏰ Start time: ' + new Date().toISOString());
+/**
+ * Main report processing function - uses an API call to resolve the test folder ID to its
+ * full path name for robust, accurate tree prioritization.
+ * @returns {object|null} Processing results or null on error
+ */
+ns.runReportBasedProcessing = function() {
+  var startTime = Date.now();
+  Logger.log('🐕 === Boxer Report-Based Processing Started (API Resolved Path Priority) ===');
+  
+  var accessToken = getValidAccessToken();
+  if (!accessToken) return null;
+
+  // --- Resolve ACTIVE_TEST_FOLDER_ID to its full path name ---
+  var testFolderPath = '';
+  var testFolderId = Config.ACTIVE_TEST_FOLDER_ID;
+
+  if (testFolderId && testFolderId !== '0') {
+    try {
+      // API call to get the folder's name and its parent hierarchy (path_collection)
+      var folderDetailsUrl = Config.BOX_API_BASE_URL + '/folders/' + testFolderId + '?fields=name,path_collection';
+      var folderResponse = UrlFetchApp.fetch(folderDetailsUrl, {
+        headers: { 'Authorization': 'Bearer ' + accessToken },
+        muteHttpExceptions: true
+      });
+
+      if (folderResponse.getResponseCode() === 200) {
+        var folderDetails = JSON.parse(folderResponse.getContentText());
+        
+        // Construct the full path by joining the names of all parent folders
+        var parentPath = folderDetails.path_collection.entries.map(p => p.name).join('/');
+        
+        // Append the actual folder's name to create the complete path
+        testFolderPath = parentPath ? `${parentPath}/${folderDetails.name}` : folderDetails.name;
+
+        Logger.log(`✅ Successfully resolved Test Folder ID ${testFolderId} to path: "${testFolderPath}"`);
+      } else {
+        Logger.log(`⚠️ Could not resolve folder ID ${testFolderId} to a path. Prioritization will be skipped. HTTP: ${folderResponse.getResponseCode()}`);
+      }
+    } catch (e) {
+      Logger.log(`⚠️ Error resolving folder ID to path: ${e.toString()}`);
+    }
+  }
+  // --- END ---
+
+  var stats = { reportFound: false, filesInReport: 0, filesProcessed: 0, filesSkipped: 0, filesErrored: 0, executionTimeMs: 0 };
+  
+  try {
+    var latestReport = ReportManager.findLatestReport(accessToken);
+    if (!latestReport) return stats;
+    stats.reportFound = true;
     
-    var accessToken = getValidAccessToken();
-    if (!accessToken) {
-      Logger.log('❌ No access token available');
-      return null;
+    var checkpointStr = Config.SCRIPT_PROPERTIES.getProperty(REPORT_PROCESSING_CHECKPOINT);
+    var checkpoint = checkpointStr ? JSON.parse(checkpointStr) : {};
+    
+    if (checkpoint.boxReportId !== latestReport.id) {
+      var newDriveFileId = ReportManager.cacheReportToDrive(checkpoint, latestReport, accessToken);
+      if (!newDriveFileId) return stats;
+      checkpoint = { boxReportId: latestReport.id, driveFileId: newDriveFileId, processedFileIds: [] };
     }
     
-    var stats = {
-      reportFound: false,
-      reportCached: false,
-      filesInReport: 0,
-      filesProcessed: 0,
-      filesSkipped: 0,
-      filesErrored: 0,
-      executionTimeMs: 0,
-      startTime: new Date().toISOString()
-    };
+    var driveFile = DriveApp.getFileById(checkpoint.driveFileId);
+    var reportContent = driveFile.getBlob().getDataAsString();
+    if (!ReportManager.verifyReport(latestReport, reportContent)) return stats;
     
-    try {
-      // Step 1: Find latest Box report
-      var latestReport = ReportManager.findLatestReport(accessToken);
-      if (!latestReport) {
-        Logger.log('❌ Could not find latest Box report');
-        return stats;
-      }
-      
-      stats.reportFound = true;
-      Logger.log('📊 Using report: ' + latestReport.name);
-      
-      // Step 2: Check if we need to update our cached copy
-      var checkpointStr = Config.SCRIPT_PROPERTIES.getProperty(REPORT_PROCESSING_CHECKPOINT);
-      var checkpoint = checkpointStr ? JSON.parse(checkpointStr) : {};
-      
-      var needsNewCache = false;
-      if (checkpoint.boxReportId !== latestReport.id) {
-        Logger.log('🔄 New report detected - updating cache...');
-        needsNewCache = true;
-      } else {
-        Logger.log('✅ Using existing cached report');
-      }
-      
-      // Step 3: Cache report to Google Drive if needed
-      if (needsNewCache) {
-        var newDriveFileId = ReportManager.cacheReportToDrive(checkpoint, latestReport, accessToken);
-        if (!newDriveFileId) {
-          Logger.log('❌ Failed to cache report to Drive');
-          return stats;
+    var allReportFiles = ns.parseReport(reportContent);
+    stats.filesInReport = allReportFiles.length;
+    
+    var processedIds = new Set(checkpoint.processedFileIds || []);
+    var filesToConsider = allReportFiles.filter(file => !processedIds.has(file.id));
+    
+    var priorityFiles = [];
+    var generalFiles = [];
+
+    if (testFolderPath) {
+      filesToConsider.forEach(function(file) {
+        // Match if the file's path is the target folder or a subfolder within it.
+        if (file.path && (file.path === testFolderPath || (file.path + '/').startsWith(testFolderPath + '/'))) {
+          priorityFiles.push(file);
+        } else {
+          generalFiles.push(file);
         }
-        
-        checkpoint = {
-          boxReportId: latestReport.id,
-          boxReportName: latestReport.name,
-          driveFileId: newDriveFileId,
-          lastUpdated: new Date().toISOString(),
-          processedFileIds: new Set(), // Track processed files
-          processingPosition: 0 // Track where we left off
-        };
-        
-        Config.SCRIPT_PROPERTIES.setProperty(REPORT_PROCESSING_CHECKPOINT, JSON.stringify({
-          ...checkpoint,
-          processedFileIds: Array.from(checkpoint.processedFileIds) // Convert Set to Array for storage
-        }));
-        
-        stats.reportCached = true;
-      } else {
-        // Convert processedFileIds back to Set
-        checkpoint.processedFileIds = new Set(checkpoint.processedFileIds || []);
-        checkpoint.processingPosition = checkpoint.processingPosition || 0;
-      }
-      
-      // Step 4: Read and parse the cached report
-      var driveFile = DriveApp.getFileById(checkpoint.driveFileId);
-      var reportContent = driveFile.getBlob().getDataAsString();
-      
-      if (!ReportManager.verifyReport(latestReport, reportContent)) {
-        Logger.log('❌ Report validation failed');
-        return stats;
-      }
-      
-      var allReportFiles = ns.parseReport(reportContent);
-      stats.filesInReport = allReportFiles.length;
-      
-      if (allReportFiles.length === 0) {
-        Logger.log('❌ No files found in report');
-        return stats;
-      }
-      
-      // Step 5: Filter files that need processing (systematic approach)
-      var filesToProcess = allReportFiles.filter(function(file) {
-        return !checkpoint.processedFileIds.has(file.id);
       });
-      
-      Logger.log('📊 Report Analysis:');
-      Logger.log('   Total files in report: ' + allReportFiles.length);
-      Logger.log('   Already processed: ' + checkpoint.processedFileIds.size);
-      Logger.log('   Need processing: ' + filesToProcess.length);
-      Logger.log('   Starting from position: ' + checkpoint.processingPosition);
-      
-      if (filesToProcess.length === 0) {
-        Logger.log('🎉 All files in report have been processed!');
+      Logger.log(`Found ${priorityFiles.length} files within the priority test folder path: "${testFolderPath}".`);
+    } else {
+      Logger.log('⚠️ Test folder path could not be determined. Skipping prioritization.');
+      generalFiles = filesToConsider;
+    }
+
+    var prioritizedFiles = priorityFiles.concat(generalFiles);
+    Logger.log(`📊 Report Analysis: Total: ${allReportFiles.length}, Already Processed: ${processedIds.size}, Needing Processing: ${prioritizedFiles.length}`);
+    
+    if (prioritizedFiles.length === 0) {
+        Logger.log('🎉 No files require processing at this time.');
         return stats;
-      }
-      
-      // Step 6: Process files systematically (continue from where we left off)
-      var remainingFiles = filesToProcess.slice(checkpoint.processingPosition);
-      var filesToProcessNow = remainingFiles.slice(0, BATCH_SIZE);
-      
-      Logger.log('🔄 Processing ' + filesToProcessNow.length + ' files in this batch...');
-      
-      for (var i = 0; i < filesToProcessNow.length; i++) {
-        // Check execution time limit
+    }
+    
+    var filesToProcessNow = prioritizedFiles.slice(0, BATCH_SIZE);
+    Logger.log(`🔄 Processing ${filesToProcessNow.length} files in this batch...`);
+
+    for (var i = 0; i < filesToProcessNow.length; i++) {
         if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
-          Logger.log('⏰ Execution time limit reached - stopping processing');
-          break;
+            Logger.log('⏰ Execution time limit reached.');
+            break;
         }
-        
         var file = filesToProcessNow[i];
         var result = ns.processFileFromReport(file, accessToken);
-        
-        if (result === 'processed') {
-          stats.filesProcessed++;
-          checkpoint.processedFileIds.add(file.id);
-        } else if (result === 'skipped') {
-          stats.filesSkipped++;
-          checkpoint.processedFileIds.add(file.id); // Don't reprocess skipped files
-        } else {
-          stats.filesErrored++;
-          // Don't add to processed set - will retry next time
-        }
-        
-        checkpoint.processingPosition++;
-        
-        // Brief pause between files
-        if (i < filesToProcessNow.length - 1) {
-          Utilities.sleep(500);
-        }
-      }
-      
-      // Step 7: Update checkpoint with progress
-      Config.SCRIPT_PROPERTIES.setProperty(REPORT_PROCESSING_CHECKPOINT, JSON.stringify({
-        ...checkpoint,
-        processedFileIds: Array.from(checkpoint.processedFileIds)
-      }));
-      
-      // Step 8: Calculate completion percentage
-      var totalProcessed = checkpoint.processedFileIds.size;
-      var completionPercentage = Math.round((totalProcessed / allReportFiles.length) * 100);
-      
-      stats.executionTimeMs = Date.now() - startTime;
-      
-      Logger.log('📊 === Processing Batch Complete ===');
-      Logger.log('✅ Processed: ' + stats.filesProcessed + ' files');
-      Logger.log('⏭️ Skipped: ' + stats.filesSkipped + ' files');
-      Logger.log('❌ Errors: ' + stats.filesErrored + ' files');
-      Logger.log('📈 Overall Progress: ' + totalProcessed + '/' + allReportFiles.length + ' (' + completionPercentage + '%)');
-      Logger.log('⏱️ Execution time: ' + (stats.executionTimeMs / 1000).toFixed(1) + 's');
-      
-      if (completionPercentage === 100) {
-        Logger.log('🎉 🐕 BOXER HAS FINISHED PROCESSING THE ENTIRE REPORT! 🎉');
-      } else {
-        var remaining = allReportFiles.length - totalProcessed;
-        var estimatedRuns = Math.ceil(remaining / BATCH_SIZE);
-        Logger.log('🔄 Estimated ' + estimatedRuns + ' more runs needed to complete report');
-      }
-      
-      // Save processing stats
-      ns.saveProcessingStats(stats);
-      
-      return stats;
-      
-    } catch (error) {
-      stats.executionTimeMs = Date.now() - startTime;
-      Logger.log('❌ Critical error in report processing: ' + error.toString());
-      console.error('Report processing error:', error);
-      return stats;
+        checkpoint.processedFileIds.push(file.id);
+        if (result === 'processed') stats.filesProcessed++;
+        else if (result === 'skipped') stats.filesSkipped++;
+        else stats.filesErrored++;
     }
-  };
-  
+    
+    Config.SCRIPT_PROPERTIES.setProperty(REPORT_PROCESSING_CHECKPOINT, JSON.stringify(checkpoint));
+    stats.executionTimeMs = Date.now() - startTime;
+    Logger.log('📊 === Processing Batch Complete ===');
+    Logger.log(`✅ Processed: ${stats.filesProcessed}, ⏭️ Skipped: ${stats.filesSkipped}, ❌ Errors: ${stats.filesErrored}`);
+    return stats;
+    
+  } catch (error) {
+    Logger.log(`❌ Critical error in report processing: ${error.toString()}`);
+    return stats;
+  }
+};
+
   /**
    * Process a single file from the report
    * @param {object} file File object from report
@@ -632,6 +570,74 @@ var BoxReportManager = (function() {
   
   return ns;
 })();
+/**
+ * A temporary diagnostic function to inspect the headers and data of the cached Box report.
+ * This will help us understand exactly how to parse the 'Path ID' column.
+ */
+function debugReportHeaders() {
+  try {
+    Logger.log('--- Starting Report Header and Data Diagnostic ---');
+    
+    // Get the ID of the cached report file from the checkpoint
+    var checkpointStr = PropertiesService.getScriptProperties().getProperty('BOXER_REPORT_CHECKPOINT');
+    if (!checkpointStr) {
+      Logger.log('ERROR: No report checkpoint found. Please run the main processing script once to generate it.');
+      return;
+    }
+    var checkpoint = JSON.parse(checkpointStr);
+    var driveFileId = checkpoint.driveFileId;
+    if (!driveFileId) {
+      Logger.log('ERROR: Checkpoint found, but it does not contain a Google Drive file ID for the cached report.');
+      return;
+    }
+    
+    Logger.log('Reading cached report from Google Drive file ID: ' + driveFileId);
+    var driveFile = DriveApp.getFileById(driveFileId);
+    var reportContent = driveFile.getBlob().getDataAsString();
+    
+    // Get the first 5 lines to show the raw text
+    var lines = reportContent.split('\n').slice(0, 5);
+    
+    Logger.log('\n--- First 5 Lines of Raw Report Text ---');
+    lines.forEach((line, index) => {
+      Logger.log(`Line ${index + 1}: ${line}`);
+    });
+    Logger.log('-------------------------------------------\n');
+    
+    // Parse the entire CSV to inspect how Apps Script sees the headers
+    var csvData = Utilities.parseCsv(reportContent);
+    
+    var headers = csvData[0];
+    Logger.log('--- Parsed Headers (as seen by the script) ---');
+    headers.forEach((header, index) => {
+      Logger.log(`Header[${index}]: "${header}"`);
+    });
+    Logger.log('-----------------------------------------------\n');
+    
+    // Find the "Path ID" column and log its index and content for a few rows
+    var pathIdIndex = -1;
+    headers.forEach((h, i) => {
+        if(h.trim() === 'Path ID') {
+            pathIdIndex = i;
+        }
+    });
+    
+    if (pathIdIndex === -1) {
+      Logger.log('>>> CRITICAL ERROR: Could not find a header exactly named "Path ID". This is the root cause of the problem.');
+    } else {
+      Logger.log(`>>> SUCCESS: Found "Path ID" header at column index: ${pathIdIndex}`);
+      Logger.log('\n--- Sample "Path ID" Data from First 5 Rows ---');
+      for (let i = 1; i < Math.min(6, csvData.length); i++) {
+        Logger.log(`Row ${i + 1} Path ID: "${csvData[i][pathIdIndex]}"`);
+      }
+      Logger.log('--------------------------------------------------');
+    }
+    
+  } catch (e) {
+    Logger.log('An error occurred during the diagnostic: ' + e.toString());
+    Logger.log('Stack: ' + e.stack);
+  }
+}
 
 // Convenience functions for easy access
 function runBoxReportProcessing() {
@@ -644,4 +650,69 @@ function showBoxerStats() {
 
 function resetBoxerCheckpoint() {
   return BoxReportManager.resetProcessingCheckpoint();
+}
+/**
+ * Reads the ACTIVE_TEST_FOLDER_ID from Config.js, resolves it to a full
+ * path name via the Box API, and logs the result.
+ */
+function logResolvedTestFolderPath() {
+  try {
+    Logger.log('--- Starting Test Folder Path Resolution ---');
+
+    // 1. Get Access Token
+    var accessToken = getValidAccessToken();
+    if (!accessToken) {
+      Logger.log('ERROR: Could not get a valid access token. Please ensure Box authentication is complete.');
+      return;
+    }
+    Logger.log('Successfully retrieved access token.');
+
+    // 2. Get the Folder ID from your Config.js file
+    var testFolderId = Config.ACTIVE_TEST_FOLDER_ID;
+    if (!testFolderId || testFolderId === '0') {
+      Logger.log('No active test folder ID is set in Config.js.');
+      return;
+    }
+    Logger.log('Attempting to resolve ID from Config.js: "' + testFolderId + '"');
+
+    // 3. Make API call to get folder details
+    var folderDetailsUrl = Config.BOX_API_BASE_URL + '/folders/' + testFolderId + '?fields=name,path_collection';
+    Logger.log('Requesting URL: ' + folderDetailsUrl);
+
+    var response = UrlFetchApp.fetch(folderDetailsUrl, {
+      headers: { 'Authorization': 'Bearer ' + accessToken },
+      muteHttpExceptions: true
+    });
+
+    var responseCode = response.getResponseCode();
+    var responseText = response.getContentText();
+
+    Logger.log('API Response Code: ' + responseCode);
+
+    // 4. Parse response and construct path
+    if (responseCode === 200) {
+      var folderDetails = JSON.parse(responseText);
+      var folderName = folderDetails.name;
+      
+      // The path_collection contains all parent folders. We join their names.
+      var parentPath = folderDetails.path_collection.entries.map(p => p.name).join('/');
+      
+      // The full path is the path of the parents plus the folder's own name.
+      var fullPath = parentPath ? (parentPath + '/' + folderName) : folderName;
+
+      Logger.log('--- S U C C E S S ---');
+      Logger.log('Resolved Path String: "' + fullPath + '"');
+      Logger.log('-----------------------');
+      Logger.log('The script will use this exact string to match against the "Path" column from your report.');
+
+    } else {
+      Logger.log('--- F A I L U R E ---');
+      Logger.log('Could not resolve the folder ID. The API returned an error.');
+      Logger.log('Response: ' + responseText);
+      Logger.log('-----------------------');
+    }
+
+  } catch (e) {
+    Logger.log('An unexpected error occurred: ' + e.toString());
+  }
 }
