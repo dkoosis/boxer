@@ -289,7 +289,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
 
     if (imageSize > Config.MAX_VISION_API_FILE_SIZE_BYTES) {
       const sizeMB = Math.round(imageSize / (1024 * 1024) * 10) / 10;
-      Logger.log(`  Image <span class="math-inline">\{fileDisplayName\} too large for Vision API \(</span>{sizeMB}MB)`);
+      Logger.log(`  Image ${fileDisplayName} too large for Vision API ${sizeMB}MB)`);
       return { error: 'FILE_TOO_LARGE', sizeMB: sizeMB, message: `File ${fileDisplayName} size ${sizeMB}MB exceeds Vision API limit.` };
     }
 

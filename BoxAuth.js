@@ -4,15 +4,7 @@
 
 /**
  * Creates and stores the Box package for cGoa using existing credentials from Script Properties.
- * Uses Bruce McPherson's cGoa library for robust OAuth2 handling.
- * @returns {object} The created Box package configuration
- */
-// In BoxAuth.js
-
-/**
- * Creates and stores the Box package for cGoa using existing credentials from Script Properties.
- * It now sources its service endpoint URLs from the global OAuthServices.pockage.
- * Uses Bruce McPherson's cGoa library for robust OAuth2 handling.
+ * It sources its service endpoint URLs from the global OAuthServices.pockage.
  * @returns {object} The created Box package configuration
  */
 function createBoxPackage() {
@@ -20,6 +12,7 @@ function createBoxPackage() {
   const clientSecret = Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_SECRET_PROPERTY);
 
   if (!clientId || !clientSecret) {
+    // TODO: assess whether to proactively check for good values at start of program
     throw new Error('Box credentials not found in Script Properties. Please set ' +
                    Config.OAUTH_CLIENT_ID_PROPERTY + ' and ' + Config.OAUTH_CLIENT_SECRET_PROPERTY);
   }
