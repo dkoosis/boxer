@@ -930,3 +930,313 @@ function test_boxer_basic() {
     return { success: false, error: error.toString() };
   }
 }
+/**
+ * DEBUG: Check what Google Apps Script thinks about deployment
+ */
+function debugDeployment() {
+  Logger.log('=== 🔍 Deployment Debug ===');
+  
+  try {
+    // Method 1: ScriptApp.getService().getUrl()
+    let webAppUrl;
+    try {
+      webAppUrl = ScriptApp.getService().getUrl();
+      Logger.log('📍 ScriptApp.getService().getUrl(): ' + (webAppUrl || 'null/undefined'));
+    } catch (e) {
+      Logger.log('❌ ScriptApp.getService().getUrl() failed: ' + e.toString());
+    }
+    
+    // Method 2: Check script ID
+    try {
+      const scriptId = ScriptApp.getScriptId();
+      Logger.log('📋 Script ID: ' + scriptId);
+      
+      // Construct what the URL should be
+      const expectedUrl = 'https://script.google.com/macros/s/' + scriptId + '/exec';
+      Logger.log('📍 Expected URL format: ' + expectedUrl);
+    } catch (e) {
+      Logger.log('❌ Could not get script ID: ' + e.toString());
+    }
+    
+    // Method 3: Check execution context
+    Logger.log('🔍 Execution context checks:');
+    Logger.log('   - typeof ScriptApp: ' + typeof ScriptApp);
+    Logger.log('   - typeof ScriptApp.getService: ' + typeof ScriptApp.getService);
+    
+    if (typeof ScriptApp.getService === 'function') {
+      try {
+        const service = ScriptApp.getService();
+        Logger.log('   - Service object: ' + (service ? 'exists' : 'null'));
+        Logger.log('   - typeof service.getUrl: ' + typeof (service ? service.getUrl : 'undefined'));
+      } catch (e) {
+        Logger.log('   - Service error: ' + e.toString());
+      }
+    }
+    
+  } catch (error) {
+    Logger.log('❌ Debug failed: ' + error.toString());
+  }
+}
+
+/**
+ * MANUAL: Set up with known deployment URL
+ * Use this if auto-detection isn't working
+ */
+function setupWithKnownUrl() {
+  Logger.log('=== 🔧 Manual Setup with Known URL ===');
+  
+  // Your actual deployed URL
+  const knownDeployedUrl = 'https://script.google.com/macros/s/AKfycbzi5i7r-wtnMeLAiDIPVqM6VaIR_B45DRrvqS82SUYQoypsGj15eGDI8D50Z50ttHm2/exec';
+  
+  Logger.log('📍 Using known deployed URL: ' + knownDeployedUrl);
+  
+  // Check credentials first
+  const properties = Config.SCRIPT_PROPERTIES;
+  const clientId = properties.getProperty('BOX_OAUTH_CLIENT_ID');
+  const clientSecret = properties.getProperty('BOX_OAUTH_CLIENT_SECRET');
+  
+  if (!clientId || !clientSecret) {
+    Logger.log('❌ Box credentials missing');
+    return;
+  }
+  
+  Logger.log('✅ Credentials verified');
+  
+  try {
+    // Clear old cGoa data
+    const existingKeys = properties.getKeys();
+    let clearedCount = 0;
+    
+    existingKeys.forEach(function(key) {
+      if (key.includes('EzyOauth2') || 
+          key.startsWith('cGoa') || 
+          key.includes('GoaApp') ||
+          (key.includes('boxService') && !key.includes('CLIENT'))) {
+        properties.deleteProperty(key);
+        clearedCount++;
+      }
+    });
+    
+    Logger.log('🗑️ Cleared ' + clearedCount + ' old cGoa properties');
+    
+    // Calculate redirect URI
+    const redirectUri = knownDeployedUrl.replace('/exec', '/usercallback');
+    Logger.log('📍 Redirect URI: ' + redirectUri);
+    
+    // Create Box package manually
+    const boxServiceEndpoints = OAuthServices.pockage.box;
+    
+    const boxPackage = {
+      clientId: clientId,
+      clientSecret: clientSecret,
+      scopes: ["root_readwrite", "manage_enterprise_properties"],
+      service: 'custom',
+      packageName: 'boxService',
+      redirectUri: redirectUri,  // Explicitly set the redirect URI
+      serviceParameters: {
+        authUrl: boxServiceEndpoints.authUrl,
+        tokenUrl: boxServiceEndpoints.tokenUrl,
+        refreshUrl: boxServiceEndpoints.refreshUrl
+      }
+    };
+    
+    cGoa.GoaApp.setPackage(Config.SCRIPT_PROPERTIES, boxPackage);
+    
+    Logger.log('✅ Box package created with manual URL');
+    Logger.log('');
+    Logger.log('🔧 NEXT STEPS:');
+    Logger.log('   1. Go to Box Developer Console');
+    Logger.log('   2. Set redirect URI to: ' + redirectUri);
+    Logger.log('   3. Visit: ' + knownDeployedUrl);
+    Logger.log('   4. Complete authorization');
+    
+  } catch (error) {
+    Logger.log('❌ Manual setup failed: ' + error.toString());
+  }
+}
+
+/**
+ * VERIFY: Check if the manual setup worked
+ */
+function verifyManualSetup() {
+  Logger.log('=== 🔍 Verify Manual Setup ===');
+  
+  try {
+    const goa = getBoxGoa();
+    const packageInfo = goa.getPackage();
+    
+    Logger.log('📦 Package info:');
+    Logger.log('   - Service: ' + (packageInfo.service || 'not set'));
+    Logger.log('   - Client ID: ' + (packageInfo.clientId ? packageInfo.clientId.substring(0,10) + '...' : 'not set'));
+    Logger.log('   - Redirect URI: ' + (packageInfo.redirectUri || 'not set'));
+    Logger.log('   - Has token: ' + goa.hasToken());
+    Logger.log('   - Needs consent: ' + goa.needsConsent());
+    
+    if (packageInfo.redirectUri) {
+      Logger.log('');
+      Logger.log('🎯 READY! Visit this URL to authorize:');
+      Logger.log('   https://script.google.com/macros/s/AKfycbzi5i7r-wtnMeLAiDIPVqM6VaIR_B45DRrvqS82SUYQoypsGj15eGDI8D50Z50ttHm2/exec');
+      Logger.log('');
+      Logger.log('📋 Make sure Box redirect URI is set to:');
+      Logger.log('   ' + packageInfo.redirectUri);
+    }
+    
+  } catch (error) {
+    Logger.log('❌ Verification failed: ' + error.toString());
+  }
+}
+/**
+ * DEBUG: Check what Google Apps Script thinks about deployment
+ */
+function debugDeployment() {
+  Logger.log('=== 🔍 Deployment Debug ===');
+  
+  try {
+    // Method 1: ScriptApp.getService().getUrl()
+    let webAppUrl;
+    try {
+      webAppUrl = ScriptApp.getService().getUrl();
+      Logger.log('📍 ScriptApp.getService().getUrl(): ' + (webAppUrl || 'null/undefined'));
+    } catch (e) {
+      Logger.log('❌ ScriptApp.getService().getUrl() failed: ' + e.toString());
+    }
+    
+    // Method 2: Check script ID
+    try {
+      const scriptId = ScriptApp.getScriptId();
+      Logger.log('📋 Script ID: ' + scriptId);
+      
+      // Construct what the URL should be
+      const expectedUrl = 'https://script.google.com/macros/s/' + scriptId + '/exec';
+      Logger.log('📍 Expected URL format: ' + expectedUrl);
+    } catch (e) {
+      Logger.log('❌ Could not get script ID: ' + e.toString());
+    }
+    
+    // Method 3: Check execution context
+    Logger.log('🔍 Execution context checks:');
+    Logger.log('   - typeof ScriptApp: ' + typeof ScriptApp);
+    Logger.log('   - typeof ScriptApp.getService: ' + typeof ScriptApp.getService);
+    
+    if (typeof ScriptApp.getService === 'function') {
+      try {
+        const service = ScriptApp.getService();
+        Logger.log('   - Service object: ' + (service ? 'exists' : 'null'));
+        Logger.log('   - typeof service.getUrl: ' + typeof (service ? service.getUrl : 'undefined'));
+      } catch (e) {
+        Logger.log('   - Service error: ' + e.toString());
+      }
+    }
+    
+  } catch (error) {
+    Logger.log('❌ Debug failed: ' + error.toString());
+  }
+}
+
+/**
+ * MANUAL: Set up with known deployment URL
+ * Use this if auto-detection isn't working
+ */
+function setupWithKnownUrl() {
+  Logger.log('=== 🔧 Manual Setup with Known URL ===');
+  
+  // Your actual deployed URL
+  const knownDeployedUrl = 'https://script.google.com/macros/s/AKfycbzi5i7r-wtnMeLAiDIPVqM6VaIR_B45DRrvqS82SUYQoypsGj15eGDI8D50Z50ttHm2/exec';
+  
+  Logger.log('📍 Using known deployed URL: ' + knownDeployedUrl);
+  
+  // Check credentials first
+  const properties = Config.SCRIPT_PROPERTIES;
+  const clientId = properties.getProperty('BOX_OAUTH_CLIENT_ID');
+  const clientSecret = properties.getProperty('BOX_OAUTH_CLIENT_SECRET');
+  
+  if (!clientId || !clientSecret) {
+    Logger.log('❌ Box credentials missing');
+    return;
+  }
+  
+  Logger.log('✅ Credentials verified');
+  
+  try {
+    // Clear old cGoa data
+    const existingKeys = properties.getKeys();
+    let clearedCount = 0;
+    
+    existingKeys.forEach(function(key) {
+      if (key.includes('EzyOauth2') || 
+          key.startsWith('cGoa') || 
+          key.includes('GoaApp') ||
+          (key.includes('boxService') && !key.includes('CLIENT'))) {
+        properties.deleteProperty(key);
+        clearedCount++;
+      }
+    });
+    
+    Logger.log('🗑️ Cleared ' + clearedCount + ' old cGoa properties');
+    
+    // Calculate redirect URI
+    const redirectUri = knownDeployedUrl.replace('/exec', '/usercallback');
+    Logger.log('📍 Redirect URI: ' + redirectUri);
+    
+    // Create Box package manually
+    const boxServiceEndpoints = OAuthServices.pockage.box;
+    
+    const boxPackage = {
+      clientId: clientId,
+      clientSecret: clientSecret,
+      scopes: ["root_readwrite", "manage_enterprise_properties"],
+      service: 'custom',
+      packageName: 'boxService',
+      redirectUri: redirectUri,  // Explicitly set the redirect URI
+      serviceParameters: {
+        authUrl: boxServiceEndpoints.authUrl,
+        tokenUrl: boxServiceEndpoints.tokenUrl,
+        refreshUrl: boxServiceEndpoints.refreshUrl
+      }
+    };
+    
+    cGoa.GoaApp.setPackage(Config.SCRIPT_PROPERTIES, boxPackage);
+    
+    Logger.log('✅ Box package created with manual URL');
+    Logger.log('');
+    Logger.log('🔧 NEXT STEPS:');
+    Logger.log('   1. Go to Box Developer Console');
+    Logger.log('   2. Set redirect URI to: ' + redirectUri);
+    Logger.log('   3. Visit: ' + knownDeployedUrl);
+    Logger.log('   4. Complete authorization');
+    
+  } catch (error) {
+    Logger.log('❌ Manual setup failed: ' + error.toString());
+  }
+}
+
+/**
+ * VERIFY: Check if the manual setup worked
+ */
+function verifyManualSetup() {
+  Logger.log('=== 🔍 Verify Manual Setup ===');
+  
+  try {
+    const goa = getBoxGoa();
+    const packageInfo = goa.getPackage();
+    
+    Logger.log('📦 Package info:');
+    Logger.log('   - Service: ' + (packageInfo.service || 'not set'));
+    Logger.log('   - Client ID: ' + (packageInfo.clientId ? packageInfo.clientId.substring(0,10) + '...' : 'not set'));
+    Logger.log('   - Redirect URI: ' + (packageInfo.redirectUri || 'not set'));
+    Logger.log('   - Has token: ' + goa.hasToken());
+    Logger.log('   - Needs consent: ' + goa.needsConsent());
+    
+    if (packageInfo.redirectUri) {
+      Logger.log('');
+      Logger.log('🎯 READY! Visit this URL to authorize:');
+      Logger.log('   https://script.google.com/macros/s/AKfycbzi5i7r-wtnMeLAiDIPVqM6VaIR_B45DRrvqS82SUYQoypsGj15eGDI8D50Z50ttHm2/exec');
+      Logger.log('');
+      Logger.log('📋 Make sure Box redirect URI is set to:');
+      Logger.log('   ' + packageInfo.redirectUri);
+    }
+    
+  } catch (error) {
+    Logger.log('❌ Verification failed: ' + error.toString());
+  }
+}

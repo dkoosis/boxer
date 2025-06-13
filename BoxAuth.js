@@ -1,11 +1,11 @@
 // File: BoxAuth.gs
 // Box Authentication using Bruce McPherson's cGoa library
+// FIXED VERSION - Auto-detects correct redirect URI
 // Depends on: Config.gs, cGoa library (by Bruce McPherson)
 
 /**
  * Creates and stores the Box package for cGoa using existing credentials from Script Properties.
- * It sources its service endpoint URLs from the global OAuthServices.pockage.
- * @returns {object} The created Box package configuration
+ * ENHANCED: Automatically detects the correct redirect URI for deployed web apps.
  */
 function createBoxPackage() {
   const clientId = Config.SCRIPT_PROPERTIES.getProperty(Config.BOX_OAUTH_CLIENT_ID_PROPERTY);
@@ -22,34 +22,47 @@ function createBoxPackage() {
   }
   const boxServiceEndpoints = OAuthServices.pockage.box;
 
+  // AUTO-DETECT the correct redirect URI
+  let redirectUri;
+  try {
+    // Try to get the deployed web app URL
+    redirectUri = ScriptApp.getService().getUrl();
+    if (redirectUri) {
+      // Convert /exec to /usercallback for OAuth
+      redirectUri = redirectUri.replace('/exec', '/usercallback');
+      Logger.log('✅ Auto-detected redirect URI: ' + redirectUri);
+    }
+  } catch (e) {
+    Logger.log('⚠️ Could not auto-detect redirect URI: ' + e.toString());
+  }
+
   const boxPackage = {
     clientId: clientId,
     clientSecret: clientSecret,
     scopes: ["root_readwrite", "manage_enterprise_properties"],
-    service: 'custom', // We keep 'custom' because we are providing all params to cGoa.
-                       // cGoa uses these directly when service is 'custom'.
+    service: 'custom',
     packageName: 'boxService',
-    serviceParameters: { // These URLs are now sourced from OAuthServices.js
+    serviceParameters: {
       authUrl: boxServiceEndpoints.authUrl,
       tokenUrl: boxServiceEndpoints.tokenUrl,
       refreshUrl: boxServiceEndpoints.refreshUrl
-      // If OAuthServices.pockage.box also defined 'basic' or other params cGoa respects
-      // under serviceParameters for a 'custom' type, you could add them here too.
-      // For instance, if 'basic' was relevant:
-      // basic: boxServiceEndpoints.basic
     }
   };
 
+  // Add redirect URI if we detected one
+  if (redirectUri) {
+    boxPackage.redirectUri = redirectUri;
+    Logger.log('📍 Using redirect URI: ' + redirectUri);
+  }
+
   cGoa.GoaApp.setPackage(Config.SCRIPT_PROPERTIES, boxPackage);
-  Logger.log('✅ Box package created using credentials from Script Properties and service URLs from OAuthServices.js');
+  Logger.log('✅ Box package created with auto-detected redirect URI');
 
   return boxPackage;
 }
 
 /**
  * Initialize Box package if it doesn't exist.
- * Call this once to set up the cGoa package with your existing credentials.
- * @returns {boolean} True if successful, false otherwise
  */
 function initializeBoxPackage() {
   try {
@@ -72,24 +85,317 @@ function initializeBoxPackage() {
 
 /**
  * Get a cGoa instance for Box operations.
- * @param {object} e Event parameter (can be undefined for server-side calls)
- * @returns {object} cGoa instance for Box
+ * ENHANCED: Automatically sets correct redirect URI if needed.
  */
 function getBoxGoa(e) {
   initializeBoxPackage();
   
-  return cGoa.make(
+  const goa = cGoa.make(
     'boxService',           
     Config.SCRIPT_PROPERTIES,      
     e                       
   );
+
+  // ENHANCEMENT: Log redirect URI info for debugging
+  if (e && typeof ScriptApp.getService === 'function') {
+    try {
+      const webAppUrl = ScriptApp.getService().getUrl();
+      if (webAppUrl) {
+        const correctRedirectUri = webAppUrl.replace('/exec', '/usercallback');
+        Logger.log('📍 Expected redirect URI: ' + correctRedirectUri);
+        
+        // Note: cGoa handles redirect URI internally, we don't need to set it manually
+        // unless there's a specific issue
+      }
+    } catch (error) {
+      Logger.log('⚠️ Could not check redirect URI: ' + error.toString());
+    }
+  }
+
+  return goa;
+}
+
+/**
+ * OAuth callback handler for initial setup.
+ * ENHANCED: Better error handling and debugging info.
+ */
+/**
+ * OAuth callback handler for initial setup.
+ * FIXED: Forces the correct redirect URI to prevent /d/ vs /s/ issues
+ */
+function doGet(e) {
+  try {
+    Logger.log('🌐 OAuth callback received');
+    Logger.log('📋 Event parameters: ' + JSON.stringify(e.parameter || {}));
+    
+    const goa = getBoxGoa(e);
+    
+    // CRITICAL FIX: Force the correct deployed redirect URI
+    const correctRedirectUri = 'https://script.google.com/macros/s/AKfycbzi5i7r-wtnMeLAiDIPVqM6VaIR_B45DRrvqS82SUYQoypsGj15eGDI8D50Z50ttHm2/usercallback';
+    
+    Logger.log('🔧 Forcing correct redirect URI: ' + correctRedirectUri);
+    
+    // Force the redirect URI (this overrides whatever cGoa auto-detects)
+    try {
+      // Method 1: Try setRedirectUri if it exists
+      if (typeof goa.setRedirectUri === 'function') {
+        goa.setRedirectUri(correctRedirectUri);
+        Logger.log('✅ Set redirect URI via setRedirectUri()');
+      } else {
+        // Method 2: Update the package directly
+        const packageInfo = goa.getPackage();
+        packageInfo.redirectUri = correctRedirectUri;
+        cGoa.GoaApp.setPackage(Config.SCRIPT_PROPERTIES, packageInfo);
+        Logger.log('✅ Set redirect URI via package update');
+        
+        // Get a fresh goa instance with the updated package
+        const updatedGoa = getBoxGoa(e);
+        
+        if (updatedGoa.needsConsent()) {
+          Logger.log('🔐 User consent needed - showing consent screen with correct URI');
+          return updatedGoa.getConsent();
+        }
+        
+        const token = updatedGoa.getToken();
+        
+        if (!updatedGoa.hasToken()) {
+          throw new Error('OAuth flow completed but no token received');
+        }
+        
+        Logger.log('✅ Box authorization successful!');
+        return HtmlService.createHtmlOutput(`
+          <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px;">
+            <h2>✅ Box Authorization Complete!</h2>
+            <p>Your Apps Script now has access to Box.</p>
+            <p><strong>Setup Complete!</strong> You can now:</p>
+            <ul>
+              <li>Close this browser tab</li>
+              <li>Return to Apps Script</li>
+              <li>Undeploy the web app if desired (auth is saved)</li>
+              <li>Your trigger scripts will now work automatically</li>
+            </ul>
+            <p><em>Token preview: ${token.substring(0, 20)}...</em></p>
+            <hr>
+            <small>Powered by <a href="https://github.com/brucemcpherson" target="_blank">Bruce McPherson's cGoa library</a></small>
+          </div>
+        `);
+      }
+    } catch (redirectError) {
+      Logger.log('⚠️ Could not set redirect URI: ' + redirectError.toString());
+    }
+    
+    if (goa.needsConsent()) {
+      Logger.log('🔐 User consent needed - showing consent screen');
+      return goa.getConsent();
+    }
+    
+    const token = goa.getToken();
+    
+    if (!goa.hasToken()) {
+      throw new Error('OAuth flow completed but no token received');
+    }
+    
+    Logger.log('✅ Box authorization successful!');
+    return HtmlService.createHtmlOutput(`
+      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px;">
+        <h2>✅ Box Authorization Complete!</h2>
+        <p>Your Apps Script now has access to Box.</p>
+        <p><strong>Setup Complete!</strong> You can now:</p>
+        <ul>
+          <li>Close this browser tab</li>
+          <li>Return to Apps Script</li>
+          <li>Undeploy the web app if desired (auth is saved)</li>
+          <li>Your trigger scripts will now work automatically</li>
+        </ul>
+        <p><em>Token preview: ${token.substring(0, 20)}...</em></p>
+        <hr>
+        <small>Powered by <a href="https://github.com/brucemcpherson" target="_blank">Bruce McPherson's cGoa library</a></small>
+      </div>
+    `);
+    
+  } catch (error) {
+    Logger.log('❌ Error in OAuth callback: ' + error.toString());
+    return HtmlService.createHtmlOutput(`
+      <div style="font-family: Arial, sans-serif; padding: 20px;">
+        <h2>❌ Authorization Error</h2>
+        <p>Error: ${error.message}</p>
+        <p><strong>Debug Info:</strong></p>
+        <ul>
+          <li>Error: ${error.toString()}</li>
+          <li>Timestamp: ${new Date().toISOString()}</li>
+          <li>Script ID: ${ScriptApp.getScriptId()}</li>
+        </ul>
+        <p>Please check the Apps Script logs and try again.</p>
+        <p><em>Tip: Try visiting this URL in an incognito window.</em></p>
+      </div>
+    `);
+  }
+}
+/**
+ * DIAGNOSTIC: Check what redirect URIs are being used
+ */
+function debugRedirectUris() {
+  Logger.log('=== 🔍 Redirect URI Diagnostic ===');
+  
+  try {
+    // Check what Apps Script thinks the web app URL is
+    const webAppUrl = ScriptApp.getService().getUrl();
+    Logger.log('📍 Apps Script web app URL: ' + webAppUrl);
+    
+    const expectedRedirectUri = webAppUrl ? webAppUrl.replace('/exec', '/usercallback') : 'Could not detect';
+    Logger.log('📍 Expected redirect URI: ' + expectedRedirectUri);
+    
+    // Check what cGoa thinks
+    try {
+      const goa = getBoxGoa();
+      const cgoaRedirectUri = goa.getRedirectUri();
+      Logger.log('📍 cGoa redirect URI: ' + cgoaRedirectUri);
+      
+      const match = expectedRedirectUri === cgoaRedirectUri;
+      Logger.log('🎯 URIs match: ' + (match ? '✅ YES' : '❌ NO'));
+      
+      if (!match) {
+        Logger.log('');
+        Logger.log('🔧 SOLUTION: The redirect URIs don\'t match!');
+        Logger.log('   1. Go to Box Developer Console');
+        Logger.log('   2. Update your app\'s redirect URI to: ' + expectedRedirectUri);
+        Logger.log('   3. Or run fixRedirectUri() to force the correct one');
+      }
+      
+    } catch (error) {
+      Logger.log('❌ Could not get cGoa redirect URI: ' + error.toString());
+    }
+    
+  } catch (error) {
+    Logger.log('❌ Diagnostic failed: ' + error.toString());
+  }
+}
+
+/**
+ * DIAGNOSTIC: Reset the Box package and recreate it
+ */
+function resetBoxPackage() {
+  Logger.log('🔄 Safely resetting Box package (preserving credentials)...');
+  
+  try {
+    // Check deployment first
+    const webAppUrl = ScriptApp.getService().getUrl();
+    
+    if (!webAppUrl || webAppUrl.includes('/dev')) {
+      Logger.log('❌ Cannot reset - need proper web app deployment first');
+      Logger.log('🔧 Deploy as web app first, then run this function');
+      return;
+    }
+    
+    // Only clear cGoa-specific properties, NOT credentials
+    const properties = Config.SCRIPT_PROPERTIES;
+    const existingKeys = properties.getKeys();
+    
+    let clearedCount = 0;
+    existingKeys.forEach(function(key) {
+      // Only clear cGoa/OAuth package data, NOT the credentials themselves
+      if (key.includes('EzyOauth2') || 
+          key.startsWith('cGoa') || 
+          key.includes('GoaApp') ||
+          (key.includes('boxService') && !key.includes('CLIENT'))) {
+        properties.deleteProperty(key);
+        Logger.log('🗑️ Cleared: ' + key);
+        clearedCount++;
+      }
+    });
+    
+    Logger.log('🗑️ Cleared ' + clearedCount + ' cGoa properties (credentials preserved)');
+    
+    // Check that credentials still exist
+    const clientId = properties.getProperty('BOX_OAUTH_CLIENT_ID');
+    const clientSecret = properties.getProperty('BOX_OAUTH_CLIENT_SECRET');
+    
+    if (!clientId || !clientSecret) {
+      Logger.log('❌ Box credentials missing! Add them to Script Properties:');
+      Logger.log('   BOX_OAUTH_CLIENT_ID = [your client ID]');
+      Logger.log('   BOX_OAUTH_CLIENT_SECRET = [your client secret]');
+      return;
+    }
+    
+    Logger.log('✅ Credentials verified');
+    
+    // Recreate the package with correct redirect URI
+    const redirectUri = webAppUrl.replace('/exec', '/usercallback');
+    Logger.log('📍 Creating package with redirect URI: ' + redirectUri);
+    
+    createBoxPackage();
+    
+    Logger.log('✅ Box package safely reset and recreated');
+    Logger.log('');
+    Logger.log('🔧 NEXT STEPS:');
+    Logger.log('   1. Update Box Developer Console redirect URI to: ' + redirectUri);
+    Logger.log('   2. Visit: ' + webAppUrl);
+    Logger.log('   3. Complete authorization');
+    
+  } catch (error) {
+    Logger.log('❌ Safe reset failed: ' + error.toString());
+  }
+}
+
+/**
+ * Quick check - do we have the basic requirements?
+ */
+function checkCredentials() {
+  Logger.log('=== 🔍 Credential Check ===');
+  
+  const properties = Config.SCRIPT_PROPERTIES;
+  const clientId = properties.getProperty('BOX_OAUTH_CLIENT_ID');
+  const clientSecret = properties.getProperty('BOX_OAUTH_CLIENT_SECRET');
+  
+  if (clientId && clientSecret) {
+    Logger.log('✅ Box credentials found');
+    Logger.log('   Client ID: ' + clientId.substring(0, 10) + '...');
+    Logger.log('   Secret: ' + clientSecret.substring(0, 10) + '...');
+    
+    const webAppUrl = ScriptApp.getService().getUrl();
+    if (webAppUrl && !webAppUrl.includes('/dev')) {
+      Logger.log('✅ Web app properly deployed');
+      Logger.log('🎯 Ready to create Box package!');
+      return true;
+    } else {
+      Logger.log('❌ Web app deployment issue');
+      return false;
+    }
+  } else {
+    Logger.log('❌ Missing Box credentials');
+    Logger.log('🔧 Add to Script Properties:');
+    Logger.log('   BOX_OAUTH_CLIENT_ID = [your client ID]');
+    Logger.log('   BOX_OAUTH_CLIENT_SECRET = [your client secret]');
+    return false;
+  }
+}
+
+/**
+ * SIMPLE FIX: Force recreate the Box package
+ * Use this if you're having redirect URI issues
+ */
+function fixBoxPackage() {
+  Logger.log('🔧 Recreating Box package...');
+  
+  try {
+    // Check if we have a proper deployment
+    const webAppUrl = ScriptApp.getService().getUrl();
+    if (!webAppUrl || webAppUrl.includes('/dev')) {
+      Logger.log('❌ Cannot fix - need proper web app deployment first');
+      Logger.log('🔧 Deploy as web app first');
+      return;
+    }
+    
+    // Clear and recreate
+    resetBoxPackage();
+    
+  } catch (error) {
+    Logger.log('❌ Fix failed: ' + error.toString());
+  }
 }
 
 /**
  * Get a valid access token for Box API calls.
- * This is the main function your processing scripts should use.
- * @returns {string} Valid Box access token
- * @throws {Error} If no token available or OAuth not complete
  */
 function getValidAccessToken() {
   try {
@@ -108,7 +414,6 @@ function getValidAccessToken() {
 
 /**
  * Check if Box authentication is ready for automated scripts.
- * @returns {boolean} True if token available, false otherwise
  */
 function isBoxAuthReady() {
   try {
@@ -122,7 +427,6 @@ function isBoxAuthReady() {
 
 /**
  * ONE-TIME SETUP: Initialize Box authentication.
- * Run this once to complete the OAuth2 flow, then you can undeploy the web app.
  */
 function initializeBoxAuth() {
   Logger.log('=== Box Authentication Initialization ===');
@@ -169,59 +473,7 @@ function initializeBoxAuth() {
 }
 
 /**
- * OAuth callback handler for initial setup.
- * This handles the OAuth redirect when you visit the web app URL.
- * @param {object} e Event object from web app request
- * @returns {HtmlOutput} HTML response for the user
- */
-function doGet(e) {
-  try {
-    const goa = getBoxGoa(e);
-    
-    if (goa.needsConsent()) {
-      Logger.log('🔐 User consent needed - showing consent screen');
-      return goa.getConsent();
-    }
-    
-    const token = goa.getToken();
-    
-    if (!goa.hasToken()) {
-      throw new Error('OAuth flow completed but no token received');
-    }
-    
-    Logger.log('✅ Box authorization successful!');
-    return HtmlService.createHtmlOutput(`
-      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px;">
-        <h2>✅ Box Authorization Complete!</h2>
-        <p>Your Apps Script now has access to Box.</p>
-        <p><strong>Setup Complete!</strong> You can now:</p>
-        <ul>
-          <li>Close this browser tab</li>
-          <li>Return to Apps Script</li>
-          <li>Undeploy the web app if desired (auth is saved)</li>
-          <li>Your trigger scripts will now work automatically</li>
-        </ul>
-        <p><em>Token preview: ${token.substring(0, 20)}...</em></p>
-        <hr>
-        <small>Powered by <a href="https://github.com/brucemcpherson" target="_blank">Bruce McPherson's cGoa library</a></small>
-      </div>
-    `);
-    
-  } catch (error) {
-    Logger.log('❌ Error in OAuth callback: ' + error.toString());
-    return HtmlService.createHtmlOutput(`
-      <div style="font-family: Arial, sans-serif; padding: 20px;">
-        <h2>❌ Authorization Error</h2>
-        <p>Error: ${error.message}</p>
-        <p>Please check the Apps Script logs and try again.</p>
-      </div>
-    `);
-  }
-}
-
-/**
  * Test Box API connection with current token.
- * @returns {object} Test result with success status and user info
  */
 function testBoxAccess() {
   try {
@@ -251,7 +503,6 @@ function testBoxAccess() {
 
 /**
  * Get detailed authorization status for debugging.
- * @returns {object} Status object with auth details
  */
 function getAuthStatus() {
   try {
