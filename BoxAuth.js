@@ -8,13 +8,12 @@
  * @returns {object} The created Box package configuration
  */
 function createBoxPackage() {
-  const clientId = Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_ID_PROPERTY);
-  const clientSecret = Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_SECRET_PROPERTY);
+  const clientId = Config.SCRIPT_PROPERTIES.getProperty(Config.BOX_OAUTH_CLIENT_ID_PROPERTY);
+  const clientSecret = Config.SCRIPT_PROPERTIES.getProperty(Config.BOX_OAUTH_CLIENT_SECRET_PROPERTY);
 
   if (!clientId || !clientSecret) {
-    // TODO: assess whether to proactively check for good values at start of program
     throw new Error('Box credentials not found in Script Properties. Please set ' +
-                   Config.OAUTH_CLIENT_ID_PROPERTY + ' and ' + Config.OAUTH_CLIENT_SECRET_PROPERTY);
+                   Config.BOX_OAUTH_CLIENT_ID_PROPERTY + ' and ' + Config.BOX_OAUTH_CLIENT_SECRET_PROPERTY);
   }
 
   // Ensure OAuthServices.pockage and its 'box' definition are available
@@ -263,8 +262,8 @@ function getAuthStatus() {
       hasToken: goa.hasToken(),
       needsConsent: goa.needsConsent(),
       packageExists: !!packageInfo,
-      credentialsSet: !!(Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_ID_PROPERTY) && 
-                        Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_SECRET_PROPERTY))
+      credentialsSet: !!(Config.SCRIPT_PROPERTIES.getProperty(Config.BOX_OAUTH_CLIENT_ID_PROPERTY) && 
+                        Config.SCRIPT_PROPERTIES.getProperty(Config.BOX_OAUTH_CLIENT_SECRET_PROPERTY))
     };
   } catch (error) {
     return {
@@ -272,8 +271,8 @@ function getAuthStatus() {
       hasToken: false,
       needsConsent: true,
       packageExists: false,
-      credentialsSet: !!(Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_ID_PROPERTY) && 
-                        Config.SCRIPT_PROPERTIES.getProperty(Config.OAUTH_CLIENT_SECRET_PROPERTY))
+      credentialsSet: !!(Config.SCRIPT_PROPERTIES.getProperty(Config.BOX_OAUTH_CLIENT_ID_PROPERTY) && 
+                        Config.SCRIPT_PROPERTIES.getProperty(Config.BOX_OAUTH_CLIENT_SECRET_PROPERTY))
     };
   }
 }

@@ -1,4 +1,3 @@
-function myFunction() {
 // File: Diagnostics.js
 // Comprehensive diagnostic, testing, and health check functions for the Boxer system.
 // Merges logic from BoxTests.js, AirtableTestFunctions.js, and BoxerHealthCheck.js
@@ -905,4 +904,29 @@ function validate_airtable() {
 function test_airtable_safely() {
   return Diagnostics.test_airtable_archival_safely();
 }
+function test_boxer_basic() {
+  Logger.log('🧪 === Basic Boxer Test ===');
+  
+  try {
+    // Test basic health check
+    var health_ok = basicHealthCheck_();
+    Logger.log('Health check: ' + (health_ok ? '✅' : '❌'));
+    
+    // Test Box auth if available
+    if (typeof getValidAccessToken === 'function') {
+      try {
+        var token = getValidAccessToken();
+        Logger.log('Box auth: ' + (token ? '✅' : '❌'));
+      } catch (e) {
+        Logger.log('Box auth: ❌ (' + e.toString() + ')');
+      }
+    }
+    
+    Logger.log('🎉 Basic test complete');
+    return { success: true, health_ok: health_ok };
+    
+  } catch (error) {
+    Logger.log('❌ Basic test failed: ' + error.toString());
+    return { success: false, error: error.toString() };
+  }
 }

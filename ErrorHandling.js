@@ -18,13 +18,20 @@ var ErrorHandler = (function() {
    * @private
    */
   function createErrorObject_(error, functionName, context) {
+    var buildNumber = 'unknown';
+    try {
+      buildNumber = Config.getCurrentBuild();
+    } catch (e) {
+      // Config might not be available
+    }
+    
     return {
       timestamp: new Date().toISOString(),
       functionName: functionName || 'unknown_function',
-      errorMessage: error.message || 'No message',
+      errorMessage: error.message || error.toString() || 'No message',
       stackTrace: error.stack || 'No stack trace',
-      context: JSON.stringify(context) || '{}',
-      buildNumber: Config.getCurrentBuild()
+      context: JSON.stringify(context || {}) || '{}',
+      buildNumber: buildNumber
     };
   }
   
@@ -35,11 +42,16 @@ var ErrorHandler = (function() {
    * @param {object} context Additional context.
    */
   ns.logError = function(error, functionName, context) {
-    const errorObject = createErrorObject_(error, functionName, context);
-    
-    Logger.log(`❌ ERROR in ${errorObject.functionName}: ${errorObject.errorMessage}`);
-    Logger.log(`   Context: ${errorObject.context}`);
-    Logger.log(`   Stack: ${errorObject.stackTrace}`);
+    try {
+      const errorObject = createErrorObject_(error, functionName, context);
+      
+      Logger.log(`❌ ERROR in ${errorObject.functionName}: ${errorObject.errorMessage}`);
+      Logger.log(`   Context: ${errorObject.context}`);
+      Logger.log(`   Stack: ${errorObject.stackTrace}`);
+    } catch (e) {
+      // If we can't even log, just try basic logging
+      Logger.log('❌ ERROR: ' + (error ? error.toString() : 'Unknown error'));
+    }
   };
   
   /**
@@ -49,16 +61,22 @@ var ErrorHandler = (function() {
    * @param {object} context Additional context.
    */
   ns.reportError = function(error, functionName, context) {
-    // Also log it to the standard logger
+    // Always log it to the standard logger first
     ns.logError(error, functionName, context);
     
     try {
+      // Check if Config is available and has the required properties
+      if (typeof Config === 'undefined' || !Config.TRACKING_SHEET_ID) {
+        Logger.log('⚠️ No Google Sheet configured for error tracking - using log only');
+        return;
+      }
+      
       const errorObject = createErrorObject_(error, functionName, context);
       
-      const sheet = SpreadsheetApp.openById(Config.TRACKING_SHEET_ID).getSheetByName(Config.ERROR_LOG_SHEET_NAME);
+      const sheet = SpreadsheetApp.openById(Config.TRACKING_SHEET_ID).getSheetByName(Config.ERROR_LOG_SHEET_NAME || 'Error_Log');
       
       if (!sheet) {
-        Logger.log(`ERROR: Could not find error log sheet: ${Config.ERROR_LOG_SHEET_NAME}`);
+        Logger.log(`⚠️ Could not find error log sheet: ${Config.ERROR_LOG_SHEET_NAME || 'Error_Log'}`);
         return;
       }
       
@@ -72,8 +90,11 @@ var ErrorHandler = (function() {
         errorObject.buildNumber
       ]);
       
+      Logger.log('📊 Error logged to tracking sheet');
+      
     } catch (e) {
-      Logger.log(`CRITICAL: Failed to report error to Google Sheet: ${e.toString()}`);
+      Logger.log(`⚠️ Failed to report error to Google Sheet: ${e.toString()}`);
+      // Don't throw here - we don't want error reporting to break the main flow
     }
   };
 
@@ -88,29 +109,36 @@ var ErrorHandler = (function() {
     ns.reportError(error, functionName, context);
     
     try {
+      // Check if Config and email are available
+      if (typeof Config === 'undefined' || !Config.CENTRAL_ERROR_EMAIL) {
+        Logger.log('⚠️ No email configured for critical error notifications');
+        return;
+      }
+      
       const errorObject = createErrorObject_(error, functionName, context);
       const email = Config.CENTRAL_ERROR_EMAIL;
 
-      if (email) {
-        const subject = `Boxer Critical Error: ${errorObject.functionName}`;
-        const body = `
-          A critical error occurred in the Boxer script.
+      const subject = `Boxer Critical Error: ${errorObject.functionName}`;
+      const body = `
+        A critical error occurred in the Boxer script.
 
-          Timestamp: ${errorObject.timestamp}
-          Function: ${errorObject.functionName}
-          Error: ${errorObject.errorMessage}
-          
-          Context:
-          ${errorObject.context}
-          
-          Stack Trace:
-          ${errorObject.stackTrace}
-        `;
+        Timestamp: ${errorObject.timestamp}
+        Function: ${errorObject.functionName}
+        Error: ${errorObject.errorMessage}
         
-        MailApp.sendEmail(email, subject, body);
-      }
+        Context:
+        ${errorObject.context}
+        
+        Stack Trace:
+        ${errorObject.stackTrace}
+      `;
+      
+      MailApp.sendEmail(email, subject, body);
+      Logger.log('📧 Critical error notification sent');
+      
     } catch (e) {
-      Logger.log(`CRITICAL: Failed to send error notification email: ${e.toString()}`);
+      Logger.log(`⚠️ Failed to send error notification email: ${e.toString()}`);
+      // Don't throw here - we don't want email sending to break the main flow
     }
   };
 
