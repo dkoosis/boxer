@@ -31,17 +31,22 @@ function getBoxService() {
 
 /**
  * OAuth callback handler
+ * NOTE: This function now uses an HTML file for the output.
+ * Please ensure you have created "AuthSuccess.html" in your project.
  */
 function doGet(e) {
+  // This function is still useful for testing the deployed web app URL.
   return HtmlService.createHtmlOutput(
     isBoxAuthReady() ? 
-    'Box authorization already complete. You can close this window.' :
-    'Visit the authorization URL to complete setup.'
+    'Box authorization is already complete. You can close this window.' :
+    'This is the Boxer authorization endpoint. Please follow the authorization URL from the script logs to complete setup.'
   );
 }
 
 /**
- * Handle the OAuth callback
+ * Handle the OAuth callback.
+ * NOTE: This function now uses HTML files for output.
+ * Please ensure you have created "AuthSuccess.html" and "AuthFailure.html".
  */
 function authCallback(request) {
   const service = getBoxService();
@@ -67,20 +72,9 @@ function authCallback(request) {
       Logger.log(`Could not auto-detect enterprise ID: ${e.toString()}`);
     }
     
-    return HtmlService.createHtmlOutput(`
-      <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px;">
-        <h2>✅ Box Authorization Complete!</h2>
-        <p>Your Apps Script now has access to Box.</p>
-        <p>You can close this window and return to Apps Script.</p>
-      </div>
-    `);
+    return HtmlService.createHtmlOutputFromFile('AuthSuccess');
   } else {
-    return HtmlService.createHtmlOutput(`
-      <div style="font-family: Arial, sans-serif; padding: 20px;">
-        <h2>❌ Authorization Failed</h2>
-        <p>Box authorization was denied or failed.</p>
-      </div>
-    `);
+    return HtmlService.createHtmlOutputFromFile('AuthFailure');
   }
 }
 
