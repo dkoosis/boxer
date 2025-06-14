@@ -8,9 +8,7 @@ const AirtableManager = (function() {
   const ns = {};
   
   // Configuration
-  const BATCH_SIZE = 5;
   const MAX_FILE_SIZE_MB = 50;
-  const RATE_LIMIT_MS = 2000;
   const STATS_KEY = 'AIRTABLE_STATS';
   
   /**
@@ -81,6 +79,8 @@ const AirtableManager = (function() {
    * @param {string} boxToken A valid Box access token
    */
   ns.archiveTable = function(config, apiKey, boxToken) {
+    const BATCH_SIZE = ConfigManager.getProperty('AIRTABLE_PROCESSING_BATCH_SIZE');
+    const RATE_LIMIT_MS = ConfigManager.getProperty('AIRTABLE_SLEEP_DELAY_MS');
     const startTime = Date.now();
     Logger.log(`📦 === Archiving ${config.tableName} ===`);
     
