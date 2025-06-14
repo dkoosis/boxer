@@ -290,79 +290,104 @@ const ExifProcessor = (function() {
     }
   }
 
+  // --- Start: Refactored Helper Functions for Value Parsing ---
+
   /**
-   * Parse tag value based on type
+   * Parses an ASCII string from data.
+   * @private
+   */
+  function _parseAsciiValue(data, offset, count) {
+    let str = '';
+    for (let i = 0; i < count; i++) {
+      const charCode = data[offset + i];
+      if (charCode === 0) break;
+      str += String.fromCharCode(charCode);
+    }
+    return str;
+  }
+
+  /**
+   * Parses a RATIONAL (numerator/denominator) value.
+   * @private
+   */
+  function _parseRationalValue(data, offset, isLittleEndian) {
+    const numerator = _parseLongValue(data, offset, isLittleEndian);
+    const denominator = _parseLongValue(data, offset + 4, isLittleEndian);
+    return denominator !== 0 ? numerator / denominator : 0;
+  }
+
+  /**
+   * Parses a SHORT (2-byte) integer.
+   * @private
+   */
+  function _parseShortValue(data, offset, isLittleEndian) {
+    return isLittleEndian
+      ? (data[offset] | (data[offset + 1] << 8))
+      : ((data[offset] << 8) | data[offset + 1]);
+  }
+
+  /**
+   * Parses a LONG (4-byte) integer.
+   * @private
+   */
+  function _parseLongValue(data, offset, isLittleEndian) {
+    return isLittleEndian
+      ? (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24))
+      : ((data[offset] << 24) | (data[offset + 1] << 16) | (data[offset + 2] << 8) | data[offset + 3]);
+  }
+
+  /**
+   * Parse tag value based on type. Delegates to smaller helper functions.
    * @private
    */
   function parseTagValue_(data, type, count, valueOffset, isLittleEndian) {
     try {
       const typeSize = TYPE_SIZES[type] || 1;
       const totalSize = typeSize * count;
-      
-      // If value fits in 4 bytes, it's stored directly
-      if (totalSize <= 4) {
-        if (type === EXIF_TYPES.ASCII) {
-          let str = '';
-          for (let i = 0; i < Math.min(count, 4); i++) {
-            const charCode = data[valueOffset + i];
-            if (charCode === 0) break;
-            str += String.fromCharCode(charCode);
-          }
-          return str;
-        } else if (type === EXIF_TYPES.SHORT) {
-          return isLittleEndian ?
-            (data[valueOffset] | (data[valueOffset + 1] << 8)) :
-            ((data[valueOffset] << 8) | data[valueOffset + 1]);
-        } else if (type === EXIF_TYPES.LONG) {
-          return isLittleEndian ?
-            (data[valueOffset] | (data[valueOffset + 1] << 8) | 
-             (data[valueOffset + 2] << 16) | (data[valueOffset + 3] << 24)) :
-            ((data[valueOffset] << 24) | (data[valueOffset + 1] << 16) | 
-             (data[valueOffset + 2] << 8) | data[valueOffset + 3]);
-        } else {
-          return data[valueOffset];
-        }
-      } else {
-        // Value is stored at offset
-        const actualOffset = isLittleEndian ?
-          (data[valueOffset] | (data[valueOffset + 1] << 8) | 
-           (data[valueOffset + 2] << 16) | (data[valueOffset + 3] << 24)) :
-          ((data[valueOffset] << 24) | (data[valueOffset + 1] << 16) | 
-           (data[valueOffset + 2] << 8) | data[valueOffset + 3]);
-        
-        if (actualOffset + totalSize > data.length) return null;
-        
-        if (type === EXIF_TYPES.ASCII) {
-          let str = '';
-          for (let i = 0; i < count; i++) {
-            const charCode = data[actualOffset + i];
-            if (charCode === 0) break;
-            str += String.fromCharCode(charCode);
-          }
-          return str;
-        } else if (type === EXIF_TYPES.RATIONAL) {
-          const numerator = isLittleEndian ?
-            (data[actualOffset] | (data[actualOffset + 1] << 8) | 
-             (data[actualOffset + 2] << 16) | (data[actualOffset + 3] << 24)) :
-            ((data[actualOffset] << 24) | (data[actualOffset + 1] << 16) | 
-             (data[actualOffset + 2] << 8) | data[actualOffset + 3]);
-          
-          const denominator = isLittleEndian ?
-            (data[actualOffset + 4] | (data[actualOffset + 5] << 8) | 
-             (data[actualOffset + 6] << 16) | (data[actualOffset + 7] << 24)) :
-            ((data[actualOffset + 4] << 24) | (data[actualOffset + 5] << 16) | 
-             (data[actualOffset + 6] << 8) | data[actualOffset + 7]);
-          
-          return denominator !== 0 ? numerator / denominator : 0;
-        }
+      let dataOffset = valueOffset; // By default, value is read from the valueOffset itself
+
+      // If the total size is greater than 4 bytes, the value is a pointer to the actual data location
+      if (totalSize > 4) {
+        dataOffset = _parseLongValue(data, valueOffset, isLittleEndian);
       }
       
-      return null;
+      // Ensure the calculated offset is within the bounds of the data array
+      if (dataOffset + totalSize > data.length) return null;
+
+      switch (type) {
+        case EXIF_TYPES.ASCII:
+          return _parseAsciiValue(data, dataOffset, totalSize);
+        case EXIF_TYPES.SHORT:
+          return _parseShortValue(data, dataOffset, isLittleEndian);
+        case EXIF_TYPES.LONG:
+          return _parseLongValue(data, dataOffset, isLittleEndian);
+        case EXIF_TYPES.RATIONAL:
+          // A single rational value is 8 bytes
+          if (count === 1) {
+            return _parseRationalValue(data, dataOffset, isLittleEndian);
+          } 
+          // Handle multiple rational values (e.g., GPS coordinates)
+          else {
+            const values = [];
+            for (let i = 0; i < count; i++) {
+              values.push(_parseRationalValue(data, dataOffset + i * 8, isLittleEndian));
+            }
+            return values;
+          }
+        case EXIF_TYPES.BYTE:
+        case EXIF_TYPES.UNDEFINED:
+          return data[dataOffset];
+        default:
+          return null; // Type not implemented
+      }
     } catch (error) {
-      Logger.log(`Error parsing tag value: ${error.toString()}`);
+      Logger.log(`Error parsing tag value (type: ${type}): ${error.toString()}`);
       return null;
     }
   }
+
+  // --- End: Refactored Helper Functions ---
+
 
   /**
    * Organize parsed TIFF data into meaningful metadata
@@ -417,7 +442,7 @@ const ExifProcessor = (function() {
       const tagName = entry.tagName;
       const value = entry.value;
       
-      if (!value) continue;
+      if (value === null || value === undefined) continue;
       
       // Camera information
       if (tagName === 'Make') organized.camera.make = value;
@@ -454,33 +479,22 @@ const ExifProcessor = (function() {
    */
   function processGpsData_(gpsIfd, organized) {
     try {
-      let gpsLat = null, gpsLon = null, gpsAlt = null;
-      let latRef = '', lonRef = '', altRef = '';
-      
-      for (const tag in gpsIfd) {
-        const entry = gpsIfd[tag];
-        const tagName = entry.tagName;
-        const value = entry.value;
-        
-        if (tagName === 'GPSLatitudeRef') latRef = value;
-        else if (tagName === 'GPSLongitudeRef') lonRef = value;
-        else if (tagName === 'GPSAltitudeRef') altRef = value;
-        else if (tagName === 'GPSLatitude') gpsLat = value;
-        else if (tagName === 'GPSLongitude') gpsLon = value;
-        else if (tagName === 'GPSAltitude') gpsAlt = value;
-      }
+      const gpsLat = gpsIfd['2'] ? gpsIfd['2'].value : null;
+      const gpsLon = gpsIfd['4'] ? gpsIfd['4'].value : null;
+      const gpsAlt = gpsIfd['6'] ? gpsIfd['6'].value : null;
+      const latRef = gpsIfd['1'] ? gpsIfd['1'].value : 'N';
+      const lonRef = gpsIfd['3'] ? gpsIfd['3'].value : 'E';
+      const altRef = gpsIfd['5'] ? gpsIfd['5'].value : 0;
       
       // Convert GPS coordinates to decimal degrees
-      if (gpsLat && latRef) {
+      if (gpsLat) {
         const latDecimal = convertGpsCoordinate_(gpsLat);
-        if (latRef === 'S') latDecimal = -latDecimal;
-        organized.gps.latitude = latDecimal;
+        organized.gps.latitude = (latRef === 'S' || latRef === 's') ? -latDecimal : latDecimal;
       }
       
-      if (gpsLon && lonRef) {
+      if (gpsLon) {
         let lonDecimal = convertGpsCoordinate_(gpsLon);
-        if (lonRef === 'W') lonDecimal = -lonDecimal;
-        organized.gps.longitude = lonDecimal;
+        organized.gps.longitude = (lonRef === 'W' || lonRef === 'w') ? -lonDecimal : lonDecimal;
       }
       
       if (gpsAlt !== null) {
@@ -497,11 +511,14 @@ const ExifProcessor = (function() {
    * @private
    */
   function convertGpsCoordinate_(coordinate) {
+    // If it's a single number, it's already decimal
     if (typeof coordinate === 'number') return coordinate;
+    
+    // If it's an array of [degrees, minutes, seconds]
     if (Array.isArray(coordinate) && coordinate.length >= 3) {
-      return coordinate[0] + (coordinate[1] / 60) + (coordinate[2] / 3600);
+      return (coordinate[0] || 0) + ((coordinate[1] || 0) / 60) + ((coordinate[2] || 0) / 3600);
     }
-    return coordinate;
+    return null;
   }
 
   /**
@@ -539,7 +556,7 @@ const ExifProcessor = (function() {
         
         if (metadata.camera.software) boxMetadata.cameraSoftware = metadata.camera.software;
         if (metadata.camera.lensMake || metadata.camera.lensModel) {
-          boxMetadata.lensModel = `${metadata.camera.lensMake || ''} ${metadata.camera.lensModel || ''}`;
+          boxMetadata.lensModel = `${metadata.camera.lensMake || ''} ${metadata.camera.lensModel || ''}`.trim();
         }
       }
       
