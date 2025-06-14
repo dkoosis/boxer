@@ -151,3 +151,29 @@ function testReportsFolder() {
     Logger.log('Contains ' + folder.item_collection.total_count + ' items');
   }
 }
+function diagnoseGDriveIssue() {
+  // Test basic Drive access
+  try {
+    DriveApp.getRootFolder().getName();
+    Logger.log('✅ Drive access works');
+  } catch (e) {
+    Logger.log('❌ Drive access failed: ' + e.toString());
+    return;
+  }
+  
+  // Check current config
+  Logger.log('\nCurrent properties:');
+  Logger.log('BOX_ENTERPRISE_ID: ' + Config.getProperty('BOX_ENTERPRISE_ID'));
+  Logger.log('BOXER_CACHE_FOLDER: ' + Config.getProperty('BOXER_CACHE_FOLDER'));
+  
+  // Try validation again
+  const validation = Config.validate(true);
+  Logger.log('\nValidation result: ' + validation.valid);
+  if (!validation.valid) {
+    validation.errors.forEach(e => Logger.log('  ' + e));
+  }
+}
+function fixDriveAuth() {
+  // This will trigger authorization prompt
+  DriveApp.getRootFolder();
+}

@@ -1,20 +1,17 @@
-/**
- * Box OAuth2 Authentication Module
- * Uses Google's OAuth2 library: 1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF
- */
+// File: BoxAuth.js
+// Box OAuth2 Authentication Module
+// Uses Google's OAuth2 library: 1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF
 
 /**
  * Get the Box OAuth2 service
  * @returns {OAuth2.Service} The configured Box OAuth2 service
  */
 function getBoxService() {
-  const clientId = Config.SCRIPT_PROPERTIES.getProperty(Config.BOX_OAUTH_CLIENT_ID_PROPERTY);
-  const clientSecret = Config.SCRIPT_PROPERTIES.getProperty(Config.BOX_OAUTH_CLIENT_SECRET_PROPERTY);
+  const clientId = Config.getProperty('BOX_CLIENT_ID');
+  const clientSecret = Config.getProperty('BOX_CLIENT_SECRET');
   
   if (!clientId || !clientSecret) {
-    throw new Error('Box OAuth credentials not found. Set ' + 
-                    Config.BOX_OAUTH_CLIENT_ID_PROPERTY + ' and ' + 
-                    Config.BOX_OAUTH_CLIENT_SECRET_PROPERTY + ' in Script Properties');
+    throw new Error('Box OAuth credentials not found. Run setupBoxer() to configure.');
   }
   
   return OAuth2.createService('Box')
@@ -52,6 +49,25 @@ function authCallback(request) {
   const isAuthorized = service.handleCallback(request);
   
   if (isAuthorized) {
+    // Auto-detect enterprise ID after successful auth
+    try {
+      const token = service.getAccessToken();
+      const response = UrlFetchApp.fetch(Config.BOX_API_BASE_URL + '/users/me', {
+        headers: { 'Authorization': 'Bearer ' + token },
+        muteHttpExceptions: true
+      });
+      
+      if (response.getResponseCode() === 200) {
+        const userData = JSON.parse(response.getContentText());
+        if (userData.enterprise && userData.enterprise.id && !Config.getProperty('BOX_ENTERPRISE_ID')) {
+          Config.setProperty('BOX_ENTERPRISE_ID', userData.enterprise.id);
+          Logger.log('✅ Auto-detected Box Enterprise ID: ' + userData.enterprise.id);
+        }
+      }
+    } catch (e) {
+      Logger.log('Could not auto-detect enterprise ID: ' + e.toString());
+    }
+    
     return HtmlService.createHtmlOutput(`
       <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px;">
         <h2>✅ Box Authorization Complete!</h2>
