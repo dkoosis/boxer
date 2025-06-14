@@ -77,14 +77,7 @@ var BoxFileOperations = (function() {
    */
   ns.isImageFile = function(filename) {
     if (!filename || typeof filename !== 'string') return false;
-    // Assuming Config is globally available
-    if (typeof Config !== 'undefined' && typeof Config.isImageFile === 'function') {
-        return Config.isImageFile(filename);
-    }
-    Logger.log('Warning: Config.isImageFile not available. Using fallback image check.');
-    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic', '.heif'];
-    const lowerFilename = filename.toLowerCase();
-    return imageExtensions.some(ext => lowerFilename.endsWith(ext));
+    return Config.isImageFile(filename);
   };
   
   /**
@@ -95,8 +88,7 @@ var BoxFileOperations = (function() {
    * @returns {object[]} Array of image file objects
    */
   ns.findAllImageFiles = function(folderId, accessToken, allImages) {
-    const currentConfig = (typeof Config !== 'undefined') ? Config : { DEFAULT_PROCESSING_FOLDER_ID: '0', DEFAULT_API_ITEM_LIMIT: 1000, BOX_API_BASE_URL: 'https://api.box.com/2.0' };
-    folderId = folderId || currentConfig.DEFAULT_PROCESSING_FOLDER_ID;
+    folderId = folderId || Config.getProperty('BOX_PRIORITY_FOLDER') || '0';
     allImages = allImages || [];
     
     if (!accessToken) {
@@ -105,8 +97,8 @@ var BoxFileOperations = (function() {
         
     try {
       var fieldsToFetch = 'id,name,type,size,path_collection,created_at,modified_at,parent';
-      var url = currentConfig.BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
-                currentConfig.DEFAULT_API_ITEM_LIMIT + '&fields=' + fieldsToFetch;
+      var url = Config.BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
+                Config.DEFAULT_API_ITEM_LIMIT + '&fields=' + fieldsToFetch;
                 
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -166,16 +158,8 @@ var BoxFileOperations = (function() {
    * @param {string} templateKey Metadata template key
    * @returns {boolean} True if metadata exists
    */
-/**
-   * Checks if a file has existing metadata with robust error handling.
-   * @param {string} fileId Box file ID
-   * @param {string} accessToken Valid Box access token
-   * @param {string} templateKey Metadata template key
-   * @returns {boolean} True if metadata exists
-   */
   ns.hasExistingMetadata = function(fileId, accessToken, templateKey) {
-    const currentConfig = (typeof Config !== 'undefined') ? Config : { BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', BOX_METADATA_SCOPE: 'enterprise', BOX_API_BASE_URL: 'https://api.box.com/2.0' };
-    templateKey = templateKey || currentConfig.BOX_METADATA_TEMPLATE_KEY;
+    templateKey = templateKey || Config.getProperty('BOX_IMAGE_METADATA_ID');
     
     if (!accessToken || !fileId) {
       Logger.log('BoxFileOperations.hasExistingMetadata: fileId and accessToken required');
@@ -183,8 +167,8 @@ var BoxFileOperations = (function() {
     }
     
     try {
-      var url = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.getBoxMetadataScope() + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -202,6 +186,7 @@ var BoxFileOperations = (function() {
       return false;
     }
   };  
+  
   /**
    * Gets current metadata with robust error handling.
    * @param {string} fileId Box file ID
@@ -210,8 +195,7 @@ var BoxFileOperations = (function() {
    * @returns {object|null} Metadata object or null
    */
   ns.getCurrentMetadata = function(fileId, accessToken, templateKey) {
-    const currentConfig = (typeof Config !== 'undefined') ? Config : { BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', BOX_METADATA_SCOPE: 'enterprise', BOX_API_BASE_URL: 'https://api.box.com/2.0' };
-    templateKey = templateKey || currentConfig.BOX_METADATA_TEMPLATE_KEY;
+    templateKey = templateKey || Config.getProperty('BOX_IMAGE_METADATA_ID');
     
     if (!accessToken || !fileId) {
       Logger.log('BoxFileOperations.getCurrentMetadata: fileId and accessToken required');
@@ -219,8 +203,8 @@ var BoxFileOperations = (function() {
     }
     
     try {
-      var url = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.getBoxMetadataScope() + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -259,8 +243,7 @@ var BoxFileOperations = (function() {
    * @returns {boolean} Success status
    */
   ns.applyMetadata = function(fileId, metadata, accessToken, templateKey) {
-    const currentConfig = (typeof Config !== 'undefined') ? Config : { BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', BOX_METADATA_SCOPE: 'enterprise', BOX_API_BASE_URL: 'https://api.box.com/2.0' };
-    templateKey = templateKey || currentConfig.BOX_METADATA_TEMPLATE_KEY;
+    templateKey = templateKey || Config.getProperty('BOX_IMAGE_METADATA_ID');
     
     if (!accessToken || !fileId || !metadata || typeof metadata !== 'object') {
       Logger.log('BoxFileOperations.applyMetadata: fileId, accessToken, and a metadata object are required.');
@@ -268,8 +251,8 @@ var BoxFileOperations = (function() {
     }
     
     try {
-      var url = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.getBoxMetadataScope() + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -313,8 +296,7 @@ var BoxFileOperations = (function() {
    * @returns {boolean} Success status
    */
   ns.updateMetadata = function(fileId, metadataToUpdate, accessToken, templateKey) {
-    const currentConfig = (typeof Config !== 'undefined') ? Config : { BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', BOX_METADATA_SCOPE: 'enterprise', BOX_API_BASE_URL: 'https://api.box.com/2.0' };
-    templateKey = templateKey || currentConfig.BOX_METADATA_TEMPLATE_KEY;
+    templateKey = templateKey || Config.getProperty('BOX_IMAGE_METADATA_ID');
     
     if (!accessToken || !fileId || !metadataToUpdate || typeof metadataToUpdate !== 'object') {
       Logger.log('BoxFileOperations.updateMetadata: fileId, accessToken, and metadataToUpdate object are required');
@@ -334,8 +316,8 @@ var BoxFileOperations = (function() {
         // This is effectively a create operation if applyMetadata's POST failed for reasons other than 409,
         // or if updateMetadata is called directly on a file without metadata.
         // Re-using the POST logic from applyMetadata:
-         var createUrl = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
+         var createUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.getBoxMetadataScope() + '/' + templateKey;
         var createResponse = makeRobustApiCall_(function() {
             return UrlFetchApp.fetch(createUrl, {
             method: 'POST',
@@ -376,8 +358,8 @@ var BoxFileOperations = (function() {
         return true; 
       }
       
-      var url = currentConfig.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
-                currentConfig.BOX_METADATA_SCOPE + '/' + templateKey;
+      var url = Config.BOX_API_BASE_URL + '/files/' + fileId + '/metadata/' + 
+                Config.getBoxMetadataScope() + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -419,15 +401,7 @@ var BoxFileOperations = (function() {
  * @returns {boolean} True if metadata was successfully updated/applied, false otherwise.
  */
 ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo) {
-  // Ensure Config object and its properties are accessible
-  const currentConfig = (typeof Config !== 'undefined') ? Config : { 
-      BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', 
-      BOX_METADATA_SCOPE: 'enterprise', 
-      PROCESSING_STAGE_FAILED: 'failed', 
-      METADATA_KEY_LAST_ERROR: 'lastProcessingError',
-      METADATA_KEY_LAST_ERROR_TIMESTAMP: 'lastErrorTimestamp'
-      // Assuming 'buildNumber' is a standard field key, not needing specific METADATA_KEY_ prefix
-  };
+  const templateKey = Config.getProperty('BOX_IMAGE_METADATA_ID');
 
   if (!fileId || !accessToken || !currentBuildNo) {
     Logger.log('BoxFileOperations.markFileAsFailed: fileId, accessToken, and currentBuildNo are required.');
@@ -436,15 +410,15 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
 
   try {
     const metadataUpdatePayload = {};
-    metadataUpdatePayload.processingStage = currentConfig.PROCESSING_STAGE_FAILED;
-    metadataUpdatePayload[currentConfig.METADATA_KEY_LAST_ERROR] = (errorMessage || "Unknown error").substring(0, 250);
-    metadataUpdatePayload[currentConfig.METADATA_KEY_LAST_ERROR_TIMESTAMP] = new Date().toISOString();
+    metadataUpdatePayload.processingStage = Config.PROCESSING_STAGE_FAILED;
+    metadataUpdatePayload.lastProcessingError = (errorMessage || "Unknown error").substring(0, 250);
+    metadataUpdatePayload.lastErrorTimestamp = new Date().toISOString();
     metadataUpdatePayload.buildNumber = currentBuildNo;
 
-    Logger.log(`Attempting to mark file ${fileId} as FAILED. Error: ${metadataUpdatePayload[currentConfig.METADATA_KEY_LAST_ERROR].substring(0,50)}..., Build: ${currentBuildNo}`);
+    Logger.log(`Attempting to mark file ${fileId} as FAILED. Error: ${metadataUpdatePayload.lastProcessingError.substring(0,50)}..., Build: ${currentBuildNo}`);
 
     // Use applyMetadata which handles POST (create) or PUT (update via patch) if instance exists (due to 409->updateMetadata)
-    return ns.applyMetadata(fileId, metadataUpdatePayload, accessToken, currentConfig.BOX_METADATA_TEMPLATE_KEY);
+    return ns.applyMetadata(fileId, metadataUpdatePayload, accessToken, templateKey);
     
   } catch (e) {
     Logger.log(`BoxFileOperations: Exception while marking file ${fileId} as failed: ${e.toString()}`);
@@ -459,14 +433,8 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
    * @returns {string} Status: 'attached', 'skipped', or 'error'
    */
   ns.attachTemplateToImage = function(imageFile, accessToken) {
-    const currentConfig = (typeof Config !== 'undefined') ? Config : { 
-        BOX_METADATA_TEMPLATE_KEY: 'comprehensiveImageMetadata', 
-        BOX_METADATA_SCOPE: 'enterprise', 
-        PROCESSING_STAGE_UNPROCESSED: 'unprocessed',
-        BOX_API_BASE_URL: 'https://api.box.com/2.0'
-    };
-     const currentBuild = (typeof Config !== 'undefined' && typeof Config.getCurrentBuild === 'function') ? Config.getCurrentBuild() : 'unknown_build';
-
+    const templateKey = Config.getProperty('BOX_IMAGE_METADATA_ID');
+    const currentBuild = Config.getCurrentBuild();
 
     if (!accessToken || !imageFile || !imageFile.id || !imageFile.name) { // Check imageFile.name as well
       Logger.log('BoxFileOperations.attachTemplateToImage: imageFile (with id and name) and accessToken required');
@@ -474,18 +442,18 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
     }
     
     try {
-      if (ns.hasExistingMetadata(imageFile.id, accessToken, currentConfig.BOX_METADATA_TEMPLATE_KEY)) {
+      if (ns.hasExistingMetadata(imageFile.id, accessToken, templateKey)) {
         return 'skipped';
       }
       
       var emptyMetadata = {
-        processingStage: currentConfig.PROCESSING_STAGE_UNPROCESSED,
+        processingStage: Config.PROCESSING_STAGE_UNPROCESSED,
         lastProcessedDate: new Date().toISOString(),
         buildNumber: currentBuild // Add current build number when attaching template
       };
       
-      var url = currentConfig.BOX_API_BASE_URL + '/files/' + imageFile.id + '/metadata/' + 
-                currentConfig.BOX_METADATA_SCOPE + '/' + currentConfig.BOX_METADATA_TEMPLATE_KEY;
+      var url = Config.BOX_API_BASE_URL + '/files/' + imageFile.id + '/metadata/' + 
+                Config.getBoxMetadataScope() + '/' + templateKey;
       
       var response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
@@ -530,12 +498,10 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
    * @param {string} accessToken Valid Box access token
    */
   ns.attachTemplateToAllImages = function(accessToken) {
-    const currentConfig = (typeof Config !== 'undefined') ? Config : { 
-        DEFAULT_PROCESSING_FOLDER_ID: '0', 
-        METADATA_ATTACHMENT_BATCH_SIZE: 50,
-        METADATA_ATTACHMENT_FILE_DELAY_MS: 100,
-        METADATA_ATTACHMENT_BATCH_DELAY_MS: 2000
-    };
+    const METADATA_ATTACHMENT_BATCH_SIZE = 50;
+    const METADATA_ATTACHMENT_FILE_DELAY_MS = 100;
+    const METADATA_ATTACHMENT_BATCH_DELAY_MS = 2000;
+    
     const getTemplateFn = (typeof getOrCreateImageTemplate === 'function') ? getOrCreateImageTemplate : function(){ Logger.log("Warning: getOrCreateImageTemplate not available!"); return {displayName: "Mock Template"}; };
 
 
@@ -555,7 +521,7 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
       }
       Logger.log('✅ Using template: ' + template.displayName);
       
-      var allImages = ns.findAllImageFiles(currentConfig.DEFAULT_PROCESSING_FOLDER_ID, accessToken);
+      var allImages = ns.findAllImageFiles(Config.getProperty('BOX_PRIORITY_FOLDER') || '0', accessToken);
       Logger.log('📊 Found ' + allImages.length + ' image files total.');
       
       if (allImages.length === 0) {
@@ -565,10 +531,10 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
       
       var stats = { processed: 0, attached: 0, skipped: 0, errors: 0, totalFiles: allImages.length };
       
-      for (var i = 0; i < allImages.length; i += currentConfig.METADATA_ATTACHMENT_BATCH_SIZE) {
-        var batch = allImages.slice(i, i + currentConfig.METADATA_ATTACHMENT_BATCH_SIZE);
-        var batchNum = Math.floor(i / currentConfig.METADATA_ATTACHMENT_BATCH_SIZE) + 1;
-        var totalBatches = Math.ceil(allImages.length / currentConfig.METADATA_ATTACHMENT_BATCH_SIZE);
+      for (var i = 0; i < allImages.length; i += METADATA_ATTACHMENT_BATCH_SIZE) {
+        var batch = allImages.slice(i, i + METADATA_ATTACHMENT_BATCH_SIZE);
+        var batchNum = Math.floor(i / METADATA_ATTACHMENT_BATCH_SIZE) + 1;
+        var totalBatches = Math.ceil(allImages.length / METADATA_ATTACHMENT_BATCH_SIZE);
         
         Logger.log('Processing batch ' + batchNum + ' of ' + totalBatches + 
                   ' for template attachment (' + batch.length + ' files)');
@@ -590,7 +556,7 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
             }
             
             if (indexInBatch < batch.length - 1) {
-                 Utilities.sleep(currentConfig.METADATA_ATTACHMENT_FILE_DELAY_MS);
+                 Utilities.sleep(METADATA_ATTACHMENT_FILE_DELAY_MS);
             }
             
           } catch (batchError) { 
@@ -600,10 +566,10 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
           }
         });
         
-        if (i + currentConfig.METADATA_ATTACHMENT_BATCH_SIZE < allImages.length) {
-          Logger.log('Pausing ' + (currentConfig.METADATA_ATTACHMENT_BATCH_DELAY_MS / 1000) + 
+        if (i + METADATA_ATTACHMENT_BATCH_SIZE < allImages.length) {
+          Logger.log('Pausing ' + (METADATA_ATTACHMENT_BATCH_DELAY_MS / 1000) + 
                     's after batch ' + batchNum + '...');
-          Utilities.sleep(currentConfig.METADATA_ATTACHMENT_BATCH_DELAY_MS);
+          Utilities.sleep(METADATA_ATTACHMENT_BATCH_DELAY_MS);
         }
       }
       

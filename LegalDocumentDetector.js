@@ -13,7 +13,7 @@ var LegalDocumentDetector = (function() {
   // Detection configuration
   var DETECTION_VERSION = 'v1.0';
   var CONFIDENCE_THRESHOLD = 50;
-  var LEGAL_DOC_TEMPLATE_KEY = 'legalAgreement';
+  var LEGAL_DOC_TEMPLATE_KEY = null; // Will be loaded from Config
   
   // Legal entities and patterns
   var LEGAL_ENTITIES = [
@@ -60,6 +60,17 @@ var LegalDocumentDetector = (function() {
     'Box Sign', 'Adobe Sign', 'DocuSign', 'HelloSign', 'PandaDoc',
     'Electronically signed', 'Digital signature', 'E-signature'
   ];
+  
+  /**
+   * Get the legal document template key from Config
+   * @private
+   */
+  function getLegalTemplateKey_() {
+    if (!LEGAL_DOC_TEMPLATE_KEY) {
+      LEGAL_DOC_TEMPLATE_KEY = Config.getProperty('BOX_LEGAL_METADATA_ID') || 'legalAgreement';
+    }
+    return LEGAL_DOC_TEMPLATE_KEY;
+  }
   
   /**
    * Check if file type is relevant for legal document detection
@@ -335,9 +346,9 @@ var LegalDocumentDetector = (function() {
           if (detectionResult && detectionResult.isLegalDocument) {
             var legalMetadata = ns.createLegalMetadata(file, detectionResult);
             
-            // Apply metadata (you'll need to ensure the legal template exists)
+            // Apply metadata using the configured template key
             var success = BoxFileOperations.applyMetadata(
-              file.id, legalMetadata, accessToken, LEGAL_DOC_TEMPLATE_KEY
+              file.id, legalMetadata, accessToken, getLegalTemplateKey_()
             );
             
             if (success) {
@@ -387,7 +398,8 @@ var LegalDocumentDetector = (function() {
       if (!testFileId) {
         // Find a test file
         Logger.log('🔍 Finding test files...');
-        ns.processLegalDocumentsInFolder(Config.ACTIVE_TEST_FOLDER_ID, accessToken, 5);
+        var testFolderId = Config.getProperty('BOX_PRIORITY_FOLDER') || '0';
+        ns.processLegalDocumentsInFolder(testFolderId, accessToken, 5);
         return;
       }
       
@@ -427,7 +439,6 @@ function testLegalDetection(fileId) {
 
 function processLegalDocsInTestFolder() {
   var accessToken = getValidAccessToken();
-  return LegalDocumentDetector.processLegalDocumentsInFolder(
-    Config.ACTIVE_TEST_FOLDER_ID, accessToken, 20
-  );
+  var testFolderId = Config.getProperty('BOX_PRIORITY_FOLDER') || '0';
+  return LegalDocumentDetector.processLegalDocumentsInFolder(testFolderId, accessToken, 20);
 }

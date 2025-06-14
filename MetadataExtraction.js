@@ -68,7 +68,7 @@ var MetadataExtraction = (function() {
    */
   function getGeocodingApiKey_() {
     try {
-      return Config.SCRIPT_PROPERTIES.getProperty('GEOCODE_API_KEY');
+      return Config.getProperty('GOOGLE_GEOCODE_API_KEY');
     } catch (error) {
       Logger.log('Error getting geocoding API key: ' + error.toString());
       return null;
@@ -85,7 +85,7 @@ var MetadataExtraction = (function() {
   function reverseGeocode_(latitude, longitude) {
     var apiKey = getGeocodingApiKey_();
     if (!apiKey) {
-      Logger.log('⚠️ No GEOCODE_API_KEY found - skipping reverse geocoding');
+      Logger.log('⚠️ No GOOGLE_GEOCODE_API_KEY found - skipping reverse geocoding');
       return null;
     }
     
@@ -545,7 +545,7 @@ var MetadataExtraction = (function() {
         importance: contentAnalysis.importance,
         processingStage: Config.PROCESSING_STAGE_BASIC,
         lastProcessedDate: new Date().toISOString(), // Full ISO datetime
-        processingVersion: Config.PROCESSING_VERSION_BASIC,
+        processingVersion: Config.SCRIPT_VERSION + '_basic',
         buildNumber: Config.getCurrentBuild(),
         needsReview: contentAnalysis.needsReview || 'no'
       };
@@ -584,14 +584,14 @@ var MetadataExtraction = (function() {
       var currentMetadata = BoxFileOperations.getCurrentMetadata(fileEntry.id, accessToken);
       var needsProcessing = !currentMetadata || 
                            currentMetadata.processingStage === Config.PROCESSING_STAGE_UNPROCESSED ||
-                           Config.shouldReprocessForBuild(currentMetadata.buildNumber);
+                           currentMetadata.buildNumber !== Config.getCurrentBuild();
       
       if (!needsProcessing) {
         return; // Skip if up-to-date
       }
       
       var reason = !currentMetadata ? 'new' : 
-                   Config.shouldReprocessForBuild(currentMetadata.buildNumber) ? 'build_update' : 'incomplete';
+                   currentMetadata.buildNumber !== Config.getCurrentBuild() ? 'build_update' : 'incomplete';
       Logger.log('🐕 Processing ' + fileEntry.name + ' (' + reason + ')');
       
       // Fetch full file details with robust error handling
@@ -635,6 +635,8 @@ var MetadataExtraction = (function() {
    * @param {string} accessToken Valid Box access token
    */
   ns.processImagesInFoldersBasic = function(folderIdsToProcess, accessToken) {
+    const IMAGE_PROCESSING_FILE_DELAY_MS = 500;
+    
     if (!accessToken) {
       throw new Error('MetadataExtraction: accessToken required');
     }
@@ -677,9 +679,9 @@ var MetadataExtraction = (function() {
           
           // Add delay every 10 files
           if ((index + 1) % 10 === 0 && imageFileEntries.length > (index + 1)) {
-            Logger.log('Pausing ' + (Config.IMAGE_PROCESSING_FILE_DELAY_MS / 1000) + 
+            Logger.log('Pausing ' + (IMAGE_PROCESSING_FILE_DELAY_MS / 1000) + 
                       's after processing 10 images...');
-            Utilities.sleep(Config.IMAGE_PROCESSING_FILE_DELAY_MS);
+            Utilities.sleep(IMAGE_PROCESSING_FILE_DELAY_MS);
           }
         });
         
@@ -764,7 +766,7 @@ var MetadataExtraction = (function() {
     }
 
     // Analyze with Vision API, passing filename for logging
-// Analyze with Vision API - skip HEIC/HEIF (not supported)
+    // Analyze with Vision API - skip HEIC/HEIF (not supported)
     var skipVisionFormats = ['HEIC', 'HEIF', 'TIFF'];
     
     if (skipVisionFormats.indexOf(combinedMetadata.fileFormat) !== -1) {
@@ -779,7 +781,7 @@ var MetadataExtraction = (function() {
           visionAnalysis.objects.map(function(obj) { return obj.name + ' (' + obj.confidence + ')'; }).join('; ') : '';
         combinedMetadata.aiSceneDescription = visionAnalysis.sceneDescription || '';
         combinedMetadata.extractedText = visionAnalysis.text ? 
-          visionAnalysis.text.replace(/\n/g, ' ').substring(0, Config.MAX_TEXT_EXTRACTION_LENGTH) : '';
+          visionAnalysis.text.replace(/\n/g, ' ').substring(0, 5000) : '';
         combinedMetadata.dominantColors = visionAnalysis.dominantColors ? 
           visionAnalysis.dominantColors.map(function(c) { return c.rgb + ' (' + c.score + ', ' + c.pixelFraction + ')'; }).join('; ') : '';
         combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
@@ -799,7 +801,7 @@ var MetadataExtraction = (function() {
     }
     // Finalize processing metadata
     combinedMetadata.lastProcessedDate = new Date().toISOString(); // Use current timestamp
-    combinedMetadata.processingVersion = Config.PROCESSING_VERSION_ENHANCED;
+    combinedMetadata.processingVersion = Config.SCRIPT_VERSION + '_enhanced';
     combinedMetadata.buildNumber = Config.getCurrentBuild();
 
     // Apply sanitization and return
@@ -906,8 +908,8 @@ var MetadataExtraction = (function() {
     
     var apiKey = getGeocodingApiKey_();
     if (!apiKey) {
-      Logger.log('❌ GEOCODE_API_KEY not found in Script Properties');
-      Logger.log('💡 Add your Google Geocoding API key to Script Properties');
+      Logger.log('❌ GOOGLE_GEOCODE_API_KEY not found');
+      Logger.log('💡 Add your Google Geocoding API key');
       return;
     }
     

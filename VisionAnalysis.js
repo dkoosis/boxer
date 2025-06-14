@@ -9,9 +9,9 @@
  * @throws {Error} If API key not found
  */
 function getVisionApiKey() {
-  const apiKey = Config.SCRIPT_PROPERTIES.getProperty(Config.VISION_API_KEY_PROPERTY);
+  const apiKey = Config.getProperty('GOOGLE_VISION_API_KEY');
   if (!apiKey) {
-    const errMsg = `${Config.VISION_API_KEY_PROPERTY} not found in Script Properties. Please add it.`;
+    const errMsg = 'GOOGLE_VISION_API_KEY not found. Please configure it.';
     Logger.log(`ERROR: ${errMsg}`);
     throw new Error(errMsg);
   }

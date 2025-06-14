@@ -513,7 +513,7 @@ var ExifProcessor = (function() {
       var box_metadata = {
         processingStage: Config.PROCESSING_STAGE_EXIF,
         lastProcessedDate: new Date().toISOString(),
-        processingVersion: Config.PROCESSING_VERSION_ENHANCED,
+        processingVersion: Config.SCRIPT_VERSION + '_enhanced',
         buildNumber: Config.getCurrentBuild()
       };
       
@@ -692,7 +692,7 @@ var ExifProcessor = (function() {
     try {
       Logger.log(' > Parsing comprehensive EXIF data from ' + file_display_name + '...');
       
-      var download_url = (Config.BOX_API_BASE_URL || 'https://api.box.com/2.0') + '/files/' + file_id + '/content';
+      var download_url = Config.BOX_API_BASE_URL + '/files/' + file_id + '/content';
       var response = utils.rateLimitExpBackoff(function() {
         return UrlFetchApp.fetch(download_url, {
           headers: { 'Authorization': 'Bearer ' + access_token },
