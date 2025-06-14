@@ -1,38 +1,38 @@
 {
   "timeZone": "America/New_York",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
   "dependencies": {
-    "libraries": [
-      {
-        "userSymbol": "cUseful",
-        "version": "134",
-        "libraryId": "1EbLSESpiGkI3PYmJqWh3-rmLkYKAtCNPi1L2YCtMgo2Ut8xMThfJ41Ex"
-      },
-      {
-        "userSymbol": "cGoa",
-        "version": "46",
-        "libraryId": "1v_l4xN3ICa0lAW315NQEzAHPSoNiFdWHsMEwj2qA5t9cgZ5VWci2Qxv2"
-      },
-      {
-        "userSymbol": "bmFiddler",
-        "version": "30",
-        "libraryId": "13EWG4-lPrEf34itxQhAQ7b9JEbmCBfO8uE4Mhr99CHi3Pw65oxXtq-rU"
-      },
-      {
-        "userSymbol": "bmPreFiddler",
-        "version": "34",
-        "libraryId": "13JUFGY18RHfjjuKmIRRfvmGlCYrEkEtN6uUm-iLUcxOUFRJD-WBX-tkR"
-      }
-    ],
     "enabledAdvancedServices": [
       {
         "userSymbol": "Drive",
-        "version": "v3",
-        "serviceId": "drive"
+        "serviceId": "drive",
+        "version": "v3"
+      }
+    ],
+    "libraries": [
+      {
+        "userSymbol": "cUseful",
+        "libraryId": "1EbLSESpiGkI3PYmJqWh3-rmLkYKAtCNPi1L2YCtMgo2Ut8xMThfJ41Ex",
+        "version": "134"
+      },
+      {
+        "userSymbol": "bmFiddler",
+        "libraryId": "13EWG4-lPrEf34itxQhAQ7b9JEbmCBfO8uE4Mhr99CHi3Pw65oxXtq-rU",
+        "version": "30"
+      },
+      {
+        "userSymbol": "bmPreFiddler",
+        "libraryId": "13JUFGY18RHfjjuKmIRRfvmGlCYrEkEtN6uUm-iLUcxOUFRJD-WBX-tkR",
+        "version": "34"
+      },
+      {
+        "userSymbol": "OAuth2",
+        "version": "43",
+        "libraryId": "1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF"
       }
     ]
   },
-  "exceptionLogging": "STACKDRIVER",
-  "runtimeVersion": "V8",
   "webapp": {
     "executeAs": "USER_DEPLOYING",
     "access": "ANYONE_ANONYMOUS"

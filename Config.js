@@ -23,7 +23,7 @@ var Config = {
   // Configuration IDs (read from properties)
   get TRACKING_SHEET_ID() { return this.SCRIPT_PROPERTIES.getProperty('TRACKING_SHEET_ID'); },
   get ACTIVE_TEST_FOLDER_ID() { return this.SCRIPT_PROPERTIES.getProperty('ACTIVE_TEST_FOLDER_ID'); },
-  get REPORTS_FOLDER_ID() { return this.SCRIPT_PROPERTIES.getProperty('REPORTS_FOLDER_ID'); },
+  get REPORTS_FOLDER_ID() { return this.SCRIPT_PROPERTIES.getProperty('BOX_REPORTS_FOLDER_ID'); },
   get AIRTABLE_ROOT_FOLDER_ID() { return this.SCRIPT_PROPERTIES.getProperty('AIRTABLE_ROOT_FOLDER_ID'); },
   get DRIVE_CACHE_FOLDER_ID() { return this.SCRIPT_PROPERTIES.getProperty('DRIVE_CACHE_FOLDER_ID'); },
 
