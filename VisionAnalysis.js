@@ -1,7 +1,7 @@
 // File: VisionAnalysis.gs
 // Google Vision API integration functions
 // Uses cUseful library by Bruce McPherson for robust operations
-// Depends on: Config.gs, BoxAuth.gs
+// Depends on: ConfigManager.gs, BoxAuth.gs
 
 /**
  * Retrieves the Vision API key from Script Properties.
@@ -9,7 +9,7 @@
  * @throws {Error} If API key not found
  */
 function getVisionApiKey() {
-  const apiKey = Config.getProperty('GOOGLE_VISION_API_KEY');
+  const apiKey = ConfigManager.getProperty('GOOGLE_VISION_API_KEY');
   if (!apiKey) {
     const errMsg = 'GOOGLE_VISION_API_KEY not found. Please configure it.';
     Logger.log(`ERROR: ${errMsg}`);
@@ -190,32 +190,32 @@ function categorizeDetectedLabel(labelDescription, categories) {
  * @returns {string} Intelligent scene description
  */
 function createIntelligentSceneDescription(labels, categories) {
-  var description = 'Image contains: ';
-  var parts = [];
+  let description = 'Image contains: ';
+  const parts = [];
   
   // Prioritize people
   if (categories.people.length > 0) {
-    parts.push('people (' + categories.people.slice(0, 2).join(', ') + ')');
+    parts.push(`people (${categories.people.slice(0, 2).join(', ')})`);
   }
   
   // Add top objects
   if (categories.objects.length > 0) {
-    parts.push('objects (' + categories.objects.slice(0, 3).join(', ') + ')');
+    parts.push(`objects (${categories.objects.slice(0, 3).join(', ')})`);
   }
   
   // Add activities if detected
   if (categories.activities.length > 0) {
-    parts.push('activities (' + categories.activities.slice(0, 2).join(', ') + ')');
+    parts.push(`activities (${categories.activities.slice(0, 2).join(', ')})`);
   }
   
   // Add places/settings
   if (categories.places.length > 0) {
-    parts.push('setting (' + categories.places.slice(0, 2).join(', ') + ')');
+    parts.push(`setting (${categories.places.slice(0, 2).join(', ')})`);
   }
   
   // Add key concepts
   if (categories.concepts.length > 0) {
-    parts.push('concepts (' + categories.concepts.slice(0, 2).join(', ') + ')');
+    parts.push(`concepts (${categories.concepts.slice(0, 2).join(', ')})`);
   }
   
   // Fallback to top labels if categories are empty
@@ -235,9 +235,9 @@ function createIntelligentSceneDescription(labels, categories) {
  */
 function getColorName(r, g, b) {
   // Simple color naming based on dominant channel
-  var max = Math.max(r, g, b);
-  var min = Math.min(r, g, b);
-  var brightness = (max + min) / 2;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const brightness = (max + min) / 2;
   
   if (brightness < 50) return 'Dark';
   if (brightness > 200) return 'Light';
@@ -256,6 +256,7 @@ function getColorName(r, g, b) {
  * Enhanced Vision API analysis with improved error handling and retry logic.
  * @param {string} fileId Box file ID
  * @param {string} accessToken Valid Box access token
+ * @param {string} filename Optional filename for logging
  * @returns {object|null} Enhanced analysis object or error object
  */
 function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
@@ -268,8 +269,8 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
 
   try {
     const visionApiKey = getVisionApiKey();
-    var utils = cUseful; // Assuming cUseful is globally available or initialized
-    const downloadUrl = Config.BOX_API_BASE_URL + '/files/' + fileId + '/content';
+    const utils = cUseful; // Assuming cUseful is globally available
+    const downloadUrl = `${ConfigManager.BOX_API_BASE_URL}/files/${fileId}/content`;
     const downloadResponse = utils.rateLimitExpBackoff(function() {
       return UrlFetchApp.fetch(downloadUrl, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
@@ -287,7 +288,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
     const imageBytes = imageBlob.getBytes();
     const imageSize = imageBytes.length;
 
-    if (imageSize > Config.MAX_VISION_API_FILE_SIZE_BYTES) {
+    if (imageSize > ConfigManager.MAX_VISION_API_FILE_SIZE_BYTES) {
       const sizeMB = Math.round(imageSize / (1024 * 1024) * 10) / 10;
       Logger.log(`  Image ${fileDisplayName} too large for Vision API ${sizeMB}MB)`);
       return { error: 'FILE_TOO_LARGE', sizeMB: sizeMB, message: `File ${fileDisplayName} size ${sizeMB}MB exceeds Vision API limit.` };
@@ -323,7 +324,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
 
 
     const visionResponse = utils.rateLimitExpBackoff(function() {
-      return UrlFetchApp.fetch(Config.VISION_API_ENDPOINT + '?key=' + visionApiKey, visionApiOptions);
+      return UrlFetchApp.fetch(`${ConfigManager.VISION_API_ENDPOINT}?key=${visionApiKey}`, visionApiOptions);
     });
 
 
@@ -338,7 +339,7 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
           return { error: 'VISION_API_RESPONSE_ERROR', details: visionData.responses[0].error, message: visionData.responses[0].error.message };
         }
 
-        var analysis = parseVisionApiResponse(visionData.responses[0]);
+        let analysis = parseVisionApiResponse(visionData.responses[0]);
 
         if (visionData.responses[0].faceAnnotations) {
           analysis.faces = visionData.responses[0].faceAnnotations.length;
@@ -368,8 +369,8 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
     }
 
   } catch (error) {
-    Logger.log(`  Exception during Vision API analysis for ${fileDisplayName}: ${error.toString()}`);
-    console.error(`Exception analyzing image ${fileDisplayName} with Vision API:`, error);
+    ErrorHandler.reportError(error, 'analyzeImageWithVisionImproved', 
+      { fileId, filename: fileDisplayName });
     return { error: 'SCRIPT_EXCEPTION', message: error.toString() };
   }
 }

@@ -1,6 +1,6 @@
 // File: BoxMetadataTemplates.gs
 // Box metadata template management for comprehensive image metadata
-// Depends on: Config.gs, BoxAuth.gs
+// Depends on: ConfigManager.gs, BoxAuth.gs
 
 /**
  * Creates the comprehensive image metadata template in Box.
@@ -14,12 +14,12 @@ function createOptimalImageMetadataTemplate(accessToken) {
     return null;
   }
   
-  Logger.log(`Creating metadata template: ${Config.BOX_METADATA_TEMPLATE_KEY}, Scope: ${Config.BOX_METADATA_SCOPE}`);
+  Logger.log(`Creating metadata template: ${ConfigManager.BOX_METADATA_TEMPLATE_KEY}, Scope: ${ConfigManager.getBoxMetadataScope()}`);
   
   const templateData = {
-    scope: Config.BOX_METADATA_SCOPE,
-    templateKey: Config.BOX_METADATA_TEMPLATE_KEY,
-    displayName: Config.BOX_METADATA_TEMPLATE_DISPLAY_NAME,
+    scope: ConfigManager.getBoxMetadataScope(),
+    templateKey: ConfigManager.BOX_METADATA_TEMPLATE_KEY,
+    displayName: 'Boxer Image Metadata',
     fields: [
       // === CORE FILE INFORMATION ===
       { key: 'originalFilename', displayName: 'Original Filename', type: 'string', description: 'Original file name before processing' },
@@ -133,12 +133,12 @@ function createOptimalImageMetadataTemplate(accessToken) {
       // === PROCESSING METADATA ===
       { key: 'processingStage', displayName: 'Processing Stage', type: 'enum', description: 'Current processing status',
         options: [
-          { key: Config.PROCESSING_STAGE_UNPROCESSED, displayName: 'Unprocessed' },
-          { key: Config.PROCESSING_STAGE_BASIC, displayName: 'Basic Info Extracted' },
-          { key: Config.PROCESSING_STAGE_EXIF, displayName: 'EXIF Extracted' },
-          { key: Config.PROCESSING_STAGE_AI, displayName: 'AI Analyzed' },
-          { key: Config.PROCESSING_STAGE_REVIEW, displayName: 'Human Reviewed' },
-          { key: Config.PROCESSING_STAGE_COMPLETE, displayName: 'Complete' }
+          { key: ConfigManager.PROCESSING_STAGE_UNPROCESSED, displayName: 'Unprocessed' },
+          { key: ConfigManager.PROCESSING_STAGE_BASIC, displayName: 'Basic Info Extracted' },
+          { key: ConfigManager.PROCESSING_STAGE_EXIF, displayName: 'EXIF Extracted' },
+          { key: ConfigManager.PROCESSING_STAGE_AI, displayName: 'AI Analyzed' },
+          { key: 'human_reviewed', displayName: 'Human Reviewed' },
+          { key: ConfigManager.PROCESSING_STAGE_COMPLETE, displayName: 'Complete' }
         ]},
       { key: 'aiConfidenceScore', displayName: 'AI Confidence Score', type: 'float', description: 'AI analysis confidence (0.0-1.0)' },
       { key: 'lastProcessedDate', displayName: 'Last Processed', type: 'date', description: 'When metadata was last updated' },
@@ -156,7 +156,7 @@ function createOptimalImageMetadataTemplate(accessToken) {
     ]
   };
 
-  const url = `${Config.BOX_API_BASE_URL}/metadata_templates/schema`;
+  const url = `${ConfigManager.BOX_API_BASE_URL}/metadata_templates/schema`;
   const options = {
     method: 'POST',
     headers: {
@@ -200,9 +200,9 @@ function listExistingTemplates(accessToken) {
     return [];
   }
   
-  Logger.log(`Listing existing templates in scope: ${Config.BOX_METADATA_SCOPE}`);
+  Logger.log(`Listing existing templates in scope: ${ConfigManager.getBoxMetadataScope()}`);
   
-  const url = `${Config.BOX_API_BASE_URL}/metadata_templates/${Config.BOX_METADATA_SCOPE}`;
+  const url = `${ConfigManager.BOX_API_BASE_URL}/metadata_templates/${ConfigManager.getBoxMetadataScope()}`;
   const options = {
     headers: { 'Authorization': `Bearer ${accessToken}` },
     muteHttpExceptions: true
@@ -215,7 +215,7 @@ function listExistingTemplates(accessToken) {
 
     if (responseCode === 200) {
       const templates = JSON.parse(responseText);
-      Logger.log(`Found ${templates.entries.length} template(s) in scope '${Config.BOX_METADATA_SCOPE}'`);
+      Logger.log(`Found ${templates.entries.length} template(s) in scope '${ConfigManager.getBoxMetadataScope()}'`);
       templates.entries.forEach(template => {
         Logger.log(`  - ${template.displayName} (Key: ${template.templateKey}, Fields: ${template.fields ? template.fields.length : 'N/A'})`);
       });
@@ -242,7 +242,7 @@ function checkTemplateExists(templateKey, accessToken) {
     return null;
   }
   
-  const url = `${Config.BOX_API_BASE_URL}/metadata_templates/${Config.BOX_METADATA_SCOPE}/${templateKey}/schema`;
+  const url = `${ConfigManager.BOX_API_BASE_URL}/metadata_templates/${ConfigManager.getBoxMetadataScope()}/${templateKey}/schema`;
   const options = {
     method: 'GET',
     headers: { 'Authorization': `Bearer ${accessToken}` },
@@ -282,18 +282,18 @@ function getOrCreateImageTemplate(accessToken) {
     return null;
   }
   
-  Logger.log(`Ensuring metadata template '${Config.BOX_METADATA_TEMPLATE_KEY}' exists`);
-  let template = checkTemplateExists(Config.BOX_METADATA_TEMPLATE_KEY, accessToken);
+  Logger.log(`Ensuring metadata template '${ConfigManager.BOX_METADATA_TEMPLATE_KEY}' exists`);
+  let template = checkTemplateExists(ConfigManager.BOX_METADATA_TEMPLATE_KEY, accessToken);
   
   if (!template) {
-    Logger.log(`Template '${Config.BOX_METADATA_TEMPLATE_KEY}' not found, creating`);
+    Logger.log(`Template '${ConfigManager.BOX_METADATA_TEMPLATE_KEY}' not found, creating`);
     template = createOptimalImageMetadataTemplate(accessToken);
   }
   
   if (template) {
     Logger.log(`Using template: ${template.displayName} (Key: ${template.templateKey})`);
   } else {
-    Logger.log(`ERROR: Failed to get or create template '${Config.BOX_METADATA_TEMPLATE_KEY}'. Check admin permissions.`);
+    Logger.log(`ERROR: Failed to get or create template '${ConfigManager.BOX_METADATA_TEMPLATE_KEY}'. Check admin permissions.`);
   }
   
   return template;
@@ -302,7 +302,7 @@ function getOrCreateImageTemplate(accessToken) {
 /**
  * Fetches and logs the schema (structure) of ALL metadata templates within a given scope.
  * @param {string} scope Optional. The scope of the metadata templates (e.g., 'enterprise'). 
- * Defaults to Config.BOX_METADATA_SCOPE.
+ * Defaults to ConfigManager.getBoxMetadataScope().
  */
 function showAllMetadataTemplateSchemas(scope) {
   const accessToken = getValidAccessToken(); // From BoxAuth.gs
@@ -312,11 +312,11 @@ function showAllMetadataTemplateSchemas(scope) {
     return;
   }
 
-  const effectiveScope = scope || Config.BOX_METADATA_SCOPE;
+  const effectiveScope = scope || ConfigManager.getBoxMetadataScope();
 
   Logger.log(`Attempting to fetch all template schemas for Scope: ${effectiveScope}`);
 
-  const listUrl = `${Config.BOX_API_BASE_URL}/metadata_templates/${effectiveScope}`;
+  const listUrl = `${ConfigManager.BOX_API_BASE_URL}/metadata_templates/${effectiveScope}`;
   const listOptions = {
     method: 'GET',
     headers: {
@@ -368,7 +368,7 @@ function showAllMetadataTemplateSchemas(scope) {
  * @param {string} accessToken
  */
 function fetchAndLogSingleTemplateSchema(templateKey, scope, accessToken) {
-  const schemaUrl = `${Config.BOX_API_BASE_URL}/metadata_templates/${scope}/${templateKey}/schema`;
+  const schemaUrl = `${ConfigManager.BOX_API_BASE_URL}/metadata_templates/${scope}/${templateKey}/schema`;
   const schemaOptions = {
     method: 'GET',
     headers: {
@@ -498,14 +498,14 @@ function addGpsFieldsToTemplate(accessToken) {
     ];
     
     // Check if template exists first
-    const existingTemplate = checkTemplateExists(Config.BOX_METADATA_TEMPLATE_KEY, accessToken);
+    const existingTemplate = checkTemplateExists(ConfigManager.BOX_METADATA_TEMPLATE_KEY, accessToken);
     if (!existingTemplate) {
       Logger.log('❌ Template not found. Create the base template first.');
       return false;
     }
     
-    Logger.log('✅ Found existing template: ' + existingTemplate.displayName);
-    Logger.log('📝 Adding ' + newGpsFields.length + ' GPS location fields...');
+    Logger.log(`✅ Found existing template: ${existingTemplate.displayName}`);
+    Logger.log(`📝 Adding ${newGpsFields.length} GPS location fields...`);
     
     // Check which fields already exist to avoid duplicates
     const existingFieldKeys = existingTemplate.fields ? 
@@ -520,11 +520,10 @@ function addGpsFieldsToTemplate(accessToken) {
       return true;
     }
     
-    Logger.log('➕ Adding ' + fieldsToAdd.length + ' new fields: ' + 
-              fieldsToAdd.map(f => f.data.key).join(', '));
+    Logger.log(`➕ Adding ${fieldsToAdd.length} new fields: ${fieldsToAdd.map(f => f.data.key).join(', ')}`);
     
     // Update template using Box API
-    const updateUrl = `${Config.BOX_API_BASE_URL}/metadata_templates/${Config.BOX_METADATA_SCOPE}/${Config.BOX_METADATA_TEMPLATE_KEY}/schema`;
+    const updateUrl = `${ConfigManager.BOX_API_BASE_URL}/metadata_templates/${ConfigManager.getBoxMetadataScope()}/${ConfigManager.BOX_METADATA_TEMPLATE_KEY}/schema`;
     
     const updateOptions = {
       method: 'PUT',
@@ -543,23 +542,23 @@ function addGpsFieldsToTemplate(accessToken) {
     if (responseCode === 200) {
       const updatedTemplate = JSON.parse(responseText);
       Logger.log('✅ Successfully updated template!');
-      Logger.log('📊 Template now has ' + updatedTemplate.fields.length + ' total fields');
+      Logger.log(`📊 Template now has ${updatedTemplate.fields.length} total fields`);
       
       // Log the new fields that were added
       fieldsToAdd.forEach(field => {
-        Logger.log('  ➕ Added: ' + field.data.displayName + ' (' + field.data.key + ')');
+        Logger.log(`  ➕ Added: ${field.data.displayName} (${field.data.key})`);
       });
       
       return true;
       
     } else {
-      Logger.log('❌ Failed to update template. HTTP Code: ' + responseCode);
-      Logger.log('Response: ' + responseText);
+      Logger.log(`❌ Failed to update template. HTTP Code: ${responseCode}`);
+      Logger.log(`Response: ${responseText}`);
       return false;
     }
     
   } catch (error) {
-    Logger.log('❌ Exception updating template: ' + error.toString());
+    Logger.log(`❌ Exception updating template: ${error.toString()}`);
     return false;
   }
 }
@@ -589,7 +588,7 @@ function testAddGpsFields() {
     }
     
   } catch (error) {
-    Logger.log('❌ Test failed: ' + error.toString());
+    Logger.log(`❌ Test failed: ${error.toString()}`);
   }
 }
 
@@ -598,10 +597,10 @@ function testAddGpsFields() {
  */
 function showCurrentTemplateFields() {
   const accessToken = getValidAccessToken();
-  const template = checkTemplateExists(Config.BOX_METADATA_TEMPLATE_KEY, accessToken);
+  const template = checkTemplateExists(ConfigManager.BOX_METADATA_TEMPLATE_KEY, accessToken);
   
   if (template && template.fields) {
-    Logger.log('📋 Current template fields (' + template.fields.length + ' total):');
+    Logger.log(`📋 Current template fields (${template.fields.length} total):`);
     template.fields.forEach((field, index) => {
       Logger.log(`  ${index + 1}. ${field.displayName} (${field.key}) - ${field.type}`);
     });
@@ -636,7 +635,7 @@ function enhanceLegalTemplateWithDetection(accessToken) {
       return false;
     }
     
-    Logger.log('✅ Found existing template: ' + existingTemplate.displayName);
+    Logger.log(`✅ Found existing template: ${existingTemplate.displayName}`);
     
     // Define new detection fields to add
     const detectionFields = [
@@ -739,10 +738,10 @@ function enhanceLegalTemplateWithDetection(accessToken) {
       return true;
     }
     
-    Logger.log('➕ Adding ' + fieldsToAdd.length + ' new detection fields');
+    Logger.log(`➕ Adding ${fieldsToAdd.length} new detection fields`);
     
     // Update template using Box API
-    const updateUrl = `${Config.BOX_API_BASE_URL}/metadata_templates/${scope}/${templateKey}/schema`;
+    const updateUrl = `${ConfigManager.BOX_API_BASE_URL}/metadata_templates/${scope}/${templateKey}/schema`;
     
     const updateOptions = {
       method: 'PUT',
@@ -761,26 +760,26 @@ function enhanceLegalTemplateWithDetection(accessToken) {
     if (responseCode === 200) {
       const updatedTemplate = JSON.parse(responseText);
       Logger.log('✅ Successfully enhanced legal template!');
-      Logger.log('📊 Template now has ' + updatedTemplate.fields.length + ' total fields');
+      Logger.log(`📊 Template now has ${updatedTemplate.fields.length} total fields`);
       
       // Log the new fields that were added
       fieldsToAdd.forEach(field => {
-        Logger.log('  ➕ Added: ' + field.data.displayName + ' (' + field.data.key + ')');
+        Logger.log(`  ➕ Added: ${field.data.displayName} (${field.data.key})`);
       });
       
-      Logger.log('\n💡 Template is now ready for legal document processing');
-      Logger.log('🔧 Update LegalDocumentDetector to use template key: "' + templateKey + '"');
+      Logger.log(`\n💡 Template is now ready for legal document processing`);
+      Logger.log(`🔧 Update LegalDocumentDetector to use template key: "${templateKey}"`);
       
       return true;
       
     } else {
-      Logger.log('❌ Failed to enhance template. HTTP Code: ' + responseCode);
-      Logger.log('Response: ' + responseText);
+      Logger.log(`❌ Failed to enhance template. HTTP Code: ${responseCode}`);
+      Logger.log(`Response: ${responseText}`);
       return false;
     }
     
   } catch (error) {
-    Logger.log('❌ Exception enhancing legal template: ' + error.toString());
+    Logger.log(`❌ Exception enhancing legal template: ${error.toString()}`);
     return false;
   }
 }
@@ -811,6 +810,6 @@ function testEnhanceLegalTemplate() {
     }
     
   } catch (error) {
-    Logger.log('❌ Test failed: ' + error.toString());
+    Logger.log(`❌ Test failed: ${error.toString()}`);
   }
 }

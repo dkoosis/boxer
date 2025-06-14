@@ -1,20 +1,20 @@
 // File: ExifProcessor.js
 // Comprehensive EXIF data extraction and parsing functions.
 // Merges the logic from former EXIFParser.js and ExifExtraction.js.
-// Depends on: Config.js, BoxAuth.js
+// Depends on: ConfigManager.js, BoxAuth.js
 
 /**
  * ExifProcessor namespace - comprehensive metadata extraction for multiple image formats.
  * Provides comprehensive metadata extraction with sophisticated parsing and fallback mechanisms.
  */
-var ExifProcessor = (function() {
+const ExifProcessor = (function() {
   'use strict';
   
-  var ns = {};
-  var utils_ = null; // For cUseful library
+  const ns = {};
+  let utils_ = null; // For cUseful library
   
   // Enhanced file format signatures
-  var FILE_SIGNATURES = {
+  const FILE_SIGNATURES = {
     JPEG: [0xFF, 0xD8],
     PNG: [0x89, 0x50, 0x4E, 0x47],
     WEBP: [0x52, 0x49, 0x46, 0x46], // followed by WEBP at offset 8
@@ -28,16 +28,16 @@ var ExifProcessor = (function() {
   };
   
   // EXIF data type constants
-  var EXIF_TYPES = {
+  const EXIF_TYPES = {
     BYTE: 1, ASCII: 2, SHORT: 3, LONG: 4, RATIONAL: 5,
     SBYTE: 6, UNDEFINED: 7, SSHORT: 8, SLONG: 9, SRATIONAL: 10,
     FLOAT: 11, DOUBLE: 12
   };
   
-  var TYPE_SIZES = [undefined, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8];
+  const TYPE_SIZES = [undefined, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8];
   
   // Comprehensive EXIF tags with enhanced mappings
-  var EXIF_TAGS = {
+  const EXIF_TAGS = {
     // Camera and capture info
     0x010F: 'Make', 0x0110: 'Model', 0x0131: 'Software',
     0x0132: 'DateTime', 0x013B: 'Artist', 0x8298: 'Copyright',
@@ -106,17 +106,17 @@ var ExifProcessor = (function() {
    * @private
    */
   function extract_basic_file_info_(image_bytes) {
-    var basic_info = {
+    const basic_info = {
       fileSize: image_bytes.length,
       format: 'Unknown'
     };
     
     // Detect file format
-    for (var format in FILE_SIGNATURES) {
-      var signature = FILE_SIGNATURES[format];
-      var matches = true;
+    for (const format in FILE_SIGNATURES) {
+      const signature = FILE_SIGNATURES[format];
+      let matches = true;
       
-      for (var i = 0; i < signature.length; i++) {
+      for (let i = 0; i < signature.length; i++) {
         if (signature[i] !== null && image_bytes[i] !== signature[i]) {
           matches = false;
           break;
@@ -146,16 +146,16 @@ var ExifProcessor = (function() {
       
       // For JPEG files
       if (image_bytes[0] === 0xFF && image_bytes[1] === 0xD8) {
-        var offset = 2;
-        var max_search_offset = Math.min(image_bytes.length - 4, 65536);
+        let offset = 2;
+        const max_search_offset = Math.min(image_bytes.length - 4, 65536);
         
         while (offset < max_search_offset) {
           if (image_bytes[offset] === 0xFF) {
-            var marker_type = image_bytes[offset + 1];
+            const marker_type = image_bytes[offset + 1];
             
             if (marker_type === 0xE1) { // APP1 marker (commonly EXIF)
-              var length = (image_bytes[offset + 2] << 8) | image_bytes[offset + 3];
-              var exif_header_offset = offset + 4;
+              const length = (image_bytes[offset + 2] << 8) | image_bytes[offset + 3];
+              const exif_header_offset = offset + 4;
               
               // Check for "Exif" identifier
               if (exif_header_offset + 6 < image_bytes.length &&
@@ -170,7 +170,7 @@ var ExifProcessor = (function() {
             }
             
             // Move to next marker
-            var segment_length = (image_bytes[offset + 2] << 8) | image_bytes[offset + 3];
+            const segment_length = (image_bytes[offset + 2] << 8) | image_bytes[offset + 3];
             offset += 2 + segment_length;
           } else {
             offset++;
@@ -186,7 +186,7 @@ var ExifProcessor = (function() {
       
       return null;
     } catch (error) {
-      Logger.log('Error finding EXIF segment: ' + error.toString());
+      Logger.log(`Error finding EXIF segment: ${error.toString()}`);
       return null;
     }
   }
@@ -199,18 +199,18 @@ var ExifProcessor = (function() {
     try {
       if (!exif_data || exif_data.length < 8) return null;
       
-      var is_little_endian = exif_data[0] === 0x49 && exif_data[1] === 0x49;
-      var tiff_magic = is_little_endian ? 
+      const is_little_endian = exif_data[0] === 0x49 && exif_data[1] === 0x49;
+      const tiff_magic = is_little_endian ? 
         (exif_data[2] | (exif_data[3] << 8)) :
         ((exif_data[2] << 8) | exif_data[3]);
       
       if (tiff_magic !== 42) return null; // Not valid TIFF
       
-      var first_ifd_offset = is_little_endian ?
+      const first_ifd_offset = is_little_endian ?
         (exif_data[4] | (exif_data[5] << 8) | (exif_data[6] << 16) | (exif_data[7] << 24)) :
         ((exif_data[4] << 24) | (exif_data[5] << 16) | (exif_data[6] << 8) | exif_data[7]);
       
-      var parsed_data = {
+      const parsed_data = {
         endianness: is_little_endian ? 'little' : 'big',
         ifd0: parse_ifd_(exif_data, first_ifd_offset, is_little_endian),
         exif_ifd: null,
@@ -220,19 +220,19 @@ var ExifProcessor = (function() {
       // Look for EXIF and GPS sub-IFDs
       if (parsed_data.ifd0) {
         if (parsed_data.ifd0['34665']) { // EXIF IFD pointer
-          var exif_offset = parsed_data.ifd0['34665'].value;
+          const exif_offset = parsed_data.ifd0['34665'].value;
           parsed_data.exif_ifd = parse_ifd_(exif_data, exif_offset, is_little_endian);
         }
         
         if (parsed_data.ifd0['34853']) { // GPS IFD pointer
-          var gps_offset = parsed_data.ifd0['34853'].value;
+          const gps_offset = parsed_data.ifd0['34853'].value;
           parsed_data.gps_ifd = parse_ifd_(exif_data, gps_offset, is_little_endian);
         }
       }
       
       return parsed_data;
     } catch (error) {
-      Logger.log('Error parsing TIFF structure: ' + error.toString());
+      Logger.log(`Error parsing TIFF structure: ${error.toString()}`);
       return null;
     }
   }
@@ -245,32 +245,32 @@ var ExifProcessor = (function() {
     try {
       if (offset + 2 >= data.length) return null;
       
-      var entry_count = is_little_endian ?
+      const entry_count = is_little_endian ?
         (data[offset] | (data[offset + 1] << 8)) :
         ((data[offset] << 8) | data[offset + 1]);
       
-      var entries = {};
-      var entry_offset = offset + 2;
+      const entries = {};
+      let entry_offset = offset + 2;
       
-      for (var i = 0; i < entry_count; i++) {
+      for (let i = 0; i < entry_count; i++) {
         if (entry_offset + 12 > data.length) break;
         
-        var tag = is_little_endian ?
+        const tag = is_little_endian ?
           (data[entry_offset] | (data[entry_offset + 1] << 8)) :
           ((data[entry_offset] << 8) | data[entry_offset + 1]);
         
-        var type = is_little_endian ?
+        const type = is_little_endian ?
           (data[entry_offset + 2] | (data[entry_offset + 3] << 8)) :
           ((data[entry_offset + 2] << 8) | data[entry_offset + 3]);
         
-        var count = is_little_endian ?
+        const count = is_little_endian ?
           (data[entry_offset + 4] | (data[entry_offset + 5] << 8) | 
            (data[entry_offset + 6] << 16) | (data[entry_offset + 7] << 24)) :
           ((data[entry_offset + 4] << 24) | (data[entry_offset + 5] << 16) | 
            (data[entry_offset + 6] << 8) | data[entry_offset + 7]);
         
-        var value_offset = entry_offset + 8;
-        var value = parse_tag_value_(data, type, count, value_offset, is_little_endian);
+        const value_offset = entry_offset + 8;
+        const value = parse_tag_value_(data, type, count, value_offset, is_little_endian);
         
         entries[tag] = {
           tag: tag,
@@ -285,7 +285,7 @@ var ExifProcessor = (function() {
       
       return entries;
     } catch (error) {
-      Logger.log('Error parsing IFD: ' + error.toString());
+      Logger.log(`Error parsing IFD: ${error.toString()}`);
       return null;
     }
   }
@@ -296,15 +296,15 @@ var ExifProcessor = (function() {
    */
   function parse_tag_value_(data, type, count, value_offset, is_little_endian) {
     try {
-      var type_size = TYPE_SIZES[type] || 1;
-      var total_size = type_size * count;
+      const type_size = TYPE_SIZES[type] || 1;
+      const total_size = type_size * count;
       
       // If value fits in 4 bytes, it's stored directly
       if (total_size <= 4) {
         if (type === EXIF_TYPES.ASCII) {
-          var str = '';
-          for (var i = 0; i < Math.min(count, 4); i++) {
-            var char_code = data[value_offset + i];
+          let str = '';
+          for (let i = 0; i < Math.min(count, 4); i++) {
+            const char_code = data[value_offset + i];
             if (char_code === 0) break;
             str += String.fromCharCode(char_code);
           }
@@ -324,7 +324,7 @@ var ExifProcessor = (function() {
         }
       } else {
         // Value is stored at offset
-        var actual_offset = is_little_endian ?
+        const actual_offset = is_little_endian ?
           (data[value_offset] | (data[value_offset + 1] << 8) | 
            (data[value_offset + 2] << 16) | (data[value_offset + 3] << 24)) :
           ((data[value_offset] << 24) | (data[value_offset + 1] << 16) | 
@@ -333,21 +333,21 @@ var ExifProcessor = (function() {
         if (actual_offset + total_size > data.length) return null;
         
         if (type === EXIF_TYPES.ASCII) {
-          var str = '';
-          for (var i = 0; i < count; i++) {
-            var char_code = data[actual_offset + i];
+          let str = '';
+          for (let i = 0; i < count; i++) {
+            const char_code = data[actual_offset + i];
             if (char_code === 0) break;
             str += String.fromCharCode(char_code);
           }
           return str;
         } else if (type === EXIF_TYPES.RATIONAL) {
-          var numerator = is_little_endian ?
+          const numerator = is_little_endian ?
             (data[actual_offset] | (data[actual_offset + 1] << 8) | 
              (data[actual_offset + 2] << 16) | (data[actual_offset + 3] << 24)) :
             ((data[actual_offset] << 24) | (data[actual_offset + 1] << 16) | 
              (data[actual_offset + 2] << 8) | data[actual_offset + 3]);
           
-          var denominator = is_little_endian ?
+          const denominator = is_little_endian ?
             (data[actual_offset + 4] | (data[actual_offset + 5] << 8) | 
              (data[actual_offset + 6] << 16) | (data[actual_offset + 7] << 24)) :
             ((data[actual_offset + 4] << 24) | (data[actual_offset + 5] << 16) | 
@@ -359,7 +359,7 @@ var ExifProcessor = (function() {
       
       return null;
     } catch (error) {
-      Logger.log('Error parsing tag value: ' + error.toString());
+      Logger.log(`Error parsing tag value: ${error.toString()}`);
       return null;
     }
   }
@@ -370,7 +370,7 @@ var ExifProcessor = (function() {
    */
   function organize_metadata_(tiff_structure, basic_info) {
     try {
-      var organized = {
+      const organized = {
         hasExif: true,
         fileInfo: basic_info,
         camera: {},
@@ -402,7 +402,7 @@ var ExifProcessor = (function() {
       
       return organized;
     } catch (error) {
-      Logger.log('Error organizing metadata: ' + error.toString());
+      Logger.log(`Error organizing metadata: ${error.toString()}`);
       return { hasExif: false, fileInfo: basic_info };
     }
   }
@@ -412,10 +412,10 @@ var ExifProcessor = (function() {
    * @private
    */
   function process_ifd_data_(ifd, organized) {
-    for (var tag in ifd) {
-      var entry = ifd[tag];
-      var tag_name = entry.tagName;
-      var value = entry.value;
+    for (const tag in ifd) {
+      const entry = ifd[tag];
+      const tag_name = entry.tagName;
+      const value = entry.value;
       
       if (!value) continue;
       
@@ -454,13 +454,13 @@ var ExifProcessor = (function() {
    */
   function process_gps_data_(gps_ifd, organized) {
     try {
-      var gps_lat = null, gps_lon = null, gps_alt = null;
-      var lat_ref = '', lon_ref = '', alt_ref = '';
+      let gps_lat = null, gps_lon = null, gps_alt = null;
+      let lat_ref = '', lon_ref = '', alt_ref = '';
       
-      for (var tag in gps_ifd) {
-        var entry = gps_ifd[tag];
-        var tag_name = entry.tagName;
-        var value = entry.value;
+      for (const tag in gps_ifd) {
+        const entry = gps_ifd[tag];
+        const tag_name = entry.tagName;
+        const value = entry.value;
         
         if (tag_name === 'GPSLatitudeRef') lat_ref = value;
         else if (tag_name === 'GPSLongitudeRef') lon_ref = value;
@@ -472,13 +472,13 @@ var ExifProcessor = (function() {
       
       // Convert GPS coordinates to decimal degrees
       if (gps_lat && lat_ref) {
-        var lat_decimal = convert_gps_coordinate_(gps_lat);
+        const lat_decimal = convert_gps_coordinate_(gps_lat);
         if (lat_ref === 'S') lat_decimal = -lat_decimal;
         organized.gps.latitude = lat_decimal;
       }
       
       if (gps_lon && lon_ref) {
-        var lon_decimal = convert_gps_coordinate_(gps_lon);
+        let lon_decimal = convert_gps_coordinate_(gps_lon);
         if (lon_ref === 'W') lon_decimal = -lon_decimal;
         organized.gps.longitude = lon_decimal;
       }
@@ -488,7 +488,7 @@ var ExifProcessor = (function() {
       }
       
     } catch (error) {
-      Logger.log('Error processing GPS data: ' + error.toString());
+      Logger.log(`Error processing GPS data: ${error.toString()}`);
     }
   }
 
@@ -510,15 +510,15 @@ var ExifProcessor = (function() {
    */
   function convert_to_box_format_(metadata) {
     try {
-      var box_metadata = {
-        processingStage: Config.PROCESSING_STAGE_EXIF,
+      const box_metadata = {
+        processingStage: ConfigManager.PROCESSING_STAGE_EXIF,
         lastProcessedDate: new Date().toISOString(),
-        processingVersion: Config.SCRIPT_VERSION + '_enhanced',
-        buildNumber: Config.getCurrentBuild()
+        processingVersion: ConfigManager.SCRIPT_VERSION + '_enhanced',
+        buildNumber: ConfigManager.getCurrentBuild()
       };
       
       if (!metadata.hasExif) {
-        box_metadata.processingStage = Config.PROCESSING_STAGE_FAILED;
+        box_metadata.processingStage = ConfigManager.PROCESSING_STAGE_FAILED;
         box_metadata.technicalNotes = 'No EXIF data found in file';
         return box_metadata;
       }
@@ -533,29 +533,29 @@ var ExifProcessor = (function() {
       // Camera information
       if (metadata.camera) {
         if (metadata.camera.make && metadata.camera.model) {
-          box_metadata.cameraModel = metadata.camera.make + ' ' + metadata.camera.model;
+          box_metadata.cameraModel = `${metadata.camera.make} ${metadata.camera.model}`;
         } else if (metadata.camera.model) {
           box_metadata.cameraModel = metadata.camera.model;
         }
         
         if (metadata.camera.software) box_metadata.cameraSoftware = metadata.camera.software;
         if (metadata.camera.lensMake || metadata.camera.lensModel) {
-          box_metadata.lensModel = (metadata.camera.lensMake || '') + ' ' + (metadata.camera.lensModel || '');
+          box_metadata.lensModel = `${metadata.camera.lensMake || ''} ${metadata.camera.lensModel || ''}`;
         }
       }
       
       // Image dimensions
       if (metadata.image) {
-        var width = metadata.image.pixelWidth || metadata.image.width;
-        var height = metadata.image.pixelHeight || metadata.image.height;
+        const width = metadata.image.pixelWidth || metadata.image.width;
+        const height = metadata.image.pixelHeight || metadata.image.height;
         
         if (width && height) {
           box_metadata.imageWidth = width;
           box_metadata.imageHeight = height;
           
           // Calculate aspect ratio and megapixels
-          var gcd = calculate_gcd_(width, height);
-          box_metadata.aspectRatio = (width / gcd) + ':' + (height / gcd);
+          const gcd = calculate_gcd_(width, height);
+          box_metadata.aspectRatio = `${width / gcd}:${height / gcd}`;
           box_metadata.megapixels = Math.round((width * height) / 1000000 * 10) / 10;
         }
         
@@ -574,7 +574,7 @@ var ExifProcessor = (function() {
       
       // Date taken (prefer DateTimeOriginal)
       if (metadata.technical) {
-        var date_taken = metadata.technical.dateTimeOriginal || 
+        const date_taken = metadata.technical.dateTimeOriginal || 
                          metadata.technical.dateTimeDigitized || 
                          metadata.technical.dateTime;
         if (date_taken) {
@@ -590,9 +590,9 @@ var ExifProcessor = (function() {
       }
       
       // Technical notes
-      var technical_notes = [];
+      const technical_notes = [];
       if (metadata.fileInfo && metadata.fileInfo.format) {
-        technical_notes.push('Format: ' + metadata.fileInfo.format);
+        technical_notes.push(`Format: ${metadata.fileInfo.format}`);
       }
       
       if (technical_notes.length > 0) {
@@ -602,10 +602,10 @@ var ExifProcessor = (function() {
       
       return box_metadata;
     } catch (error) {
-      Logger.log('Error converting to Box format: ' + error.toString());
+      Logger.log(`Error converting to Box format: ${error.toString()}`);
       return {
-        processingStage: Config.PROCESSING_STAGE_FAILED,
-        technicalNotes: 'EXIF Processing Error: ' + String(error.message || error).substring(0, 100)
+        processingStage: ConfigManager.PROCESSING_STAGE_FAILED,
+        technicalNotes: `EXIF Processing Error: ${String(error.message || error).substring(0, 100)}`
       };
     }
   }
@@ -624,16 +624,16 @@ var ExifProcessor = (function() {
    */
   function extract_jpeg_metadata_(image_bytes, basic_info) {
     try {
-      var exif_data_segment = find_exif_segment_(image_bytes);
+      const exif_data_segment = find_exif_segment_(image_bytes);
       if (!exif_data_segment) {
-        Logger.log(' ⚠️ No EXIF APP1 segment found in JPEG/TIFF structure for ' + basic_info.filename);
+        Logger.log(` ⚠️ No EXIF APP1 segment found in JPEG/TIFF structure for ${basic_info.filename}`);
         return { hasExif: false, fileInfo: basic_info };
       }
       
-      var tiff_structure = parse_tiff_structure_(exif_data_segment);
+      const tiff_structure = parse_tiff_structure_(exif_data_segment);
       return organize_metadata_(tiff_structure, basic_info);
     } catch (error) {
-      Logger.log('Error extracting JPEG/TIFF EXIF metadata for ' + basic_info.filename + ': ' + error.toString());
+      Logger.log(`Error extracting JPEG/TIFF EXIF metadata for ${basic_info.filename}: ${error.toString()}`);
       return { hasExif: false, fileInfo: basic_info };
     }
   }
@@ -643,18 +643,18 @@ var ExifProcessor = (function() {
    * @private
    */
   function extract_other_format_metadata_(image_bytes, basic_info) {
-    Logger.log(' ⚠️ Advanced EXIF extraction for ' + basic_info.format + ' not fully implemented. Checking for common patterns.');
+    Logger.log(` ⚠️ Advanced EXIF extraction for ${basic_info.format} not fully implemented. Checking for common patterns.`);
     
     // Try a generic search for TIFF header within the file as fallback
     // This is speculative and might not be standard for these formats
-    for (var i = 0; i < Math.min(image_bytes.length - 8, 1024); i++) {
+    for (let i = 0; i < Math.min(image_bytes.length - 8, 1024); i++) {
       if ((image_bytes[i] === 0x49 && image_bytes[i + 1] === 0x49) || // Little endian TIFF
           (image_bytes[i] === 0x4D && image_bytes[i + 1] === 0x4D)) { // Big endian TIFF
         try {
-          var potential_tiff = image_bytes.slice(i);
-          var tiff_structure = parse_tiff_structure_(potential_tiff);
+          const potential_tiff = image_bytes.slice(i);
+          const tiff_structure = parse_tiff_structure_(potential_tiff);
           if (tiff_structure) {
-            Logger.log(' ✅ Found embedded TIFF structure in ' + basic_info.format + ' file');
+            Logger.log(` ✅ Found embedded TIFF structure in ${basic_info.format} file`);
             return organize_metadata_(tiff_structure, basic_info);
           }
         } catch (error) {
@@ -679,43 +679,41 @@ var ExifProcessor = (function() {
    * @returns {object|null} Box-formatted metadata object with enhanced EXIF data or null on error
    */
   ns.extract_metadata = function(file_id, access_token, filename) {
-    var file_display_name = filename || file_id;
+    const file_display_name = filename || file_id;
     
     if (!file_id || !access_token) {
       Logger.log('ERROR: ExifProcessor.extract_metadata requires file_id and access_token');
       return null;
     }
     
-    var utils = init_utils_();
-    var image_bytes;
+    const utils = init_utils_();
+    let image_bytes;
     
     try {
-      Logger.log(' > Parsing comprehensive EXIF data from ' + file_display_name + '...');
+      Logger.log(` > Parsing comprehensive EXIF data from ${file_display_name}...`);
       
-      var download_url = Config.BOX_API_BASE_URL + '/files/' + file_id + '/content';
-      var response = utils.rateLimitExpBackoff(function() {
+      const download_url = `${ConfigManager.BOX_API_BASE_URL}/files/${file_id}/content`;
+      const response = utils.rateLimitExpBackoff(function() {
         return UrlFetchApp.fetch(download_url, {
-          headers: { 'Authorization': 'Bearer ' + access_token },
+          headers: { 'Authorization': `Bearer ${access_token}` },
           muteHttpExceptions: true
         });
       });
       
       if (response.getResponseCode() !== 200) {
-        Logger.log('    Failed to download ' + file_display_name + ' for metadata extraction. HTTP Code: ' + 
-                  response.getResponseCode() + " Response: " + response.getContentText().substring(0, 200));
+        Logger.log(`    Failed to download ${file_display_name} for metadata extraction. HTTP Code: ${response.getResponseCode()} Response: ${response.getContentText().substring(0, 200)}`);
         return null;
       }
       
-      var image_blob = response.getBlob();
+      const image_blob = response.getBlob();
       image_bytes = new Uint8Array(image_blob.getBytes());
       
-      var basic_info = extract_basic_file_info_(image_bytes);
+      const basic_info = extract_basic_file_info_(image_bytes);
       basic_info.filename = file_display_name;
       
-      Logger.log(' > Format detected: ' + (basic_info.format || 'Unknown') + ' for ' + file_display_name + 
-                '. Size: ' + image_bytes.length + ' bytes.');
+      Logger.log(` > Format detected: ${basic_info.format || 'Unknown'} for ${file_display_name}. Size: ${image_bytes.length} bytes.`);
 
-      var metadata_from_parser = null;
+      let metadata_from_parser = null;
       
       if (basic_info.format === 'JPEG' || basic_info.format === 'TIFF') {
         metadata_from_parser = extract_jpeg_metadata_(image_bytes, basic_info);
@@ -730,27 +728,26 @@ var ExifProcessor = (function() {
       }
 
       if (metadata_from_parser) {
-        Logger.log(' > File parsed. EXIF found: ' + metadata_from_parser.hasExif + ' for ' + file_display_name + '.');
+        Logger.log(` > File parsed. EXIF found: ${metadata_from_parser.hasExif} for ${file_display_name}.`);
         return convert_to_box_format_(metadata_from_parser);
       } else {
-        Logger.log(' ⚠️ No processable EXIF structure identified in ' + file_display_name + '. Returning basic info.');
+        Logger.log(` ⚠️ No processable EXIF structure identified in ${file_display_name}. Returning basic info.`);
         return convert_to_box_format_({ hasExif: false, fileInfo: basic_info });
       }
       
     } catch (error) {
-      Logger.log('    ERROR: Parsing EXIF from ' + file_display_name + ' failed: ' + error.toString() + 
-                (error.stack ? '\nStack: ' + error.stack : ''));
+      Logger.log(`    ERROR: Parsing EXIF from ${file_display_name} failed: ${error.toString()}${error.stack ? '\nStack: ' + error.stack : ''}`);
       
-      var error_basic_info = { 
+      const error_basic_info = { 
         filename: file_display_name, 
         fileSize: (image_bytes ? image_bytes.length : 0), 
         format: 'unknown' 
       };
-      var box_error_format = convert_to_box_format_({ hasExif: false, fileInfo: error_basic_info });
+      const box_error_format = convert_to_box_format_({ hasExif: false, fileInfo: error_basic_info });
       
       // Ensure technicalNotes exists before appending
       box_error_format.technicalNotes = (box_error_format.technicalNotes || '') + 
-        ' EXIF Parsing Error: ' + String(error.message || error).substring(0, 100);
+        ` EXIF Parsing Error: ${String(error.message || error).substring(0, 100)}`;
       
       return box_error_format;
     }
@@ -764,7 +761,7 @@ var ExifProcessor = (function() {
    * @returns {object|null} Enhanced EXIF data object for compatibility
    */
   ns.extract_enhanced_metadata = function(file_id, access_token, filename) {
-    var box_formatted_metadata = ns.extract_metadata(file_id, access_token, filename);
+    const box_formatted_metadata = ns.extract_metadata(file_id, access_token, filename);
     
     if (!box_formatted_metadata) {
       return null;
@@ -772,7 +769,7 @@ var ExifProcessor = (function() {
     
     // Return in legacy format for compatibility
     return {
-      hasExif: box_formatted_metadata.processingStage !== Config.PROCESSING_STAGE_FAILED,
+      hasExif: box_formatted_metadata.processingStage !== ConfigManager.PROCESSING_STAGE_FAILED,
       enhanced: true,
       metadata: box_formatted_metadata,
       extractionMethod: 'comprehensive_parser'

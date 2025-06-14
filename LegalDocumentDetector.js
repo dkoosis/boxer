@@ -1,22 +1,22 @@
 // File: LegalDocumentDetector.gs
 // Legal document detection for Box files
-// Depends on: Config.gs, BoxAuth.gs, BoxFileOperations.gs
+// Depends on: ConfigManager.gs, BoxAuth.gs, BoxFileOperations.gs
 
 /**
  * LegalDocumentDetector namespace for identifying legal documents in Box
  */
-var LegalDocumentDetector = (function() {
+const LegalDocumentDetector = (function() {
   'use strict';
   
-  var ns = {};
+  const ns = {};
   
   // Detection configuration
-  var DETECTION_VERSION = 'v1.0';
-  var CONFIDENCE_THRESHOLD = 50;
-  var LEGAL_DOC_TEMPLATE_KEY = null; // Will be loaded from Config
+  const DETECTION_VERSION = 'v1.0';
+  const CONFIDENCE_THRESHOLD = 50;
+  let LEGAL_DOC_TEMPLATE_KEY = null; // Will be loaded from Config
   
   // Legal entities and patterns
-  var LEGAL_ENTITIES = [
+  const LEGAL_ENTITIES = [
     // Major law firms
     'Cooley LLP', 'Wilson Sonsini', 'Latham & Watkins', 'Skadden', 'Kirkland & Ellis',
     'DLA Piper', 'Baker McKenzie', 'White & Case', 'Freshfields', 'Allen & Overy',
@@ -29,7 +29,7 @@ var LegalDocumentDetector = (function() {
     'Esq.', 'Attorney', 'Counsel', 'Legal Advisor'
   ];
   
-  var LEGAL_ENTITY_PATTERNS = [
+  const LEGAL_ENTITY_PATTERNS = [
     /\b\w+\s+(Law|Legal)\s+(Group|Firm|LLP|LLC|PC|PLLC)\b/gi,
     /\bGeneral\s+Counsel\b/gi,
     /\bChief\s+Legal\s+Officer\b/gi,
@@ -38,13 +38,13 @@ var LegalDocumentDetector = (function() {
     /\b\w+,?\s+Esq\.?\b/gi
   ];
   
-  var CONTRACT_KEYWORDS = [
+  const CONTRACT_KEYWORDS = [
     'agreement', 'contract', 'license', 'nda', 'mou', 'sow', 'msa',
     'amendment', 'addendum', 'exhibit', 'terms', 'conditions',
     'subscription', 'renewal', 'software license', 'service agreement'
   ];
   
-  var LEGAL_CONTENT_PATTERNS = [
+  const LEGAL_CONTENT_PATTERNS = [
     /\bwhereas\b/gi,
     /\bparty of the first part\b/gi,
     /\bexecuted\s+and\s+delivered\b/gi,
@@ -56,7 +56,7 @@ var LegalDocumentDetector = (function() {
     /\bsubject\s+to\s+the\s+terms\s+and\s+conditions\b/gi
   ];
   
-  var ESIGNATURE_INDICATORS = [
+  const ESIGNATURE_INDICATORS = [
     'Box Sign', 'Adobe Sign', 'DocuSign', 'HelloSign', 'PandaDoc',
     'Electronically signed', 'Digital signature', 'E-signature'
   ];
@@ -67,7 +67,7 @@ var LegalDocumentDetector = (function() {
    */
   function getLegalTemplateKey_() {
     if (!LEGAL_DOC_TEMPLATE_KEY) {
-      LEGAL_DOC_TEMPLATE_KEY = Config.getProperty('BOX_LEGAL_METADATA_ID') || 'legalAgreement';
+      LEGAL_DOC_TEMPLATE_KEY = ConfigManager.getProperty('BOX_LEGAL_METADATA_ID') || 'legalAgreement';
     }
     return LEGAL_DOC_TEMPLATE_KEY;
   }
@@ -79,7 +79,7 @@ var LegalDocumentDetector = (function() {
    */
   ns.isRelevantFileType = function(filename) {
     if (!filename) return false;
-    var lowerName = filename.toLowerCase();
+    const lowerName = filename.toLowerCase();
     return lowerName.endsWith('.pdf') || 
            lowerName.endsWith('.docx') || 
            lowerName.endsWith('.doc') || 
@@ -93,27 +93,27 @@ var LegalDocumentDetector = (function() {
    * @returns {object} Analysis results
    */
   function analyzeFileNameAndPath_(filename, folderPath) {
-    var score = 0;
-    var indicators = [];
+    let score = 0;
+    const indicators = [];
     
-    var lowerName = filename.toLowerCase();
-    var lowerPath = folderPath.toLowerCase();
-    var combined = (lowerName + ' ' + lowerPath);
+    const lowerName = filename.toLowerCase();
+    const lowerPath = folderPath.toLowerCase();
+    const combined = (lowerName + ' ' + lowerPath);
     
     // Check for contract keywords
     CONTRACT_KEYWORDS.forEach(function(keyword) {
       if (combined.includes(keyword)) {
         score += 20;
-        indicators.push('keyword:' + keyword);
+        indicators.push(`keyword:${keyword}`);
       }
     });
     
     // Legal folder paths
-    var legalFolders = ['legal', 'contracts', 'agreements', 'compliance', 'licenses'];
+    const legalFolders = ['legal', 'contracts', 'agreements', 'compliance', 'licenses'];
     legalFolders.forEach(function(folder) {
       if (lowerPath.includes(folder)) {
         score += 15;
-        indicators.push('folder:' + folder);
+        indicators.push(`folder:${folder}`);
       }
     });
     
@@ -134,33 +134,33 @@ var LegalDocumentDetector = (function() {
    * @returns {object} Content analysis results
    */
   function analyzeDocumentContent_(fileId, accessToken, filename) {
-    var score = 0;
-    var indicators = [];
-    var extractedText = '';
+    let score = 0;
+    const indicators = [];
+    let extractedText = '';
     
     try {
       // Use Vision API to extract text (works for PDFs too)
-      var visionResult = analyzeImageWithVisionImproved(fileId, accessToken, filename);
+      const visionResult = analyzeImageWithVisionImproved(fileId, accessToken, filename);
       
       if (visionResult && !visionResult.error && visionResult.text) {
         extractedText = visionResult.text;
         
         // Check for legal entities
-        var entityMatches = 0;
+        let entityMatches = 0;
         LEGAL_ENTITIES.forEach(function(entity) {
           if (extractedText.toLowerCase().includes(entity.toLowerCase())) {
             score += 50; // High weight for known legal entities
-            indicators.push('entity:' + entity);
+            indicators.push(`entity:${entity}`);
             entityMatches++;
           }
         });
         
         // Check for legal entity patterns
         LEGAL_ENTITY_PATTERNS.forEach(function(pattern) {
-          var matches = extractedText.match(pattern);
+          const matches = extractedText.match(pattern);
           if (matches) {
             score += 30;
-            indicators.push('entity_pattern:' + matches[0]);
+            indicators.push(`entity_pattern:${matches[0]}`);
             entityMatches++;
           }
         });
@@ -169,12 +169,12 @@ var LegalDocumentDetector = (function() {
         ESIGNATURE_INDICATORS.forEach(function(indicator) {
           if (extractedText.toLowerCase().includes(indicator.toLowerCase())) {
             score += 40;
-            indicators.push('esignature:' + indicator);
+            indicators.push(`esignature:${indicator}`);
           }
         });
         
         // Check for legal content patterns
-        var legalPatternMatches = 0;
+        let legalPatternMatches = 0;
         LEGAL_CONTENT_PATTERNS.forEach(function(pattern) {
           if (pattern.test(extractedText)) {
             legalPatternMatches++;
@@ -183,7 +183,7 @@ var LegalDocumentDetector = (function() {
         
         if (legalPatternMatches >= 2) {
           score += 25;
-          indicators.push('legal_language:' + legalPatternMatches + '_patterns');
+          indicators.push(`legal_language:${legalPatternMatches}_patterns`);
         }
         
         // Bonus for multiple entity matches (strong signal)
@@ -194,7 +194,7 @@ var LegalDocumentDetector = (function() {
       }
       
     } catch (error) {
-      Logger.log('Error analyzing document content for ' + filename + ': ' + error.toString());
+      Logger.log(`Error analyzing document content for ${filename}: ${error.toString()}`);
     }
     
     return {
@@ -216,10 +216,10 @@ var LegalDocumentDetector = (function() {
       return null;
     }
     
-    Logger.log('🔍 Analyzing legal document potential: ' + fileDetails.name);
+    Logger.log(`🔍 Analyzing legal document potential: ${fileDetails.name}`);
     
     try {
-      var folderPath = 'N/A';
+      let folderPath = 'N/A';
       if (fileDetails.path_collection && fileDetails.path_collection.entries) {
         folderPath = fileDetails.path_collection.entries.slice(1)
           .map(function(p) { return p.name; })
@@ -227,16 +227,16 @@ var LegalDocumentDetector = (function() {
       }
       
       // Analyze filename and path
-      var fileAnalysis = analyzeFileNameAndPath_(fileDetails.name, folderPath);
+      const fileAnalysis = analyzeFileNameAndPath_(fileDetails.name, folderPath);
       
       // Analyze document content
-      var contentAnalysis = analyzeDocumentContent_(fileDetails.id, accessToken, fileDetails.name);
+      const contentAnalysis = analyzeDocumentContent_(fileDetails.id, accessToken, fileDetails.name);
       
       // Calculate total confidence
-      var totalScore = fileAnalysis.score + contentAnalysis.score;
-      var confidence = Math.min(100, totalScore); // Cap at 100
+      const totalScore = fileAnalysis.score + contentAnalysis.score;
+      const confidence = Math.min(100, totalScore); // Cap at 100
       
-      var result = {
+      const result = {
         isLegalDocument: confidence >= CONFIDENCE_THRESHOLD,
         confidence: confidence,
         detectionVersion: DETECTION_VERSION,
@@ -246,18 +246,16 @@ var LegalDocumentDetector = (function() {
         analysisDate: new Date().toISOString()
       };
       
-      Logger.log('📊 Legal detection result: ' + fileDetails.name + 
-                ' - Confidence: ' + confidence + '% (' + 
-                (result.isLegalDocument ? 'LEGAL' : 'NOT LEGAL') + ')');
+      Logger.log(`📊 Legal detection result: ${fileDetails.name} - Confidence: ${confidence}% (${result.isLegalDocument ? 'LEGAL' : 'NOT LEGAL'})`);
       
       if (result.indicators.length > 0) {
-        Logger.log('   Indicators: ' + result.indicators.join(', '));
+        Logger.log(`   Indicators: ${result.indicators.join(', ')}`);
       }
       
       return result;
       
     } catch (error) {
-      Logger.log('❌ Error in legal document detection for ' + fileDetails.name + ': ' + error.toString());
+      Logger.log(`❌ Error in legal document detection for ${fileDetails.name}: ${error.toString()}`);
       return null;
     }
   };
@@ -273,7 +271,7 @@ var LegalDocumentDetector = (function() {
       throw new Error('File details and detection result required');
     }
     
-    var folderPath = 'N/A';
+    let folderPath = 'N/A';
     if (fileDetails.path_collection && fileDetails.path_collection.entries) {
       folderPath = fileDetails.path_collection.entries.slice(1)
         .map(function(p) { return p.name; })
@@ -313,49 +311,48 @@ var LegalDocumentDetector = (function() {
   ns.processLegalDocumentsInFolder = function(folderId, accessToken, maxFiles) {
     maxFiles = maxFiles || 50;
     
-    Logger.log('=== 📋 Processing Legal Documents in Folder: ' + folderId + ' ===');
+    Logger.log(`=== 📋 Processing Legal Documents in Folder: ${folderId} ===`);
     
     try {
-      var listUrl = Config.BOX_API_BASE_URL + '/folders/' + folderId + '/items?limit=' + 
-                   Math.min(maxFiles, 1000) + '&fields=id,name,type,size,path_collection,created_at,parent';
+      const listUrl = `${ConfigManager.BOX_API_BASE_URL}/folders/${folderId}/items?limit=${Math.min(maxFiles, 1000)}&fields=id,name,type,size,path_collection,created_at,parent`;
       
-      var response = UrlFetchApp.fetch(listUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken },
+      const response = UrlFetchApp.fetch(listUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
         muteHttpExceptions: true
       });
       
       if (response.getResponseCode() !== 200) {
-        Logger.log('❌ Failed to list items in folder ' + folderId);
+        Logger.log(`❌ Failed to list items in folder ${folderId}`);
         return;
       }
       
-      var listData = JSON.parse(response.getContentText());
-      var relevantFiles = listData.entries.filter(function(item) {
+      const listData = JSON.parse(response.getContentText());
+      const relevantFiles = listData.entries.filter(function(item) {
         return item.type === 'file' && ns.isRelevantFileType(item.name);
       });
       
-      Logger.log('📄 Found ' + relevantFiles.length + ' relevant files for legal analysis');
+      Logger.log(`📄 Found ${relevantFiles.length} relevant files for legal analysis`);
       
-      var processed = 0;
-      var detected = 0;
+      let processed = 0;
+      let detected = 0;
       
       relevantFiles.slice(0, maxFiles).forEach(function(file) {
         try {
-          var detectionResult = ns.detectLegalDocument(file, accessToken);
+          const detectionResult = ns.detectLegalDocument(file, accessToken);
           
           if (detectionResult && detectionResult.isLegalDocument) {
-            var legalMetadata = ns.createLegalMetadata(file, detectionResult);
+            const legalMetadata = ns.createLegalMetadata(file, detectionResult);
             
             // Apply metadata using the configured template key
-            var success = BoxFileOperations.applyMetadata(
+            const success = BoxFileOperations.applyMetadata(
               file.id, legalMetadata, accessToken, getLegalTemplateKey_()
             );
             
             if (success) {
               detected++;
-              Logger.log('✅ Legal document detected and tagged: ' + file.name);
+              Logger.log(`✅ Legal document detected and tagged: ${file.name}`);
             } else {
-              Logger.log('⚠️ Failed to apply legal metadata: ' + file.name);
+              Logger.log(`⚠️ Failed to apply legal metadata: ${file.name}`);
             }
           }
           
@@ -367,17 +364,18 @@ var LegalDocumentDetector = (function() {
           }
           
         } catch (error) {
-          Logger.log('❌ Error processing ' + file.name + ': ' + error.toString());
+          Logger.log(`❌ Error processing ${file.name}: ${error.toString()}`);
         }
       });
       
       Logger.log('\n📊 Legal Document Processing Complete:');
-      Logger.log('   Files analyzed: ' + processed);
-      Logger.log('   Legal documents detected: ' + detected);
-      Logger.log('   Detection rate: ' + Math.round(detected / processed * 100) + '%');
+      Logger.log(`   Files analyzed: ${processed}`);
+      Logger.log(`   Legal documents detected: ${detected}`);
+      Logger.log(`   Detection rate: ${Math.round(detected / processed * 100)}%`);
       
     } catch (error) {
-      Logger.log('❌ Error in legal document processing: ' + error.toString());
+      ErrorHandler.reportError(error, 'LegalDocumentDetector.processLegalDocumentsInFolder', 
+        { folderId, maxFiles });
     }
   };
   
@@ -388,7 +386,7 @@ var LegalDocumentDetector = (function() {
   ns.testLegalDetection = function(testFileId) {
     Logger.log('=== 🧪 Testing Legal Document Detection ===');
     
-    var accessToken = getValidAccessToken();
+    const accessToken = getValidAccessToken();
     if (!accessToken) {
       Logger.log('❌ No access token available');
       return;
@@ -398,34 +396,33 @@ var LegalDocumentDetector = (function() {
       if (!testFileId) {
         // Find a test file
         Logger.log('🔍 Finding test files...');
-        var testFolderId = Config.getProperty('BOX_PRIORITY_FOLDER') || '0';
+        const testFolderId = ConfigManager.getProperty('BOX_PRIORITY_FOLDER') || '0';
         ns.processLegalDocumentsInFolder(testFolderId, accessToken, 5);
         return;
       }
       
       // Test specific file
-      var fileDetailsUrl = Config.BOX_API_BASE_URL + '/files/' + testFileId + 
-                          '?fields=id,name,size,path_collection,created_at,parent';
-      var response = UrlFetchApp.fetch(fileDetailsUrl, {
-        headers: { 'Authorization': 'Bearer ' + accessToken }
+      const fileDetailsUrl = `${ConfigManager.BOX_API_BASE_URL}/files/${testFileId}?fields=id,name,size,path_collection,created_at,parent`;
+      const response = UrlFetchApp.fetch(fileDetailsUrl, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
       });
       
       if (response.getResponseCode() === 200) {
-        var fileDetails = JSON.parse(response.getContentText());
-        var result = ns.detectLegalDocument(fileDetails, accessToken);
+        const fileDetails = JSON.parse(response.getContentText());
+        const result = ns.detectLegalDocument(fileDetails, accessToken);
         
         if (result) {
-          Logger.log('🎯 Detection Results for: ' + fileDetails.name);
-          Logger.log('   Legal Document: ' + (result.isLegalDocument ? 'YES' : 'NO'));
-          Logger.log('   Confidence: ' + result.confidence + '%');
-          Logger.log('   Indicators: ' + result.indicators.join(', '));
+          Logger.log(`🎯 Detection Results for: ${fileDetails.name}`);
+          Logger.log(`   Legal Document: ${result.isLegalDocument ? 'YES' : 'NO'}`);
+          Logger.log(`   Confidence: ${result.confidence}%`);
+          Logger.log(`   Indicators: ${result.indicators.join(', ')}`);
         } else {
           Logger.log('⚠️ File not relevant for legal detection');
         }
       }
       
     } catch (error) {
-      Logger.log('❌ Test failed: ' + error.toString());
+      Logger.log(`❌ Test failed: ${error.toString()}`);
     }
   };
   
@@ -438,7 +435,7 @@ function testLegalDetection(fileId) {
 }
 
 function processLegalDocsInTestFolder() {
-  var accessToken = getValidAccessToken();
-  var testFolderId = Config.getProperty('BOX_PRIORITY_FOLDER') || '0';
+  const accessToken = getValidAccessToken();
+  const testFolderId = ConfigManager.getProperty('BOX_PRIORITY_FOLDER') || '0';
   return LegalDocumentDetector.processLegalDocumentsInFolder(testFolderId, accessToken, 20);
 }
