@@ -208,6 +208,28 @@ const ConfigManager = (function() {
       description: "Access level for shared links created for archived files ('open', 'company', 'collaborators')",
       default: 'company',
       validate: val => ['open', 'company', 'collaborators'].includes(val)
+    },
+
+    // Throttling Controls
+    AIRTABLE_PROCESSING_BATCH_SIZE: {
+      required: false, category: 'throttling', description: 'Number of Airtable records to process per run.',
+      default: 5, validate: val => !isNaN(parseInt(val))
+    },
+    AIRTABLE_SLEEP_DELAY_MS: {
+      required: false, category: 'throttling', description: 'Delay between processing Airtable records in ms.',
+      default: 2000, validate: val => !isNaN(parseInt(val))
+    },
+    METADATA_ATTACH_BATCH_SIZE: {
+      required: false, category: 'throttling', description: 'Number of files to attach metadata templates to in a batch.',
+      default: 50, validate: val => !isNaN(parseInt(val))
+    },
+    METADATA_ATTACH_FILE_DELAY_MS: {
+        required: false, category: 'throttling', description: 'Delay between individual file template attachments in ms.',
+        default: 100, validate: val => !isNaN(parseInt(val))
+    },
+    METADATA_ATTACH_BATCH_DELAY_MS: {
+        required: false, category: 'throttling', description: 'Delay between batches of template attachments in ms.',
+        default: 2000, validate: val => !isNaN(parseInt(val))
     }
   };
   
