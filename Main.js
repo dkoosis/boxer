@@ -1,5 +1,5 @@
-// File: Main.js
-// Central orchestrator for the Boxer system.
+// File: Main.js (Enhanced Version)
+// Central orchestrator for the Boxer system with integrated configuration validation
 // All scheduled triggers should point to the functions in this file.
 
 /**
@@ -14,6 +14,7 @@ function loadAllModules_() {
   // --- Load all modules onto the Boxer namespace ---
   // Use try-catch for each module to handle missing modules gracefully
   try { if (typeof Config !== 'undefined') Boxer.Config = Config; } catch (e) { Logger.log('Config module not available'); }
+  try { if (typeof ConfigValidator !== 'undefined') Boxer.ConfigValidator = ConfigValidator; } catch (e) { Logger.log('ConfigValidator module not available'); }
   try { if (typeof OAuthServices !== 'undefined') Boxer.OAuthServices = OAuthServices; } catch (e) { Logger.log('OAuthServices module not available'); }
   try { if (typeof ErrorHandler !== 'undefined') Boxer.ErrorHandler = ErrorHandler; } catch (e) { Logger.log('ErrorHandler module not available'); }
   try { if (typeof BoxAuth !== 'undefined') Boxer.BoxAuth = BoxAuth; } catch (e) { Logger.log('BoxAuth module not available'); }
@@ -34,6 +35,94 @@ function loadAllModules_() {
   Logger.log('📦 Loaded modules: ' + loadedModules.join(', '));
   
   return Boxer;
+}
+
+/**
+ * Validates configuration and attempts auto-repair if needed
+ * @returns {object} Validation results with status and any errors
+ */
+function validateAndRepairConfiguration_() {
+  try {
+    if (typeof ConfigValidator === 'undefined') {
+      Logger.log('⚠️ ConfigValidator not available - skipping validation');
+      return { valid: true, warnings: ['ConfigValidator module not loaded'] };
+    }
+    
+    // Run validation with auto-fix enabled
+    var results = ConfigValidator.validateConfiguration(true);
+    
+    if (!results.valid) {
+      // Log the setup guide for manual intervention
+      var guide = ConfigValidator.generateSetupGuide(results);
+      Logger.log(guide);
+      
+      // If we fixed some issues, re-validate to check final status
+      if (results.fixed > 0) {
+        Logger.log('🔄 Re-validating after auto-fixes...');
+        results = ConfigValidator.validateConfiguration(false);
+      }
+    }
+    
+    if (results.fixed > 0) {
+      Logger.log('✅ Auto-fixed ' + results.fixed + ' configuration issue(s)');
+    }
+    
+    return results;
+    
+  } catch (error) {
+    Logger.log('❌ Configuration validation failed: ' + error.toString());
+    return { valid: false, errors: ['Configuration validation error: ' + error.toString()] };
+  }
+}
+
+/**
+ * Enhanced health check that includes configuration validation
+ * @returns {boolean} True if system is ready to process
+ */
+function performSystemHealthCheck_(Boxer) {
+  Logger.log('🏥 === System Health Check ===');
+  
+  // Step 1: Validate and repair configuration
+  var configResults = validateAndRepairConfiguration_();
+  
+  if (!configResults.valid) {
+    Logger.log('❌ Configuration validation failed');
+    Logger.log('🛑 CRITICAL: Required configurations are missing');
+    Logger.log('💡 Run setupBoxer() to complete configuration');
+    
+    // Report this as a critical error
+    if (typeof ErrorHandler !== 'undefined' && ErrorHandler.notifyCriticalError) {
+      var configError = new Error('Required configurations missing: ' + configResults.errors.join(', '));
+      ErrorHandler.notifyCriticalError(configError, 'System Health Check', configResults);
+    }
+    
+    return false;
+  }
+  
+  // Step 2: Check Google Services health
+  var health_check_passed = false;
+  if (Boxer.Diagnostics && typeof Boxer.Diagnostics.check_critical_services === 'function') {
+    health_check_passed = Boxer.Diagnostics.check_critical_services();
+  } else {
+    Logger.log('⚠️ Diagnostics module not available, using basic health check');
+    health_check_passed = basicHealthCheck_();
+  }
+  
+  if (!health_check_passed) {
+    Logger.log('🛑 PROCESSING ABORTED: Critical Google Services are not responding.');
+    
+    // Run detailed diagnostics
+    if (Boxer.Diagnostics && typeof Boxer.Diagnostics.detailed_health_check === 'function') {
+      Logger.log('🩺 Running detailed health check...');
+      var detailed_status = Boxer.Diagnostics.detailed_health_check();
+      Logger.log('Detailed Health Status: ' + JSON.stringify(detailed_status, null, 2));
+    }
+    
+    return false;
+  }
+  
+  Logger.log('✅ System health check passed');
+  return true;
 }
 
 /**
@@ -62,59 +151,20 @@ function basicHealthCheck_() {
  * This is your main image processing workflow using the robust report-based approach.
  * Recommended Trigger: Every 2-4 hours
  */
-/**
- * ENTRY POINT 1: Sweeps Box.com for image files and enhances their metadata.
- * This is your main image processing workflow using the robust report-based approach.
- * Recommended Trigger: Every 2-4 hours
- */
 function add_metadata_to_images() {
   try {
     Logger.log('🐕 === BOXER: Starting Image Metadata Processing ===');
     Logger.log('⏰ Start time: ' + new Date().toISOString());
     
-    const Boxer = loadAllModules_(); // Ensures all modules are loaded before execution.
+    const Boxer = loadAllModules_();
     
-    // Health check first
-    var health_check_passed = false;
-    if (Boxer.Diagnostics && typeof Boxer.Diagnostics.check_critical_services === 'function') {
-      health_check_passed = Boxer.Diagnostics.check_critical_services();
-    } else {
-      Logger.log('⚠️ Diagnostics module not available, using basic health check');
-      health_check_passed = basicHealthCheck_();
+    // Perform comprehensive system health check (includes config validation)
+    if (!performSystemHealthCheck_(Boxer)) {
+      Logger.log('🔄 Boxer will retry when system is healthy');
+      return { success: false, error: 'System health check failed' };
     }
-    
-    // --- MODIFIED BLOCK ---
-    // If the health check fails, run the detailed check and report it.
-    if (!health_check_passed) {
-      Logger.log('🛑 PROCESSING ABORTED: Critical Google Services are not responding.');
 
-      // SOP Step 2: Automatically run detailed health check for deeper insight.
-      Logger.log('🩺 Running detailed health check as per SOP...');
-      var detailed_status = {};
-      if (Boxer.Diagnostics && typeof Boxer.Diagnostics.detailed_health_check === 'function') {
-          detailed_status = Boxer.Diagnostics.detailed_health_check();
-          // Log the detailed status for immediate review in the logs.
-          Logger.log('Detailed Health Status: ' + JSON.stringify(detailed_status, null, 2));
-      }
-
-      // Report the critical failure with the detailed context.
-      if (typeof ErrorHandler !== 'undefined' && ErrorHandler.notifyCriticalError) {
-          var error_message = 'Critical service health check failed. Aborting run.';
-          var context = {
-              reason: 'Initial health check failed.',
-              detailed_status: detailed_status
-          };
-          var health_check_error = new Error(error_message);
-          // Notify with the detailed context for better triage.
-          ErrorHandler.notifyCriticalError(health_check_error, 'add_metadata_to_images (Health Check)', context);
-      }
-      
-      Logger.log('🔄 Boxer will retry when services recover');
-      return { success: false, error: 'Google Services outage detected', details: detailed_status };
-    }
-    // --- END OF MODIFICATION ---
-
-    Logger.log('✅ Google Services healthy - proceeding with processing');
+    Logger.log('✅ All systems healthy - proceeding with processing');
 
     // Use the report-based processing (most robust method)
     if (!Boxer.BoxReportManager || typeof Boxer.BoxReportManager.runReportBasedProcessing !== 'function') {
@@ -159,26 +209,26 @@ function archive_airtable_attachments() {
     Logger.log('📋 === BOXER: Starting Airtable Archival ===');
     Logger.log('⏰ Start time: ' + new Date().toISOString());
     
-    const Boxer = loadAllModules_(); // Ensures all modules are loaded before execution.
+    const Boxer = loadAllModules_();
     
-    // Health check first
-    var health_check_passed = false;
-    if (Boxer.Diagnostics && typeof Boxer.Diagnostics.check_critical_services === 'function') {
-      health_check_passed = Boxer.Diagnostics.check_critical_services();
-    } else {
-      Logger.log('⚠️ Diagnostics module not available, using basic health check');
-      health_check_passed = basicHealthCheck_();
-    }
-    
-    if (!health_check_passed) {
-      Logger.log('🛑 PROCESSING ABORTED: Critical Google Services are not responding.');
-      return { success: false, error: 'Google Services outage detected' };
+    // Perform comprehensive system health check
+    if (!performSystemHealthCheck_(Boxer)) {
+      Logger.log('🔄 Boxer will retry when system is healthy');
+      return { success: false, error: 'System health check failed' };
     }
 
     // Check if AirtableArchivalManager is available
     if (!Boxer.AirtableArchivalManager || typeof Boxer.AirtableArchivalManager.runAirtableArchival !== 'function') {
       Logger.log('❌ AirtableArchivalManager not available - cannot proceed');
       return { success: false, error: 'AirtableArchivalManager module not available' };
+    }
+
+    // Check if Airtable API key is configured
+    var airtableKey = PropertiesService.getScriptProperties().getProperty('AIRTABLE_API_KEY');
+    if (!airtableKey) {
+      Logger.log('⚠️ Airtable API key not configured - skipping archival');
+      Logger.log('💡 Run setAirtableApiKey("YOUR_API_KEY") to enable this feature');
+      return { success: false, error: 'Airtable API key not configured' };
     }
 
     // Run Airtable archival with default configuration
@@ -220,20 +270,12 @@ function add_metadata_to_legal_docs() {
     Logger.log('⚖️ === BOXER: Starting Legal Document Scan ===');
     Logger.log('⏰ Start time: ' + new Date().toISOString());
     
-    const Boxer = loadAllModules_(); // Ensures all modules are loaded before execution.
+    const Boxer = loadAllModules_();
     
-    // Health check first
-    var health_check_passed = false;
-    if (Boxer.Diagnostics && typeof Boxer.Diagnostics.check_critical_services === 'function') {
-      health_check_passed = Boxer.Diagnostics.check_critical_services();
-    } else {
-      Logger.log('⚠️ Diagnostics module not available, using basic health check');
-      health_check_passed = basicHealthCheck_();
-    }
-    
-    if (!health_check_passed) {
-      Logger.log('🛑 PROCESSING ABORTED: Critical Google Services are not responding.');
-      return { success: false, error: 'Google Services outage detected' };
+    // Perform comprehensive system health check
+    if (!performSystemHealthCheck_(Boxer)) {
+      Logger.log('🔄 Boxer will retry when system is healthy');
+      return { success: false, error: 'System health check failed' };
     }
 
     // Check if required modules are available
@@ -286,13 +328,23 @@ function add_metadata_to_legal_docs() {
 }
 
 /**
- * Simple test function to verify basic functionality
+ * Enhanced test function that includes configuration check
  */
 function test_boxer_basic() {
   Logger.log('🧪 === Basic Boxer Test ===');
   
   try {
     const Boxer = loadAllModules_();
+    
+    // Test configuration first
+    Logger.log('\n📋 Configuration Check:');
+    var configResults = validateAndRepairConfiguration_();
+    Logger.log('Configuration valid: ' + (configResults.valid ? '✅' : '❌'));
+    
+    if (!configResults.valid) {
+      Logger.log('⚠️ Configuration issues found. Run setupBoxer() to fix.');
+      return { success: false, configuration_valid: false };
+    }
     
     // Test basic health check
     var health_ok = false;
@@ -315,7 +367,7 @@ function test_boxer_basic() {
     }
     
     Logger.log('🎉 Basic test complete');
-    return { success: true, health_ok: health_ok };
+    return { success: true, health_ok: health_ok, configuration_valid: configResults.valid };
     
   } catch (error) {
     Logger.log('❌ Basic test failed: ' + error.toString());

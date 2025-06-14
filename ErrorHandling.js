@@ -1,5 +1,6 @@
 // File: ErrorHandling.js
 // Centralized error handling and reporting for the Boxer system.
+// Enhanced to handle missing or invalid tracking resources gracefully.
 
 /**
  * ErrorHandler namespace for centralized error management.
@@ -56,6 +57,7 @@ var ErrorHandler = (function() {
   
   /**
    * Reports an error to a central Google Sheet for tracking and analysis.
+   * Enhanced to handle missing or invalid tracking sheet gracefully.
    * @param {Error} error The error object.
    * @param {string} functionName The name of the function where the error occurred.
    * @param {object} context Additional context.
@@ -66,19 +68,39 @@ var ErrorHandler = (function() {
     
     try {
       // Check if Config is available and has the required properties
-      if (typeof Config === 'undefined' || !Config.TRACKING_SHEET_ID) {
-        Logger.log('⚠️ No Google Sheet configured for error tracking - using log only');
+      if (typeof Config === 'undefined') {
+        Logger.log('⚠️ Config not available - using log only');
         return;
       }
       
-      const errorObject = createErrorObject_(error, functionName, context);
+      var trackingSheetId = Config.TRACKING_SHEET_ID;
+      if (!trackingSheetId) {
+        Logger.log('⚠️ No tracking sheet configured - using log only');
+        return;
+      }
       
-      const sheet = SpreadsheetApp.openById(Config.TRACKING_SHEET_ID).getSheetByName(Config.ERROR_LOG_SHEET_NAME || 'Error_Log');
+      // Try to open the sheet
+      var sheet;
+      try {
+        sheet = SpreadsheetApp.openById(trackingSheetId).getSheetByName(Config.ERROR_LOG_SHEET_NAME || 'Error_Log');
+      } catch (sheetError) {
+        Logger.log('⚠️ Could not access tracking sheet - it may have been deleted');
+        // Clear the invalid property
+        try {
+          Config.SCRIPT_PROPERTIES.deleteProperty('TRACKING_SHEET_ID');
+          Logger.log('   Cleared invalid TRACKING_SHEET_ID');
+        } catch (e) {
+          // Ignore
+        }
+        return;
+      }
       
       if (!sheet) {
         Logger.log(`⚠️ Could not find error log sheet: ${Config.ERROR_LOG_SHEET_NAME || 'Error_Log'}`);
         return;
       }
+      
+      const errorObject = createErrorObject_(error, functionName, context);
       
       // Append the error as a new row
       sheet.appendRow([
@@ -100,23 +122,30 @@ var ErrorHandler = (function() {
 
   /**
    * Sends a critical error notification via email.
+   * Enhanced to handle missing configuration gracefully.
    * @param {Error} error The error object.
    * @param {string} functionName The name of the function where the error occurred.
    * @param {object} context Additional context.
    */
   ns.notifyCriticalError = function(error, functionName, context) {
-    // Report the error to the sheet first
+    // Report the error to the sheet first (if available)
     ns.reportError(error, functionName, context);
     
     try {
       // Check if Config and email are available
-      if (typeof Config === 'undefined' || !Config.CENTRAL_ERROR_EMAIL) {
+      if (typeof Config === 'undefined') {
+        Logger.log('⚠️ Config not available for email notifications');
+        return;
+      }
+      
+      var email = Config.CENTRAL_ERROR_EMAIL || Config.SCRIPT_PROPERTIES.getProperty('CENTRAL_ERROR_EMAIL');
+      
+      if (!email) {
         Logger.log('⚠️ No email configured for critical error notifications');
         return;
       }
       
       const errorObject = createErrorObject_(error, functionName, context);
-      const email = Config.CENTRAL_ERROR_EMAIL;
 
       const subject = `Boxer Critical Error: ${errorObject.functionName}`;
       const body = `
