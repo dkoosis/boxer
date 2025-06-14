@@ -135,18 +135,22 @@ var BoxReportManager = (function() {
         }
 
         var folder;
-        var cacheFolderId = Config.getProperty('BOXER_CACHE_FOLDER');
-        if (cacheFolderId) {
-          try {
-            folder = DriveApp.getFolderById(cacheFolderId);
-          } catch (e) {
-            Logger.log('⚠️ Could not access cache folder. Using root folder.');
-            folder = DriveApp.getRootFolder();
-          }
-        } else {
-          folder = DriveApp.getRootFolder();
-        }
+var cacheFolderId = Config.getProperty('BOXER_CACHE_FOLDER');
+if (cacheFolderId) {
+  try {
+    folder = DriveApp.getFolderById(cacheFolderId);
+    // Ensure folder is named "Boxer"
+    if (folder.getName() !== 'Boxer') {
+      folder.setName('Boxer');
+    }
+  } catch (e) {
+    Logger.log('⚠️ Could not access Boxer folder. Using root folder.');
+    folder = DriveApp.getRootFolder();
+  }
+}
 
+// Keep the original Box report filename
+var fileName = 'box_report_' + latestReport.id + '_' + new Date().toISOString().slice(0, 10) + '.csv';
         var fileName = 'boxer_report_cache_' + latestReport.id + '_' + new Date().toISOString().slice(0, 10) + '.csv';
         var driveFile = folder.createFile(fileName, reportContent);
         

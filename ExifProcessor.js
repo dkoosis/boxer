@@ -88,7 +88,7 @@ var ExifProcessor = (function() {
   function init_utils_() {
     if (utils_ === null) {
       if (typeof cUseful !== 'undefined') {
-        utils_ = cUseful.Utils;
+        utils_ = cUseful;
       } else {
         // Fallback object with basic rate limiting
         utils_ = {

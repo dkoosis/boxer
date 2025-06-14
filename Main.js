@@ -124,7 +124,7 @@ function archive_airtable_attachments() {
       return { success: true, skipped: true };
     }
     
-    const result = AirtableArchivalManager.runAirtableArchival();
+    const result = AirtableArchiver.archiveTable(Config.getProperty('AIRTABLE_DEFAULT_CONFIG'));
     
     // Store stats in tracking sheet
     if (result && Config.BOXER_TRACKING_SHEET_ID) {
