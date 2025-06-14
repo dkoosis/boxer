@@ -688,12 +688,12 @@ const MetadataExtraction = (function() {
   };
   
   /**
-   * Extracts metadata combining basic info, EXIF, and Vision API analysis.
+   * Orchestrates the full metadata extraction process, combining basic info, EXIF, and Vision API analysis.
    * @param {object} fileDetails Full file details from Box API
    * @param {string} accessToken Valid Box access token
-   * @returns {object} Enhanced metadata object
+   * @returns {object} Enhanced metadata object, sanitized for Box
    */
-  ns.extractMetadata = function(fileDetails, accessToken) {
+  ns.orchestrateFullExtraction = function(fileDetails, accessToken) {
     // Extract filename and fileId from fileDetails for use in logging and calls
     const filename = fileDetails.name;
     const fileId = fileDetails.id;
@@ -702,39 +702,11 @@ const MetadataExtraction = (function() {
     const basicMetadata = ns.extractComprehensiveMetadata(fileDetails);
     const combinedMetadata = JSON.parse(JSON.stringify(basicMetadata)); // Deep copy
 
-    // Extract EXIF data, passing filename for logging
-    const exifData = extractMetadata(fileId, accessToken, filename);
-    if (exifData && exifData.hasExif) {
-      if (exifData.metadata) {
-        if (exifData.metadata.cameraModel) combinedMetadata.cameraModel = exifData.metadata.cameraModel;
-        if (exifData.metadata.dateTaken) combinedMetadata.dateTaken = exifData.metadata.dateTaken;
-        if (exifData.metadata.imageWidth) combinedMetadata.imageWidth = exifData.metadata.imageWidth;
-        if (exifData.metadata.imageHeight) combinedMetadata.imageHeight = exifData.metadata.imageHeight;
-        if (exifData.metadata.aspectRatio) combinedMetadata.aspectRatio = exifData.metadata.aspectRatio;
-        if (exifData.metadata.megapixels) combinedMetadata.megapixels = exifData.metadata.megapixels;
-        
-        // GPS coordinates - all three values
-        if (typeof exifData.metadata.gpsLatitude === 'number') {
-          combinedMetadata.gpsLatitude = exifData.metadata.gpsLatitude;
-        }
-        if (typeof exifData.metadata.gpsLongitude === 'number') {
-          combinedMetadata.gpsLongitude = exifData.metadata.gpsLongitude;
-        }
-        if (typeof exifData.metadata.gpsAltitude === 'number') {
-          combinedMetadata.gpsAltitude = exifData.metadata.gpsAltitude;
-        }
-        
-        // Camera settings
-        if (exifData.metadata.cameraSettings) {
-          combinedMetadata.cameraSettings = exifData.metadata.cameraSettings;
-        }
-        
-        // Technical notes
-        if (exifData.metadata.technicalNotes) {
-          combinedMetadata.technicalNotes = exifData.metadata.technicalNotes;
-        }
-      }
-      combinedMetadata.processingStage = ConfigManager.PROCESSING_STAGE_EXIF;
+    // Extract EXIF data using the renamed function from ExifProcessor
+    const exifData = ExifProcessor.extractExifData(fileId, accessToken, filename);
+    if (exifData && exifData.hasExif && exifData.metadata) {
+        Object.assign(combinedMetadata, exifData.metadata); // Merge EXIF data
+        combinedMetadata.processingStage = ConfigManager.PROCESSING_STAGE_EXIF;
     }
 
     // Reverse geocode GPS coordinates if available
@@ -743,14 +715,7 @@ const MetadataExtraction = (function() {
       const locationData = reverseGeocode_(combinedMetadata.gpsLatitude, combinedMetadata.gpsLongitude);
       
       if (locationData) {
-        // Add all the geocoded location fields
-        if (locationData.gpsLocation) combinedMetadata.gpsLocation = locationData.gpsLocation;
-        if (locationData.gpsVenue) combinedMetadata.gpsVenue = locationData.gpsVenue;
-        if (locationData.gpsNeighborhood) combinedMetadata.gpsNeighborhood = locationData.gpsNeighborhood;
-        if (locationData.gpsCity) combinedMetadata.gpsCity = locationData.gpsCity;
-        if (locationData.gpsRegion) combinedMetadata.gpsRegion = locationData.gpsRegion;
-        if (locationData.gpsCountry) combinedMetadata.gpsCountry = locationData.gpsCountry;
-        
+        Object.assign(combinedMetadata, locationData); // Merge location data
         Logger.log('✅ Location data added to metadata');
       } else {
         Logger.log('⚠️ Reverse geocoding failed - GPS coordinates preserved');
@@ -760,33 +725,29 @@ const MetadataExtraction = (function() {
       Utilities.sleep(500);
     }
 
-    // Analyze with Vision API, passing filename for logging
-    // Analyze with Vision API - skip HEIC/HEIF (not supported)
+    // Analyze with Vision API, using the renamed function from VisionAnalysis
     const skipVisionFormats = ['HEIC', 'HEIF', 'TIFF'];
-    
     if (skipVisionFormats.indexOf(combinedMetadata.fileFormat) !== -1) {
       Logger.log(`⏭️ Skipping Vision API for ${combinedMetadata.fileFormat} format: ${filename}`);
       combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
         `Vision API skipped - ${combinedMetadata.fileFormat} format not supported`;
     } else {
-      const visionAnalysis = analyzeImageWithVisionImproved(fileId, accessToken, filename);
+      const visionAnalysis = VisionAnalysis.analyzeImageWithVision(fileId, accessToken, filename);
 
       if (visionAnalysis && !visionAnalysis.error) {
         combinedMetadata.aiDetectedObjects = visionAnalysis.objects ? 
-          visionAnalysis.objects.map(function(obj) { return `${obj.name} (${obj.confidence})`; }).join('; ') : '';
+          visionAnalysis.objects.map(obj => `${obj.name} (${obj.confidence})`).join('; ') : '';
         combinedMetadata.aiSceneDescription = visionAnalysis.sceneDescription || '';
         combinedMetadata.extractedText = visionAnalysis.text ? 
           visionAnalysis.text.replace(/\n/g, ' ').substring(0, 5000) : '';
         combinedMetadata.dominantColors = visionAnalysis.dominantColors ? 
-          visionAnalysis.dominantColors.map(function(c) { return `${c.rgb} (${c.score}, ${c.pixelFraction})`; }).join('; ') : '';
+          visionAnalysis.dominantColors.map(c => `${c.rgb} (${c.score}, ${c.pixelFraction})`).join('; ') : '';
         combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
         combinedMetadata.processingStage = ConfigManager.PROCESSING_STAGE_AI;
 
         // Apply AI-driven content enhancements
         const aiEnhancements = ns.enhanceContentAnalysisWithAI(combinedMetadata, visionAnalysis, filename, combinedMetadata.folderPath);
-        Object.keys(aiEnhancements).forEach(function(key) {
-          combinedMetadata[key] = aiEnhancements[key];
-        });
+        Object.assign(combinedMetadata, aiEnhancements);
 
       } else if (visionAnalysis && visionAnalysis.error) {
         Logger.log(`  Vision API error for ${filename}: ${visionAnalysis.message || visionAnalysis.error}`);
@@ -794,6 +755,7 @@ const MetadataExtraction = (function() {
           `Vision API Error: ${visionAnalysis.message || visionAnalysis.error}`;
       }
     }
+    
     // Finalize processing metadata
     combinedMetadata.lastProcessedDate = new Date().toISOString(); // Use current timestamp
     combinedMetadata.processingVersion = ConfigManager.SCRIPT_VERSION + '_enhanced';
