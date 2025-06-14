@@ -62,6 +62,11 @@ function basicHealthCheck_() {
  * This is your main image processing workflow using the robust report-based approach.
  * Recommended Trigger: Every 2-4 hours
  */
+/**
+ * ENTRY POINT 1: Sweeps Box.com for image files and enhances their metadata.
+ * This is your main image processing workflow using the robust report-based approach.
+ * Recommended Trigger: Every 2-4 hours
+ */
 function add_metadata_to_images() {
   try {
     Logger.log('🐕 === BOXER: Starting Image Metadata Processing ===');
@@ -69,7 +74,7 @@ function add_metadata_to_images() {
     
     const Boxer = loadAllModules_(); // Ensures all modules are loaded before execution.
     
-    // Health check first (use fallback if Diagnostics not available)
+    // Health check first
     var health_check_passed = false;
     if (Boxer.Diagnostics && typeof Boxer.Diagnostics.check_critical_services === 'function') {
       health_check_passed = Boxer.Diagnostics.check_critical_services();
@@ -78,11 +83,36 @@ function add_metadata_to_images() {
       health_check_passed = basicHealthCheck_();
     }
     
+    // --- MODIFIED BLOCK ---
+    // If the health check fails, run the detailed check and report it.
     if (!health_check_passed) {
       Logger.log('🛑 PROCESSING ABORTED: Critical Google Services are not responding.');
+
+      // SOP Step 2: Automatically run detailed health check for deeper insight.
+      Logger.log('🩺 Running detailed health check as per SOP...');
+      var detailed_status = {};
+      if (Boxer.Diagnostics && typeof Boxer.Diagnostics.detailed_health_check === 'function') {
+          detailed_status = Boxer.Diagnostics.detailed_health_check();
+          // Log the detailed status for immediate review in the logs.
+          Logger.log('Detailed Health Status: ' + JSON.stringify(detailed_status, null, 2));
+      }
+
+      // Report the critical failure with the detailed context.
+      if (typeof ErrorHandler !== 'undefined' && ErrorHandler.notifyCriticalError) {
+          var error_message = 'Critical service health check failed. Aborting run.';
+          var context = {
+              reason: 'Initial health check failed.',
+              detailed_status: detailed_status
+          };
+          var health_check_error = new Error(error_message);
+          // Notify with the detailed context for better triage.
+          ErrorHandler.notifyCriticalError(health_check_error, 'add_metadata_to_images (Health Check)', context);
+      }
+      
       Logger.log('🔄 Boxer will retry when services recover');
-      return { success: false, error: 'Google Services outage detected' };
+      return { success: false, error: 'Google Services outage detected', details: detailed_status };
     }
+    // --- END OF MODIFICATION ---
 
     Logger.log('✅ Google Services healthy - proceeding with processing');
 

@@ -104,50 +104,86 @@ var BoxReportManager = (function() {
      * @param {string} accessToken Valid Box access token
      * @returns {string|null} Google Drive file ID or null on error
      */
-    cacheReportToDrive: function(checkpoint, latestReport, accessToken) {
-      Logger.log('📥 Caching report to Google Drive...');
-      
-      try {
-        // Download report content from Box
-        var reportContentUrl = Config.BOX_API_BASE_URL + '/files/' + latestReport.id + '/content';
-        var reportResponse = UrlFetchApp.fetch(reportContentUrl, {
-          headers: { 'Authorization': 'Bearer ' + accessToken },
-          muteHttpExceptions: true
-        });
-        
-        if (reportResponse.getResponseCode() !== 200) {
-          Logger.log('❌ Failed to download report content. HTTP: ' + reportResponse.getResponseCode());
-          return null;
+/**
+ * Cache report content to Google Drive using bmFiddler and robust retries.
+ * @param {object} checkpoint Current checkpoint data
+ * @param {object} latestReport Report info object
+ * @param {string} accessToken Valid Box access token
+ * @returns {string|null} Google Drive file ID or null on error
+ */
+cacheReportToDrive: function(checkpoint, latestReport, accessToken) {
+  Logger.log('📥 Caching report to Google Drive with retry logic...');
+
+  try {
+    // Download report content from Box first
+    var reportContentUrl = Config.BOX_API_BASE_URL + '/files/' + latestReport.id + '/content';
+    var reportResponse = UrlFetchApp.fetch(reportContentUrl, {
+      headers: { 'Authorization': 'Bearer ' + accessToken },
+      muteHttpExceptions: true
+    });
+
+    if (reportResponse.getResponseCode() !== 200) {
+      Logger.log('❌ Failed to download report content from Box. HTTP: ' + reportResponse.getResponseCode());
+      return null;
+    }
+    var reportContent = reportResponse.getContentText();
+
+    // --- IMPROVED FOLDER HANDLING WITH RETRY MECHANISM ---
+    // Use cUseful to automatically retry the block of code on transient errors
+    var utils = cUseful; // The cUseful library is already a project dependency
+    var newDriveFileId = utils.rateLimitExpBackoff(function() {
+      // Delete old cached report if it exists
+      if (checkpoint && checkpoint.driveFileId) {
+        try {
+          DriveApp.getFileById(checkpoint.driveFileId).setTrashed(true);
+        } catch (e) {
+          // Non-critical error, log and continue
+          Logger.log('⚠️ Could not delete old cached report (may have been deleted manually): ' + e.message);
         }
-        
-        var reportContent = reportResponse.getContentText();
-        
-        // Delete old cached report if it exists
-        if (checkpoint && checkpoint.driveFileId) {
-          try {
-            DriveApp.getFileById(checkpoint.driveFileId).setTrashed(true);
-            Logger.log('🗑️ Deleted old cached report');
-          } catch (e) {
-            Logger.log('⚠️ Could not delete old cached report: ' + e.toString());
-          }
-        }
-        
-        // Create new cached file in Google Drive
-        var folder = Config.DRIVE_CACHE_FOLDER_ID ? 
-          DriveApp.getFolderById(Config.DRIVE_CACHE_FOLDER_ID) : 
-          DriveApp.getRootFolder();
-        
-        var fileName = 'boxer_report_cache_' + latestReport.id + '_' + new Date().toISOString().slice(0,10) + '.csv';
-        var driveFile = folder.createFile(fileName, reportContent);
-        
-        Logger.log('✅ Report cached to Drive: ' + fileName);
-        return driveFile.getId();
-        
-      } catch (error) {
-        Logger.log('❌ Exception caching report: ' + error.toString());
-        return null;
       }
-    },
+
+      var folder;
+      var cacheFolderId = Config.DRIVE_CACHE_FOLDER_ID;
+      if (cacheFolderId) {
+        try {
+          folder = DriveApp.getFolderById(cacheFolderId);
+        } catch (e) {
+          Logger.log('⚠️ Could not access configured DRIVE_CACHE_FOLDER_ID (' + cacheFolderId + '). Error: ' + e.message);
+          Logger.log('📂 Falling back to root Drive folder.');
+          folder = DriveApp.getRootFolder();
+        }
+      } else {
+        folder = DriveApp.getRootFolder();
+      }
+
+      var fileName = 'boxer_report_cache_' + latestReport.id + '_' + new Date().toISOString().slice(0, 10) + '.csv';
+      var driveFile = folder.createFile(fileName, reportContent);
+      
+      // If any of the DriveApp calls above fail with a transient error,
+      // cUseful.rateLimitExpBackoff will automatically wait and retry.
+
+      return driveFile.getId();
+    });
+    // --- END OF IMPROVEMENT ---
+
+    if (newDriveFileId) {
+        Logger.log('✅ Report cached to Drive: (ID: ' + newDriveFileId + ')');
+    }
+    
+    return newDriveFileId;
+
+  } catch (error) {
+    var errorMessage = '❌ Exception caching report: ' + error.toString();
+    Logger.log(errorMessage);
+    if (typeof ErrorHandler !== 'undefined' && ErrorHandler.reportError) {
+      ErrorHandler.reportError(error, 'BoxReportManager.ReportManager.cacheReportToDrive', {
+        reportId: latestReport ? latestReport.id : 'unknown',
+        reportName: latestReport ? latestReport.name : 'unknown'
+      });
+    }
+    return null;
+  }
+  },
     
     /**
      * Verify report content and structure
