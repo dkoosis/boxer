@@ -69,17 +69,7 @@ const BoxFileOperations = (function() {
       return result; 
     });
   }
-  
-  /**
-   * Checks if a filename represents an image file.
-   * @param {string} filename The filename to check
-   * @returns {boolean} True if recognized image extension
-   */
-  ns.isImageFile = function(filename) {
-    if (!filename || typeof filename !== 'string') return false;
-    return ConfigManager.isImageFile(filename);
-  };
-  
+    
   /**
    * Iteratively finds all image files with robust error handling.
    * This is safer than recursion for deep folder structures.

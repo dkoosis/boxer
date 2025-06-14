@@ -119,6 +119,14 @@ const ConfigManager = (function() {
       description: 'Box folder ID containing CSV reports',
       validate: val => val && val.length > 0
     },
+
+    BOX_REPORT_FOLDER_PREFIX: {
+      required: false,
+      category: 'box_config',
+      description: 'The text that weekly report folders begin with.',
+      default: 'Folder and File Tree run on',
+      validate: val => val && val.length > 0
+    },
     
     BOX_PRIORITY_FOLDER: {
       required: false,

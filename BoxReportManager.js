@@ -50,8 +50,9 @@ const BoxReportManager = (function() {
         }
         
         const folderItems = JSON.parse(folderResponse.getContentText()).entries;
+        const reportPrefix = ConfigManager.getProperty('BOX_REPORT_FOLDER_PREFIX');
         const reportSubfolders = folderItems.filter(function(item) {
-          return item.type === 'folder' && item.name.startsWith('Folder and File Tree run on');
+          return item.type === 'folder' && item.name.startsWith(reportPrefix);
         });
         
         if (reportSubfolders.length === 0) {
