@@ -4,14 +4,13 @@
 
 /**
  * Get the Box OAuth2 service
- * @returns {OAuth2.Service} The configured Box OAuth2 service
  */
 function getBoxService() {
-  const clientId = Config.getProperty('BOX_CLIENT_ID');
-  const clientSecret = Config.getProperty('BOX_CLIENT_SECRET');
+  const clientId = ConfigManager.getProperty('BOX_CLIENT_ID');
+  const clientSecret = ConfigManager.getProperty('BOX_CLIENT_SECRET');
   
   if (!clientId || !clientSecret) {
-    throw new Error('Box OAuth credentials not found. Run setupBoxer() to configure.');
+    throw new Error('Box OAuth credentials not found. Run BoxerApp.setup() to configure.');
   }
   
   return OAuth2.createService('Box')
@@ -20,12 +19,12 @@ function getBoxService() {
     .setClientId(clientId)
     .setClientSecret(clientSecret)
     .setCallbackFunction('authCallback')
-    .setPropertyStore(Config.SCRIPT_PROPERTIES)
+    .setPropertyStore(ConfigManager.SCRIPT_PROPERTIES)
     .setScope('root_readwrite')
     .setParam('access_type', 'offline')
     .setParam('approval_prompt', 'force')
     .setTokenHeaders({
-      'Authorization': 'Basic ' + Utilities.base64Encode(clientId + ':' + clientSecret),
+      'Authorization': `Basic ${Utilities.base64Encode(`${clientId}:${clientSecret}`)}`,
       'Content-Type': 'application/x-www-form-urlencoded'
     });
 }
@@ -52,20 +51,20 @@ function authCallback(request) {
     // Auto-detect enterprise ID after successful auth
     try {
       const token = service.getAccessToken();
-      const response = UrlFetchApp.fetch(Config.BOX_API_BASE_URL + '/users/me', {
-        headers: { 'Authorization': 'Bearer ' + token },
+      const response = UrlFetchApp.fetch(`${ConfigManager.BOX_API_BASE_URL}/users/me`, {
+        headers: { 'Authorization': `Bearer ${token}` },
         muteHttpExceptions: true
       });
       
       if (response.getResponseCode() === 200) {
         const userData = JSON.parse(response.getContentText());
-        if (userData.enterprise && userData.enterprise.id && !Config.getProperty('BOX_ENTERPRISE_ID')) {
-          Config.setProperty('BOX_ENTERPRISE_ID', userData.enterprise.id);
-          Logger.log('✅ Auto-detected Box Enterprise ID: ' + userData.enterprise.id);
+        if (userData.enterprise && userData.enterprise.id && !ConfigManager.getProperty('BOX_ENTERPRISE_ID')) {
+          ConfigManager.setProperty('BOX_ENTERPRISE_ID', userData.enterprise.id);
+          Logger.log(`✅ Auto-detected Box Enterprise ID: ${userData.enterprise.id}`);
         }
       }
     } catch (e) {
-      Logger.log('Could not auto-detect enterprise ID: ' + e.toString());
+      Logger.log(`Could not auto-detect enterprise ID: ${e.toString()}`);
     }
     
     return HtmlService.createHtmlOutput(`
@@ -87,13 +86,12 @@ function authCallback(request) {
 
 /**
  * Get a valid Box access token, refreshing if needed
- * @returns {string} Valid access token
  */
 function getValidAccessToken() {
   const service = getBoxService();
   
   if (!service.hasAccess()) {
-    throw new Error('Box authorization required. Run initializeBoxAuth() for setup instructions.');
+    throw new Error('Box authorization required. Run BoxerApp.initializeBoxAuth() for setup instructions.');
   }
   
   return service.getAccessToken();
@@ -101,7 +99,6 @@ function getValidAccessToken() {
 
 /**
  * Check if Box authentication is ready
- * @returns {boolean} True if authenticated
  */
 function isBoxAuthReady() {
   try {
@@ -129,7 +126,7 @@ function initializeBoxAuth() {
   
   Logger.log('📋 TO COMPLETE SETUP:');
   Logger.log('1. Visit this URL to authorize:');
-  Logger.log('   ' + authorizationUrl);
+  Logger.log(`   ${authorizationUrl}`);
   Logger.log('');
   Logger.log('2. Complete the Box authorization');
   Logger.log('3. Your scripts will then work automatically');
@@ -141,22 +138,22 @@ function initializeBoxAuth() {
 function testBoxAccess() {
   try {
     const token = getValidAccessToken();
-    const response = UrlFetchApp.fetch(Config.BOX_API_BASE_URL + '/users/me', {
-      headers: { 'Authorization': 'Bearer ' + token },
+    const response = UrlFetchApp.fetch(`${ConfigManager.BOX_API_BASE_URL}/users/me`, {
+      headers: { 'Authorization': `Bearer ${token}` },
       muteHttpExceptions: true
     });
     
     if (response.getResponseCode() === 200) {
       const user = JSON.parse(response.getContentText());
       Logger.log('✅ Box connection successful!');
-      Logger.log('👤 User: ' + user.name + ' (' + user.login + ')');
-      return { success: true, user: user };
+      Logger.log(`👤 User: ${user.name} (${user.login})`);
+      return { success: true, user };
     } else {
-      Logger.log('❌ Box API error: ' + response.getResponseCode());
-      return { success: false, error: 'HTTP ' + response.getResponseCode() };
+      Logger.log(`❌ Box API error: ${response.getResponseCode()}`);
+      return { success: false, error: `HTTP ${response.getResponseCode()}` };
     }
   } catch (error) {
-    Logger.log('❌ Box connection error: ' + error.toString());
+    Logger.log(`❌ Box connection error: ${error.toString()}`);
     return { success: false, error: error.toString() };
   }
 }
