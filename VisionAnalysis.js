@@ -253,17 +253,17 @@ function getColorName(r, g, b) {
 }
 
 /**
- * Enhanced Vision API analysis with improved error handling and retry logic.
+ * Main Vision API analysis function with error handling and retry logic.
  * @param {string} fileId Box file ID
  * @param {string} accessToken Valid Box access token
  * @param {string} filename Optional filename for logging
  * @returns {object|null} Enhanced analysis object or error object
  */
-function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
+function analyzeImageWithVision(fileId, accessToken, filename) {
   const fileDisplayName = filename || fileId; // Use filename if provided, else fileId
 
   if (!accessToken || !fileId) {
-    Logger.log('ERROR: analyzeImageWithVisionImproved - fileId and accessToken required');
+    Logger.log('ERROR: analyzeImageWithVision - fileId and accessToken required');
     return { error: 'MISSING_PARAMETERS', message: 'File ID and Access Token are required.' };
   }
 
@@ -369,13 +369,8 @@ function analyzeImageWithVisionImproved(fileId, accessToken, filename) {
     }
 
   } catch (error) {
-    ErrorHandler.reportError(error, 'analyzeImageWithVisionImproved', 
+    ErrorHandler.reportError(error, 'analyzeImageWithVision', 
       { fileId, filename: fileDisplayName });
     return { error: 'SCRIPT_EXCEPTION', message: error.toString() };
   }
-}
-
-// Alias for simpler calling
-function analyzeImageWithVision(fileId, accessToken) {
-  return analyzeImageWithVisionImproved(fileId, accessToken);
 }
