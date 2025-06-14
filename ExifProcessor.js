@@ -670,17 +670,17 @@ const ExifProcessor = (function() {
   // =============================================================================
 
   /**
-   * Main function to extract and parse metadata from a file.
+   * Main function to extract and parse EXIF metadata from a file.
    * @param {string} fileId Box file ID
    * @param {string} accessToken Valid Box access token
    * @param {string} filename The name of the file for logging
    * @returns {object|null} Box-formatted metadata object with enhanced EXIF data or null on error
    */
-  ns.extractMetadata = function(fileId, accessToken, filename) {
+  ns.extractExifData = function(fileId, accessToken, filename) {
     const fileDisplayName = filename || fileId;
     
     if (!fileId || !accessToken) {
-      Logger.log('ERROR: ExifProcessor.extractMetadata requires fileId and accessToken');
+      Logger.log('ERROR: ExifProcessor.extractExifData requires fileId and accessToken');
       return null;
     }
     
