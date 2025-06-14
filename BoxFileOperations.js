@@ -81,71 +81,79 @@ const BoxFileOperations = (function() {
   };
   
   /**
-   * Recursively finds all image files with robust error handling.
+   * Iteratively finds all image files with robust error handling.
+   * This is safer than recursion for deep folder structures.
    * @param {string} folderId Box folder ID to start scanning from
    * @param {string} accessToken Valid Box access token
-   * @param {object[]} allImages Accumulator array for recursion
    * @returns {object[]} Array of image file objects
    */
-  ns.findAllImageFiles = function(folderId, accessToken, allImages) {
-    folderId = folderId || ConfigManager.getProperty('BOX_PRIORITY_FOLDER') || '0';
-    allImages = allImages || [];
+  ns.findAllImageFiles = function(folderId, accessToken) {
+    const startFolderId = folderId || ConfigManager.getProperty('BOX_PRIORITY_FOLDER') || '0';
+    const allImages = [];
+    const folderQueue = [startFolderId];
+    const processedFolders = new Set();
     
     if (!accessToken) {
       throw new Error('BoxFileOperations.findAllImageFiles: accessToken is required');
     }
-        
-    try {
-      const fieldsToFetch = 'id,name,type,size,path_collection,created_at,modified_at,parent';
-      const url = `${ConfigManager.BOX_API_BASE_URL}/folders/${folderId}/items?limit=${ConfigManager.DEFAULT_API_ITEM_LIMIT}&fields=${fieldsToFetch}`;
-                
-      const response = makeRobustApiCall_(function() {
-        return UrlFetchApp.fetch(url, {
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          muteHttpExceptions: true
-        });
-      }, `findAllImageFiles for folder ${folderId}`);
-      
-      const responseCode = response.getResponseCode();
-      if (responseCode !== 200) {
-        Logger.log(`BoxFileOperations: Failed to list items in folder ${folderId}. HTTP Code: ${responseCode}. Response: ${response.getContentText().substring(0,500)}`);
-        return allImages;
+    
+    while (folderQueue.length > 0) {
+      const currentFolderId = folderQueue.shift();
+      if (processedFolders.has(currentFolderId)) {
+        continue;
       }
+      processedFolders.add(currentFolderId);
       
-      const data = JSON.parse(response.getContentText());
-      
-      data.entries.forEach(function(item) {
-        if (item.type === 'file' && ns.isImageFile(item.name)) {
-          let pathString = 'All Files';
-          if (item.path_collection && item.path_collection.entries && item.path_collection.entries.length > 1) {
-            pathString = item.path_collection.entries.slice(1)
-              .map(function(p) { return p.name; })
-              .join('/');
-          } else if (item.parent && item.parent.name && item.parent.id !== '0') {
-            pathString = item.parent.name;
-          } else if (item.parent && item.parent.id === '0') {
-            pathString = ''; 
-          }
-          
-          allImages.push({
-            id: item.id,
-            name: item.name,
-            size: item.size,
-            path: pathString,
-            created_at: item.created_at,
-            modified_at: item.modified_at
+      try {
+        const fieldsToFetch = 'id,name,type,size,path_collection,created_at,modified_at,parent';
+        const url = `${ConfigManager.BOX_API_BASE_URL}/folders/${currentFolderId}/items?limit=${ConfigManager.DEFAULT_API_ITEM_LIMIT}&fields=${fieldsToFetch}`;
+                  
+        const response = makeRobustApiCall_(function() {
+          return UrlFetchApp.fetch(url, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+            muteHttpExceptions: true
           });
-        } else if (item.type === 'folder') {
-          ns.findAllImageFiles(item.id, accessToken, allImages);
+        }, `findAllImageFiles for folder ${currentFolderId}`);
+        
+        const responseCode = response.getResponseCode();
+        if (responseCode !== 200) {
+          Logger.log(`BoxFileOperations: Failed to list items in folder ${currentFolderId}. HTTP Code: ${responseCode}. Response: ${response.getContentText().substring(0,500)}`);
+          continue; // Skip this folder on error
         }
-      });
-      
-      return allImages;
-      
-    } catch (error) {
-      ErrorHandler.reportError(error, 'BoxFileOperations.findAllImageFiles', { folderId });
-      return allImages;
+        
+        const data = JSON.parse(response.getContentText());
+        
+        data.entries.forEach(function(item) {
+          if (item.type === 'file' && ns.isImageFile(item.name)) {
+            let pathString = 'All Files';
+            if (item.path_collection && item.path_collection.entries && item.path_collection.entries.length > 1) {
+              pathString = item.path_collection.entries.slice(1).map(p => p.name).join('/');
+            } else if (item.parent && item.parent.name && item.parent.id !== '0') {
+              pathString = item.parent.name;
+            } else if (item.parent && item.parent.id === '0') {
+              pathString = ''; 
+            }
+            
+            allImages.push({
+              id: item.id,
+              name: item.name,
+              size: item.size,
+              path: pathString,
+              created_at: item.created_at,
+              modified_at: item.modified_at
+            });
+          } else if (item.type === 'folder') {
+            folderQueue.push(item.id);
+          }
+        });
+        
+      } catch (error) {
+        ErrorHandler.reportError(error, 'BoxFileOperations.findAllImageFiles', { folderId: currentFolderId });
+        continue; // Continue to next folder in queue
+      }
     }
+    
+    return allImages;
   };
   
   /**
@@ -294,26 +302,11 @@ const BoxFileOperations = (function() {
     
     try {
       const currentMetadata = ns.getCurrentMetadata(fileId, accessToken, templateKey);
+      
+      // If no metadata exists, delegate to applyMetadata to create it.
       if (!currentMetadata) {
-        Logger.log(`BoxFileOperations.updateMetadata: No current metadata to update for file ${fileId}. Attempting to create with the provided payload.`);
-         const createUrl = `${ConfigManager.BOX_API_BASE_URL}/files/${fileId}/metadata/${ConfigManager.getBoxMetadataScope()}/${templateKey}`;
-        const createResponse = makeRobustApiCall_(function() {
-            return UrlFetchApp.fetch(createUrl, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json'
-            },
-            payload: JSON.stringify(metadataToUpdate),
-            muteHttpExceptions: true
-            });
-        }, `updateMetadata (attempting create via POST) for file ${fileId}`);
-        
-        if (createResponse.getResponseCode() === 201) return true;
-        else {
-            Logger.log(`BoxFileOperations.updateMetadata: Failed to create metadata for ${fileId}. Code: ${createResponse.getResponseCode()}. Response: ${createResponse.getContentText().substring(0,300)}`);
-            return false;
-        }
+        Logger.log(`BoxFileOperations.updateMetadata: No current metadata for file ${fileId}. Delegating to create.`);
+        return ns.applyMetadata(fileId, metadataToUpdate, accessToken, templateKey);
       }
       
       const patchOperations = [];
@@ -463,9 +456,9 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage) {
    * @param {string} accessToken Valid Box access token
    */
   ns.attachTemplateToAllImages = function(accessToken) {
-    const METADATA_ATTACHMENT_BATCH_SIZE = 50;
-    const METADATA_ATTACHMENT_FILE_DELAY_MS = 100;
-    const METADATA_ATTACHMENT_BATCH_DELAY_MS = 2000;
+    const BATCH_SIZE = ConfigManager.getProperty('METADATA_ATTACH_BATCH_SIZE');
+    const FILE_DELAY_MS = ConfigManager.getProperty('METADATA_ATTACH_FILE_DELAY_MS');
+    const BATCH_DELAY_MS = ConfigManager.getProperty('METADATA_ATTACH_BATCH_DELAY_MS');
     
     const getTemplateFn = (typeof getOrCreateImageTemplate === 'function') ? getOrCreateImageTemplate : function(){ Logger.log("Warning: getOrCreateImageTemplate not available!"); return {displayName: "Mock Template"}; };
 
@@ -496,10 +489,10 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage) {
       
       const stats = { processed: 0, attached: 0, skipped: 0, errors: 0, totalFiles: allImages.length };
       
-      for (let i = 0; i < allImages.length; i += METADATA_ATTACHMENT_BATCH_SIZE) {
-        const batch = allImages.slice(i, i + METADATA_ATTACHMENT_BATCH_SIZE);
-        const batchNum = Math.floor(i / METADATA_ATTACHMENT_BATCH_SIZE) + 1;
-        const totalBatches = Math.ceil(allImages.length / METADATA_ATTACHMENT_BATCH_SIZE);
+      for (let i = 0; i < allImages.length; i += BATCH_SIZE) {
+        const batch = allImages.slice(i, i + BATCH_SIZE);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(allImages.length / BATCH_SIZE);
         
         Logger.log(`Processing batch ${batchNum} of ${totalBatches} for template attachment (${batch.length} files)`);
         
@@ -517,7 +510,7 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage) {
             }
             
             if (indexInBatch < batch.length - 1) {
-                 Utilities.sleep(METADATA_ATTACHMENT_FILE_DELAY_MS);
+                 Utilities.sleep(FILE_DELAY_MS);
             }
             
           } catch (batchError) { 
@@ -526,9 +519,9 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage) {
           }
         });
         
-        if (i + METADATA_ATTACHMENT_BATCH_SIZE < allImages.length) {
-          Logger.log(`Pausing ${METADATA_ATTACHMENT_BATCH_DELAY_MS / 1000}s after batch ${batchNum}...`);
-          Utilities.sleep(METADATA_ATTACHMENT_BATCH_DELAY_MS);
+        if (i + BATCH_SIZE < allImages.length) {
+          Logger.log(`Pausing ${BATCH_DELAY_MS / 1000}s after batch ${batchNum}...`);
+          Utilities.sleep(BATCH_DELAY_MS);
         }
       }
       
