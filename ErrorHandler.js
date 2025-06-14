@@ -49,7 +49,7 @@ const ErrorHandler = (function() {
     ns.logError(error, functionName, context);
     
     try {
-      const sheetId = ConfigManager.BOXER_TRACKING_SHEET_ID;
+      const sheetId = ConfigManager.getProperty('BOXER_TRACKING_SHEET');
       if (!sheetId) {
         return; // No tracking sheet configured
       }

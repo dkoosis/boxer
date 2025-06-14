@@ -163,7 +163,7 @@ const Diagnostics = (function() {
       
       // Try to find some image files
       const images = BoxFileOperations.findAllImageFiles(
-        ConfigManager.BOX_PRIORITY_FOLDER_ID || '0', 
+        ConfigManager.getProperty('BOX_PRIORITY_FOLDER') || '0', 
         accessToken
       );
       

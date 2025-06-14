@@ -588,34 +588,5 @@ const ConfigManager = (function() {
     return ns.IMAGE_EXTENSIONS.some(ext => lower.endsWith(ext));
   };
   
-  // Convenience getters
-  Object.defineProperty(ns, 'BOXER_CACHE_FOLDER_ID', {
-    get: () => ns.getProperty('BOXER_CACHE_FOLDER')
-  });
-  
-  Object.defineProperty(ns, 'BOXER_TRACKING_SHEET_ID', {
-    get: () => ns.getProperty('BOXER_TRACKING_SHEET')
-  });
-  
-  Object.defineProperty(ns, 'BOX_REPORTS_FOLDER_ID', {
-    get: () => ns.getProperty('BOX_REPORTS_FOLDER')
-  });
-  
-  Object.defineProperty(ns, 'BOX_PRIORITY_FOLDER_ID', {
-    get: () => ns.getProperty('BOX_PRIORITY_FOLDER')
-  });
-  
-  Object.defineProperty(ns, 'BOX_IMAGE_METADATA_KEY', {
-    get: () => ns.getProperty('BOX_IMAGE_METADATA_ID')
-  });
-  
-  Object.defineProperty(ns, 'BOX_LEGAL_METADATA_KEY', {
-    get: () => ns.getProperty('BOX_LEGAL_METADATA_ID')
-  });
-  
-  Object.defineProperty(ns, 'BOX_METADATA_TEMPLATE_KEY', {
-    get: () => ns.getProperty('BOX_IMAGE_METADATA_ID')
-  });
-  
   return ns;
 })();

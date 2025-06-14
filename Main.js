@@ -106,7 +106,7 @@ const BoxerApp = {
       }
       
       const token = getValidAccessToken();
-      const folderId = ConfigManager.BOX_PRIORITY_FOLDER_ID || '0';
+      const folderId = ConfigManager.getProperty('BOX_PRIORITY_FOLDER') || '0';
       
       const result = LegalDocumentDetector.processLegalDocumentsInFolder(folderId, token);
       

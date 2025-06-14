@@ -17,16 +17,6 @@
         "version": "134"
       },
       {
-        "userSymbol": "bmFiddler",
-        "libraryId": "13EWG4-lPrEf34itxQhAQ7b9JEbmCBfO8uE4Mhr99CHi3Pw65oxXtq-rU",
-        "version": "30"
-      },
-      {
-        "userSymbol": "bmPreFiddler",
-        "libraryId": "13JUFGY18RHfjjuKmIRRfvmGlCYrEkEtN6uUm-iLUcxOUFRJD-WBX-tkR",
-        "version": "34"
-      },
-      {
         "userSymbol": "OAuth2",
         "version": "43",
         "libraryId": "1B7FSrk5Zi6L1rSxxTDgDEUsPzlukDsi4KGuTMorsTQHhGBzBkMun4iDF"
