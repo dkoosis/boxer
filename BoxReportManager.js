@@ -390,15 +390,32 @@ const BoxReportManager = (function() {
   }
 
   /**
-   * Parses the report and filters out already processed files.
+   * Parses the report, prioritizes files without metadata, and filters out already processed files.
    * @private
    */
   function _getFilesToProcess(checkpoint, reportContent, accessToken) {
       const allReportFiles = ns.parseReport(reportContent);
       const processedIds = new Set(checkpoint.processedFileIds || []);
-      const filesToConsider = allReportFiles.filter(file => !processedIds.has(file.id));
       
-      let testFolderPath = '';
+      // Filter out files that have already been processed during this report's cycle
+      const filesToConsider = allReportFiles.filter(file => !processedIds.has(file.id));
+
+      // Prioritize files that the report indicates have no metadata yet
+      const filesWithoutMetadata = [];
+      const filesWithMetadata = [];
+      filesToConsider.forEach(file => {
+          if (file.hasMetadata) {
+              filesWithMetadata.push(file);
+          } else {
+              filesWithoutMetadata.push(file);
+          }
+      });
+
+      // The final list to process will be new files first, then existing files (for potential updates)
+      const prioritizedFiles = filesWithoutMetadata.concat(filesWithMetadata);
+      Logger.log(`ℹ️ Prioritizing ${filesWithoutMetadata.length} unprocessed files. ${filesWithMetadata.length} files with existing metadata will be checked for updates later.`);
+      
+      // Apply priority folder logic to the already-prioritized list of files
       const testFolderId = ConfigManager.getProperty('BOX_PRIORITY_FOLDER');
       if (testFolderId) {
           try {
@@ -407,21 +424,23 @@ const BoxReportManager = (function() {
               if (folderResponse.getResponseCode() === 200) {
                   const folderDetails = JSON.parse(folderResponse.getContentText());
                   const parentPath = folderDetails.path_collection.entries.map(p => p.name).join('/');
-                  testFolderPath = parentPath ? `${parentPath}/${folderDetails.name}` : folderDetails.name;
+                  const testFolderPath = parentPath ? `${parentPath}/${folderDetails.name}` : folderDetails.name;
                   Logger.log(`✅ Priority folder resolved to: "${testFolderPath}"`);
+
+                  const priorityBucket = prioritizedFiles.filter(file => file.path && (file.path === testFolderPath || (file.path + '/').startsWith(testFolderPath + '/')));
+                  const generalBucket = prioritizedFiles.filter(file => !priorityBucket.includes(file));
+
+                  Logger.log(`Found ${priorityBucket.length} files within the priority folder.`);
+                  return priorityBucket.concat(generalBucket);
               }
-          } catch (e) { /* Ignore error */ }
+          } catch (e) { 
+              Logger.log(`⚠️ Could not resolve priority folder path: ${e.toString()}`);
+          }
       }
       
-      if (testFolderPath) {
-          const priorityFiles = filesToConsider.filter(file => file.path && (file.path === testFolderPath || (file.path + '/').startsWith(testFolderPath + '/')));
-          const generalFiles = filesToConsider.filter(file => !priorityFiles.includes(file));
-          Logger.log(`Found ${priorityFiles.length} files within priority folder.`);
-          return priorityFiles.concat(generalFiles);
-      }
-      
-      return filesToConsider;
+      return prioritizedFiles;
   }
+
 
   /**
    * Processes a batch of files, respecting the execution time limit.
@@ -488,7 +507,7 @@ const BoxReportManager = (function() {
       
       // Check if file already has up-to-date metadata
       const currentMetadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
-      const finalStages = [ConfigManager.PROCESSING_STAGE_AI, ConfigManager.PROCESSING_STAGE_COMPLETE, 'human_reviewed'];
+      const finalStages = [ConfigManager.PROCESSING_STAGE_AI, ConfigManager.PROCESSING_STAGE_COMPLETE, ConfigManager.PROCESSING_STAGE_REVIEWED];
       const needsProcessing = !currentMetadata || !finalStages.includes(currentMetadata.processingStage);
 
       if (!needsProcessing) {
