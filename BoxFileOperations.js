@@ -168,7 +168,7 @@ const BoxFileOperations = (function() {
       
       const response = makeRobustApiCall_(function() {
         return UrlFetchApp.fetch(url, {
-          method: 'GET', // Changed from HEAD to GET - Google Apps Script doesn't support HEAD
+          method: 'GET',
           headers: { 'Authorization': `Bearer ${accessToken}` },
           muteHttpExceptions: true
         });
@@ -294,17 +294,8 @@ const BoxFileOperations = (function() {
     
     try {
       const currentMetadata = ns.getCurrentMetadata(fileId, accessToken, templateKey);
-      // If no current metadata, we can't "update". applyMetadata should handle creation.
-      // However, if applyMetadata calls this, metadataToUpdate is the full payload.
-      // We need to build patch operations relative to what's currently there if currentMetadata is available.
-      // If currentMetadata is null, it means the instance doesn't exist, so this update call might be inappropriate,
-      // or we should attempt a create (though applyMetadata should have done that).
-      // For robustness, if currentMetadata is null, attempt to create it with metadataToUpdate.
       if (!currentMetadata) {
         Logger.log(`BoxFileOperations.updateMetadata: No current metadata to update for file ${fileId}. Attempting to create with the provided payload.`);
-        // This is effectively a create operation if applyMetadata's POST failed for reasons other than 409,
-        // or if updateMetadata is called directly on a file without metadata.
-        // Re-using the POST logic from applyMetadata:
          const createUrl = `${ConfigManager.BOX_API_BASE_URL}/files/${fileId}/metadata/${ConfigManager.getBoxMetadataScope()}/${templateKey}`;
         const createResponse = makeRobustApiCall_(function() {
             return UrlFetchApp.fetch(createUrl, {
@@ -313,22 +304,22 @@ const BoxFileOperations = (function() {
                 'Authorization': `Bearer ${accessToken}`,
                 'Content-Type': 'application/json'
             },
-            payload: JSON.stringify(metadataToUpdate), // Use the full metadataToUpdate as the creation payload
+            payload: JSON.stringify(metadataToUpdate),
             muteHttpExceptions: true
             });
         }, `updateMetadata (attempting create via POST) for file ${fileId}`);
         
         if (createResponse.getResponseCode() === 201) return true;
         else {
-            Logger.log(`BoxFileOperations.updateMetadata: Failed to create metadata (after finding no current metadata to update) for ${fileId}. Code: ${createResponse.getResponseCode()}. Response: ${createResponse.getContentText().substring(0,300)}`);
+            Logger.log(`BoxFileOperations.updateMetadata: Failed to create metadata for ${fileId}. Code: ${createResponse.getResponseCode()}. Response: ${createResponse.getContentText().substring(0,300)}`);
             return false;
         }
       }
       
-      const patchOperations = []; // Changed from 'updates' to 'patchOperations' for clarity
+      const patchOperations = [];
       
       Object.keys(metadataToUpdate).forEach(function(key) {
-        const path = '/' + key; // Assumes keys don't need escaping for JSON Patch path
+        const path = '/' + key;
         if (metadataToUpdate.hasOwnProperty(key)) {
           if (currentMetadata.hasOwnProperty(key)) {
             if (JSON.stringify(currentMetadata[key]) !== JSON.stringify(metadataToUpdate[key])) {
@@ -341,7 +332,6 @@ const BoxFileOperations = (function() {
       });
       
       if (patchOperations.length === 0) {
-        // Logger.log('BoxFileOperations.updateMetadata: No changes needed for file ' + fileId);
         return true; 
       }
       
@@ -352,16 +342,16 @@ const BoxFileOperations = (function() {
           method: 'PUT',
           headers: {
             'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json-patch+json' // Correct for JSON Patch
+            'Content-Type': 'application/json-patch+json'
           },
-          payload: JSON.stringify(patchOperations), // Send the array of patch operations
+          payload: JSON.stringify(patchOperations),
           muteHttpExceptions: true
         });
       }, `updateMetadata (JSON Patch PUT) for file ${fileId}`);
       
       const responseCode = response.getResponseCode();
       
-      if (responseCode === 200 || responseCode === 201) { // 200 OK for update
+      if (responseCode === 200 || responseCode === 201) {
         return true;
       } else {
         const errorText = response.getContentText();
@@ -376,18 +366,17 @@ const BoxFileOperations = (function() {
   };
 
 /**
- * Marks a file's metadata to indicate processing has failed, and records the build number.
+ * Marks a file's metadata to indicate processing has failed.
  * @param {string} fileId Box file ID.
  * @param {string} accessToken Valid Box access token.
  * @param {string} errorMessage The error message to record (will be truncated).
- * @param {string} currentBuildNo The current script build number when the failure occurred.
  * @returns {boolean} True if metadata was successfully updated/applied, false otherwise.
  */
-ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo) {
+ns.markFileAsFailed = function(fileId, accessToken, errorMessage) {
   const templateKey = ConfigManager.getProperty('BOX_IMAGE_METADATA_ID');
 
-  if (!fileId || !accessToken || !currentBuildNo) {
-    Logger.log('BoxFileOperations.markFileAsFailed: fileId, accessToken, and currentBuildNo are required.');
+  if (!fileId || !accessToken) {
+    Logger.log('BoxFileOperations.markFileAsFailed: fileId and accessToken are required.');
     return false;
   }
 
@@ -396,11 +385,9 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
     metadataUpdatePayload.processingStage = ConfigManager.PROCESSING_STAGE_FAILED;
     metadataUpdatePayload.lastProcessingError = (errorMessage || "Unknown error").substring(0, 250);
     metadataUpdatePayload.lastErrorTimestamp = new Date().toISOString();
-    metadataUpdatePayload.buildNumber = currentBuildNo;
+    
+    Logger.log(`Attempting to mark file ${fileId} as FAILED. Error: ${(errorMessage || "").substring(0,50)}...`);
 
-    Logger.log(`Attempting to mark file ${fileId} as FAILED. Error: ${metadataUpdatePayload.lastProcessingError.substring(0,50)}..., Build: ${currentBuildNo}`);
-
-    // Use applyMetadata which handles POST (create) or PUT (update via patch) if instance exists (due to 409->updateMetadata)
     return ns.applyMetadata(fileId, metadataUpdatePayload, accessToken, templateKey);
     
   } catch (e) {
@@ -417,9 +404,8 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
    */
   ns.attachTemplateToImage = function(imageFile, accessToken) {
     const templateKey = ConfigManager.getProperty('BOX_IMAGE_METADATA_ID');
-    const currentBuild = ConfigManager.getCurrentBuild();
 
-    if (!accessToken || !imageFile || !imageFile.id || !imageFile.name) { // Check imageFile.name as well
+    if (!accessToken || !imageFile || !imageFile.id || !imageFile.name) {
       Logger.log('BoxFileOperations.attachTemplateToImage: imageFile (with id and name) and accessToken required');
       return 'error';
     }
@@ -431,8 +417,7 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
       
       const emptyMetadata = {
         processingStage: ConfigManager.PROCESSING_STAGE_UNPROCESSED,
-        lastProcessedDate: new Date().toISOString(),
-        buildNumber: currentBuild // Add current build number when attaching template
+        lastProcessedDate: new Date().toISOString()
       };
       
       const url = `${ConfigManager.BOX_API_BASE_URL}/files/${imageFile.id}/metadata/${ConfigManager.getBoxMetadataScope()}/${templateKey}`;
@@ -489,7 +474,7 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
       throw new Error('BoxFileOperations.attachTemplateToAllImages: accessToken required');
     }
     
-    initUtils_(); // Ensure cUseful is available for Utilities.sleep
+    initUtils_();
     
     Logger.log('=== BoxFileOperations: Attaching Template to All Images ===');
     
@@ -559,6 +544,5 @@ ns.markFileAsFailed = function(fileId, accessToken, errorMessage, currentBuildNo
     }
   };
   
-  // Return the public interface
   return ns;
 })();

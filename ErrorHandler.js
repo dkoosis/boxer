@@ -20,7 +20,7 @@ const ErrorHandler = (function() {
       errorMessage: error.message || error.toString() || 'No message',
       stackTrace: error.stack || 'No stack trace',
       context: JSON.stringify(context || {}),
-      buildNumber: ConfigManager.BUILD_NUMBER
+      scriptVersion: ConfigManager.getCurrentVersion()
     };
   }
   
@@ -70,7 +70,7 @@ const ErrorHandler = (function() {
         errorObject.errorMessage,
         errorObject.context,
         errorObject.stackTrace,
-        errorObject.buildNumber
+        errorObject.scriptVersion
       ]);
       
     } catch (e) {
@@ -108,7 +108,7 @@ ${errorObject.context}
 Stack Trace:
 ${errorObject.stackTrace}
 
-Build: ${errorObject.buildNumber}
+Version: ${errorObject.scriptVersion}
       `;
       
       MailApp.sendEmail(email, subject, body);

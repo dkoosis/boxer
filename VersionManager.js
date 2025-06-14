@@ -1,6 +1,5 @@
 // File: VersionManager.js
-// Build and script version management utilities
-// Consolidates VersionManager.js and VersionUtilities.js
+// Script version management utilities.
 
 const VersionManager = (function() {
   'use strict';
@@ -8,106 +7,44 @@ const VersionManager = (function() {
   const ns = {};
 
   /**
-   * Display current build information
+   * Display current script version information
    */
-  ns.showCurrentBuild = function() {
+  ns.showCurrentVersion = function() {
     const versionInfo = {
-      scriptVersion: ConfigManager.SCRIPT_VERSION,
-      buildNumber: ConfigManager.BUILD_NUMBER,
-      buildDate: ConfigManager.BUILD_NUMBER.split('.')[0],
-      fullVersion: `${ConfigManager.SCRIPT_VERSION}_${ConfigManager.BUILD_NUMBER}`
+      scriptVersion: ConfigManager.getCurrentVersion()
     };
     
-    Logger.log('=== 🐕 Boxer Build Information ===');
+    Logger.log('=== 🐕 Boxer Version Information ===');
     Logger.log(`Script Version: ${versionInfo.scriptVersion}`);
-    Logger.log(`Build Number: ${versionInfo.buildNumber}`);
-    Logger.log(`Build Date: ${versionInfo.buildDate}`);
-    Logger.log(`Full Version: ${versionInfo.fullVersion}`);
-    Logger.log('=====================================');
+    Logger.log('===================================');
     
     return versionInfo;
   };
 
   /**
-   * Increment build number
-   */
-  ns.incrementBuild = function() {
-    const current = ConfigManager.getCurrentBuild();
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const parts = current.split('.');
-    const increment = parts[0] === today ? String(parseInt(parts[1]) + 1).padStart(3, '0') : '001';
-    const newBuild = `${today}.${increment}`;
-    
-    ConfigManager.SCRIPT_PROPERTIES.setProperty('BUILD_NUMBER', newBuild);
-    Logger.log(`🐕 Boxer build updated: ${current} → ${newBuild}`);
-    return newBuild;
-  };
-
-  /**
-   * Check how many files need build updates
-   */
-  ns.checkBuildStatus = function(sampleSize = 20) {
-    Logger.log(`Current build: ${ConfigManager.getCurrentBuild()}`);
-    
-    const accessToken = getValidAccessToken();
-    const images = BoxFileOperations.findAllImageFiles(
-      ConfigManager.BOX_PRIORITY_FOLDER_ID || '0', 
-      accessToken
-    );
-    
-    let needsUpdate = 0;
-    let upToDate = 0;
-    let noMetadata = 0;
-    
-    images.slice(0, sampleSize).forEach(image => {
-      const metadata = BoxFileOperations.getCurrentMetadata(image.id, accessToken);
-      if (!metadata) {
-        noMetadata++;
-      } else if (metadata.buildNumber !== ConfigManager.getCurrentBuild()) {
-        needsUpdate++;
-      } else {
-        upToDate++;
-      }
-    });
-    
-    const result = {
-      sampleSize: Math.min(sampleSize, images.length),
-      upToDate,
-      needsUpdate,
-      noMetadata,
-      currentBuild: ConfigManager.getCurrentBuild()
-    };
-    
-    Logger.log(`Build Status (sample of ${result.sampleSize} files):`);
-    Logger.log(`  Up-to-date: ${upToDate}`);
-    Logger.log(`  Needs update: ${needsUpdate}`); 
-    Logger.log(`  No metadata: ${noMetadata}`);
-    
-    return result;
-  };
-
-  /**
    * Analyze version distribution across processed files
+   * @param {string} accessToken A valid Box access token.
    */
   ns.analyzeVersionDistribution = function(accessToken) {
     if (!accessToken) {
-      Logger.log('❌ No access token available');
+      Logger.log('❌ No access token available for version analysis.');
       return null;
     }
     
     Logger.log('=== 🔍 Boxer Version Distribution Analysis ===\n');
     
     try {
-      const searchQueries = ['type:file .jpg', 'type:file .png', 'type:file .jpeg'];
+      const imageExtensions = ConfigManager.IMAGE_EXTENSIONS;
+      const searchQueries = imageExtensions.map(ext => `type:file ${ext}`);
       const versionCounts = {};
       let totalProcessed = 0;
       let totalUnprocessed = 0;
       let needsUpdate = 0;
       
-      const currentVersion = `${ConfigManager.SCRIPT_VERSION}_${ConfigManager.BUILD_NUMBER}`;
+      const currentVersion = ConfigManager.getCurrentVersion();
       
-      Logger.log(`🎯 Current version: ${currentVersion}`);
-      Logger.log('🔍 Analyzing file versions...\n');
+      Logger.log(`🎯 Current script version: ${currentVersion}`);
+      Logger.log('🔍 Analyzing file versions and processing stages...\n');
       
       searchQueries.forEach(query => {
         try {
@@ -122,16 +59,16 @@ const VersionManager = (function() {
             const data = JSON.parse(response.getContentText());
             
             data.entries.forEach(file => {
-              if (BoxFileOperations.isImageFile(file.name)) {
+              if (ConfigManager.isImageFile(file.name)) {
                 const metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
                 
                 if (metadata) {
                   totalProcessed++;
-                  const fileVersion = metadata.processingVersion || metadata.scriptVersion || 'unknown';
-                  
+                  const fileVersion = metadata.processingVersion || 'unknown';
                   versionCounts[fileVersion] = (versionCounts[fileVersion] || 0) + 1;
                   
-                  if (metadata.buildNumber !== ConfigManager.getCurrentBuild()) {
+                  const finalStages = [ConfigManager.PROCESSING_STAGE_AI, ConfigManager.PROCESSING_STAGE_COMPLETE, 'human_reviewed'];
+                  if (!finalStages.includes(metadata.processingStage)) {
                     needsUpdate++;
                   }
                 } else {
@@ -140,7 +77,6 @@ const VersionManager = (function() {
               }
             });
           }
-          
           Utilities.sleep(200); // Rate limiting
         } catch (error) {
           Logger.log(`Error searching ${query}: ${error.toString()}`);
@@ -151,32 +87,28 @@ const VersionManager = (function() {
       Logger.log('📊 ANALYSIS RESULTS:');
       Logger.log(`Total processed files: ${totalProcessed}`);
       Logger.log(`Total unprocessed files: ${totalUnprocessed}`);
-      Logger.log(`Files needing version update: ${needsUpdate}\n`);
+      Logger.log(`Files needing update (incomplete stage): ${needsUpdate}\n`);
       
       if (Object.keys(versionCounts).length > 0) {
         Logger.log('🏷️ VERSION DISTRIBUTION:');
-        
         Object.keys(versionCounts)
           .sort((a, b) => versionCounts[b] - versionCounts[a])
           .forEach(version => {
             const count = versionCounts[version];
-            const isCurrent = version === currentVersion;
-            const status = isCurrent ? '✅ CURRENT' : '⚠️ OLD';
-            
-            Logger.log(`  ${version}: ${count} files ${status}`);
+            Logger.log(`  ${version}: ${count} files`);
           });
       }
       
       Logger.log('\n💡 RECOMMENDATIONS:');
       if (needsUpdate > 0) {
-        Logger.log(`🦴 Run version update processing for ${needsUpdate} outdated files`);
-        Logger.log('   Use: VersionManager.processOutdatedFiles()');
+        Logger.log(`🦴 Run update processing for ${needsUpdate} incompletely processed files.`);
+        Logger.log('   Use: BoxerApp.updateOutdatedFiles()');
       }
       if (totalUnprocessed > 0) {
-        Logger.log(`📦 Process ${totalUnprocessed} unprocessed files`);
+        Logger.log(`📦 Process ${totalUnprocessed} unprocessed files.`);
       }
       if (needsUpdate === 0 && totalUnprocessed === 0) {
-        Logger.log('🎉 All files are up-to-date with current Boxer version!');
+        Logger.log('🎉 All files appear to be fully processed!');
       }
       
       return {
@@ -194,101 +126,28 @@ const VersionManager = (function() {
   };
 
   /**
-   * Process files with outdated versions
+   * Process files that are incompletely processed.
+   * @param {string} accessToken A valid Box access token.
+   * @param {number} maxFiles The maximum number of files to process in this run.
    */
-  ns.processOutdatedFiles = function(maxFiles = 10) {
-    Logger.log('🔄 Processing files with outdated build numbers...');
+  ns.processOutdatedFiles = function(accessToken, maxFiles = 25) {
+    Logger.log('🔄 Processing files with incomplete stages...');
     Logger.log(`Maximum files to process: ${maxFiles}`);
     
-    const accessToken = getValidAccessToken();
     if (!accessToken) {
       Logger.log('❌ No access token available');
       return null;
     }
     
     try {
-      const images = BoxFileOperations.findAllImageFiles(
-        ConfigManager.BOX_PRIORITY_FOLDER_ID || '0', 
-        accessToken
-      );
+      const imageExtensions = ConfigManager.IMAGE_EXTENSIONS;
+      const searchQueries = imageExtensions.map(ext => `type:file ${ext}`);
       let processed = 0;
       let skipped = 0;
       let errors = 0;
       
-      for (let i = 0; i < images.length && processed < maxFiles; i++) {
-        const image = images[i];
-        const metadata = BoxFileOperations.getCurrentMetadata(image.id, accessToken);
-        
-        if (!metadata) {
-          Logger.log(`⏭️ Skipping ${image.name} (no existing metadata)`);
-          skipped++;
-          continue;
-        }
-        
-        if (metadata.buildNumber === ConfigManager.getCurrentBuild()) {
-          skipped++;
-          continue;
-        }
-        
-        try {
-          Logger.log(`🔄 Updating: ${image.name}`);
-          const result = MetadataExtraction.processSingleImageBasic(image, accessToken);
-          if (result && result.success !== false) {
-            processed++;
-            Logger.log(`✅ Updated: ${image.name}`);
-          } else {
-            errors++;
-            Logger.log(`❌ Failed: ${image.name}`);
-          }
-        } catch (error) {
-          errors++;
-          Logger.log(`❌ Error updating ${image.name}: ${error.toString()}`);
-        }
-        
-        Utilities.sleep(1000); // Rate limiting
-      }
-      
-      Logger.log('\n📊 Processing complete:');
-      Logger.log(`  Processed: ${processed}`);
-      Logger.log(`  Skipped: ${skipped}`);
-      Logger.log(`  Errors: ${errors}`);
-      
-      if (processed === maxFiles) {
-        Logger.log(`⚠️ Reached processing limit. Run again to process more files.`);
-      }
-      
-      return {
-        processed,
-        skipped,
-        errors,
-        reachedLimit: processed === maxFiles
-      };
-      
-    } catch (error) {
-      Logger.log(`❌ Error in processOutdatedFiles: ${error.toString()}`);
-      return null;
-    }
-  };
+      const finalStages = [ConfigManager.PROCESSING_STAGE_AI, ConfigManager.PROCESSING_STAGE_COMPLETE, 'human_reviewed'];
 
-  /**
-   * Process all files that have outdated versions
-   */
-  ns.processAllOutdatedFiles = function(maxFiles = 25) {
-    Logger.log('🔄 === Processing All Outdated Files ===');
-    Logger.log(`Maximum files to process: ${maxFiles}`);
-    
-    const accessToken = getValidAccessToken();
-    if (!accessToken) {
-      Logger.log('❌ No access token available');
-      return null;
-    }
-    
-    try {
-      const searchQueries = ['type:file .jpg', 'type:file .png', 'type:file .jpeg'];
-      let processed = 0;
-      let skipped = 0;
-      let errors = 0;
-      
       for (const query of searchQueries) {
         if (processed >= maxFiles) break;
         
@@ -305,28 +164,20 @@ const VersionManager = (function() {
             
             for (const file of data.entries) {
               if (processed >= maxFiles) break;
-              
-              if (!BoxFileOperations.isImageFile(file.name)) continue;
+              if (!ConfigManager.isImageFile(file.name)) continue;
               
               const metadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
-              if (!metadata) {
-                skipped++;
-                continue;
-              }
               
-              const fileVersion = metadata.processingVersion || metadata.scriptVersion || 'unknown';
-              if (metadata.buildNumber === ConfigManager.getCurrentBuild()) {
+              // Skip if no metadata or if processing is already complete
+              if (!metadata || finalStages.includes(metadata.processingStage)) {
                 skipped++;
                 continue;
               }
               
               try {
-                Logger.log(`🔄 Updating outdated file: ${file.name} (version: ${fileVersion})`);
+                Logger.log(`🔄 Updating file with stage '${metadata.processingStage}': ${file.name}`);
                 
-                const result = MetadataExtraction.processSingleImageBasic(
-                  { id: file.id, name: file.name }, 
-                  accessToken
-                );
+                const result = MetadataExtraction.processSingleImageBasic({ id: file.id, name: file.name }, accessToken);
                 
                 if (result && result.success !== false) {
                   processed++;
@@ -335,7 +186,6 @@ const VersionManager = (function() {
                   errors++;
                   Logger.log(`❌ Failed: ${file.name}`);
                 }
-                
                 Utilities.sleep(1000); // Rate limiting
                 
               } catch (error) {
@@ -344,9 +194,7 @@ const VersionManager = (function() {
               }
             }
           }
-          
           Utilities.sleep(200); // Rate limiting between searches
-          
         } catch (error) {
           Logger.log(`Error with search query ${query}: ${error.toString()}`);
         }
@@ -370,18 +218,19 @@ const VersionManager = (function() {
       };
       
     } catch (error) {
-      Logger.log(`❌ Error in processAllOutdatedFiles: ${error.toString()}`);
+      Logger.log(`❌ Error in processOutdatedFiles: ${error.toString()}`);
       return null;
     }
   };
 
   /**
    * Test version tracking on a single file
+   * @param {string} accessToken A valid Box access token.
+   * @param {string} fileId The ID of the file to test.
    */
-  ns.testVersionTracking = function(fileId) {
-    Logger.log('=== 🧪 Testing Version Tracking ===');
+  ns.testVersionTracking = function(accessToken, fileId) {
+    Logger.log('=== 🧪 Testing Version & Stage Tracking ===');
     
-    const accessToken = getValidAccessToken();
     if (!accessToken) {
       Logger.log('❌ No access token available');
       return { success: false, error: 'No access token' };
@@ -390,10 +239,7 @@ const VersionManager = (function() {
     try {
       // Find a test file if not specified
       if (!fileId) {
-        const testImages = BoxFileOperations.findAllImageFiles(
-          ConfigManager.BOX_PRIORITY_FOLDER_ID || '0', 
-          accessToken
-        );
+        const testImages = BoxFileOperations.findAllImageFiles('0', accessToken);
         if (testImages.length === 0) {
           Logger.log('❌ No test images found');
           return { success: false, error: 'No test images found' };
@@ -404,59 +250,38 @@ const VersionManager = (function() {
       
       Logger.log('🔍 Analyzing current metadata...');
       
-      // Get current metadata
       const currentMetadata = BoxFileOperations.getCurrentMetadata(fileId, accessToken);
-      const currentVersion = `${ConfigManager.SCRIPT_VERSION}_${ConfigManager.BUILD_NUMBER}`;
+      const currentVersion = ConfigManager.getCurrentVersion();
       
       if (currentMetadata) {
-        const fileVersion = currentMetadata.processingVersion || currentMetadata.scriptVersion || 'none';
-        const processingCount = currentMetadata.processingCount || 0;
-        const firstProcessed = currentMetadata.firstProcessedDate || 'never';
-        const lastProcessed = currentMetadata.lastProcessedDate || 'never';
-        
         Logger.log('📋 Current Status:');
-        Logger.log(`  File version: ${fileVersion}`);
-        Logger.log(`  Current version: ${currentVersion}`);
-        Logger.log(`  Processing count: ${processingCount}`);
-        Logger.log(`  First processed: ${firstProcessed}`);
-        Logger.log(`  Last processed: ${lastProcessed}`);
-        Logger.log(`  Needs update: ${currentMetadata.buildNumber !== ConfigManager.getCurrentBuild()}`);
+        Logger.log(`  File version: ${currentMetadata.processingVersion || 'none'}`);
+        Logger.log(`  Current script version: ${currentVersion}`);
+        Logger.log(`  Processing stage: ${currentMetadata.processingStage || 'unknown'}`);
         
-        if (currentMetadata.processingNotes) {
-          Logger.log(`  Processing notes: ${currentMetadata.processingNotes.substring(0, 100)}...`);
-        }
       } else {
         Logger.log('📋 No existing metadata found');
       }
       
       Logger.log('\n🔄 Testing version-aware processing...');
       
-      // Test the version-aware processing
-      const processResult = MetadataExtraction.processSingleImageBasic({ id: fileId, name: 'test-file' }, accessToken);
+      MetadataExtraction.processSingleImageBasic({ id: fileId, name: 'test-file' }, accessToken);
       
       Logger.log('\n🔍 Checking updated metadata...');
       
-      // Get updated metadata
       const updatedMetadata = BoxFileOperations.getCurrentMetadata(fileId, accessToken);
       
       if (updatedMetadata) {
         Logger.log('📋 Updated Status:');
         Logger.log(`  New version: ${updatedMetadata.processingVersion || 'none'}`);
-        Logger.log(`  New processing count: ${updatedMetadata.processingCount || 0}`);
-        Logger.log(`  Script version: ${updatedMetadata.scriptVersion || 'none'}`);
-        Logger.log(`  Build number: ${updatedMetadata.buildNumber || 'none'}`);
-        
-        if (updatedMetadata.processingNotes) {
-          Logger.log(`  Updated notes: ${updatedMetadata.processingNotes.substring(0, 150)}...`);
-        }
+        Logger.log(`  New stage: ${updatedMetadata.processingStage || 'none'}`);
         
         Logger.log('\n✅ Version tracking test complete!');
         
         return {
           success: true,
           before: currentMetadata,
-          after: updatedMetadata,
-          processingResult: processResult
+          after: updatedMetadata
         };
       } else {
         Logger.log('❌ No metadata found after processing');
@@ -467,55 +292,6 @@ const VersionManager = (function() {
       Logger.log(`❌ Version tracking test failed: ${error.toString()}`);
       return { success: false, error: error.toString() };
     }
-  };
-
-  /**
-   * Get build history from recent processing
-   */
-  ns.getBuildHistory = function() {
-    const accessToken = getValidAccessToken();
-    const images = BoxFileOperations.findAllImageFiles(
-      ConfigManager.BOX_PRIORITY_FOLDER_ID || '0', 
-      accessToken
-    );
-    
-    const builds = new Set();
-    
-    images.slice(0, 50).forEach(image => {
-      const metadata = BoxFileOperations.getCurrentMetadata(image.id, accessToken);
-      if (metadata && metadata.buildNumber) {
-        builds.add(metadata.buildNumber);
-      }
-    });
-    
-    const buildArray = Array.from(builds).sort().reverse();
-    
-    Logger.log('Recent builds found:');
-    buildArray.forEach(build => {
-      Logger.log(`  ${build}`);
-    });
-    
-    return buildArray;
-  };
-
-  /**
-   * Generate a suggested build number based on current date
-   */
-  ns.generateBuildNumber = function() {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const dateStr = `${year}${month}${day}`;
-    
-    const increment = '001';
-    const suggested = `${dateStr}.${increment}`;
-    
-    Logger.log(`💡 Suggested build number for today: ${suggested}`);
-    Logger.log('Format: YYYYMMDD.increment');
-    Logger.log(`Current: ${ConfigManager.BUILD_NUMBER}`);
-    
-    return suggested;
   };
 
   return ns;

@@ -20,7 +20,6 @@ const ConfigManager = (function() {
   ns.ERROR_LOG_SHEET_NAME = 'Error_Log';
   ns.PROCESSING_STATS_SHEET_NAME = 'Processing_Stats';
   ns.SCRIPT_VERSION = '3.0';
-  ns.BUILD_NUMBER = '20241219.001';
   
   // Processing constants
   ns.IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic', '.heif'];
@@ -145,6 +144,14 @@ const ConfigManager = (function() {
       default: '',
       validate: () => true
     },
+
+    CRITICAL_ERROR_EMAIL: {
+      required: false,
+      category: 'apis',
+      description: 'Email address for critical error notifications',
+      default: '',
+      validate: () => true
+    },
     
     AIRTABLE_API_KEY: {
       required: false,
@@ -170,13 +177,37 @@ const ConfigManager = (function() {
       default: '',
       validate: () => true
     },
-    
+
+    AIRTABLE_ATTACHMENT_FIELD: {
+      required: false,
+      category: 'airtable',
+      description: 'The name of the attachment field in Airtable',
+      default: 'Attachments',
+      validate: () => true
+    },
+
+    AIRTABLE_LINK_FIELD: {
+      required: false,
+      category: 'airtable',
+      description: 'The name of the field to store the Box link in Airtable',
+      default: 'Box_Link',
+      validate: () => true
+    },
+
     BOX_AIRTABLE_ARCHIVE_FOLDER: {
       required: false,
       category: 'airtable',
       description: 'Box folder ID for Airtable archives',
       default: '0',
       validate: () => true
+    },
+
+    BOX_AIRTABLE_SHARED_LINK_ACCESS: {
+      required: false,
+      category: 'airtable',
+      description: "Access level for shared links created for archived files ('open', 'company', 'collaborators')",
+      default: 'company',
+      validate: val => ['open', 'company', 'collaborators'].includes(val)
     }
   };
   
@@ -233,16 +264,16 @@ const ConfigManager = (function() {
     // Set up error log sheet
     const errorSheet = sheet.getActiveSheet();
     errorSheet.setName(ns.ERROR_LOG_SHEET_NAME);
-    errorSheet.getRange(1, 1, 1, 6).setValues([[
-      'Timestamp', 'Function', 'Error Message', 'Context', 'Stack Trace', 'Build Number'
+    errorSheet.getRange(1, 1, 1, 5).setValues([[
+      'Timestamp', 'Function', 'Error Message', 'Context', 'Stack Trace'
     ]]);
     errorSheet.setFrozenRows(1);
     
     // Set up stats sheet
     const statsSheet = sheet.insertSheet(ns.PROCESSING_STATS_SHEET_NAME);
-    statsSheet.getRange(1, 1, 1, 8).setValues([[
+    statsSheet.getRange(1, 1, 1, 7).setValues([[
       'Timestamp', 'Run Type', 'Files Found', 'Files Processed', 'Files Skipped', 
-      'Errors', 'Duration (sec)', 'Build Number'
+      'Errors', 'Duration (sec)'
     ]]);
     statsSheet.setFrozenRows(1);
     
@@ -514,9 +545,9 @@ const ConfigManager = (function() {
   };
   
   /**
-   * Get current build number
+   * Get current script version
    */
-  ns.getCurrentBuild = () => ns.BUILD_NUMBER;
+  ns.getCurrentVersion = () => ns.SCRIPT_VERSION;
   
   /**
    * Check if file is an image
@@ -558,6 +589,3 @@ const ConfigManager = (function() {
   
   return ns;
 })();
-
-// Make available as Config for compatibility
-const Config = ConfigManager;

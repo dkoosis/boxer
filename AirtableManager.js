@@ -11,23 +11,17 @@ const AirtableManager = (function() {
   const BATCH_SIZE = 5;
   const MAX_FILE_SIZE_MB = 50;
   const RATE_LIMIT_MS = 2000;
-  const TRACKING_KEY = 'AIRTABLE_TRACKING';
   const STATS_KEY = 'AIRTABLE_STATS';
   
   /**
-   * Get Airtable API key
-   */
-  ns.getApiKey = () => ConfigManager.getProperty('AIRTABLE_API_KEY');
-  
-  /**
    * Analyze entire workspace
+   * @param {string} apiKey Airtable API Key
    */
-  ns.analyzeWorkspace = function() {
+  ns.analyzeWorkspace = function(apiKey) {
     Logger.log('🔍 === Analyzing Airtable Workspace ===');
     
-    const apiKey = ns.getApiKey();
     if (!apiKey) {
-      Logger.log('❌ No API key. Run: BoxerApp.setAirtableApiKey("YOUR_KEY")');
+      Logger.log('❌ No API key provided. Run: BoxerApp.setAirtableApiKey("YOUR_KEY")');
       return null;
     }
     
@@ -82,13 +76,13 @@ const AirtableManager = (function() {
   
   /**
    * Archive records from specific base/table
+   * @param {object} config Configuration object for the archival task
+   * @param {string} apiKey Airtable API Key
+   * @param {string} boxToken A valid Box access token
    */
-  ns.archiveTable = function(config) {
+  ns.archiveTable = function(config, apiKey, boxToken) {
     const startTime = Date.now();
     Logger.log(`📦 === Archiving ${config.tableName} ===`);
-    
-    const apiKey = ns.getApiKey();
-    const boxToken = getValidAccessToken();
     
     if (!apiKey || !boxToken) {
       return { success: false, error: 'Missing credentials' };
@@ -147,56 +141,12 @@ const AirtableManager = (function() {
   };
   
   /**
-   * Archive by priority (largest bases first)
-   */
-  ns.archiveByPriority = function(options = {}) {
-    Logger.log('🚀 === Archive by Priority ===');
-    Logger.log(`Mode: ${options.testMode ? 'TEST' : 'LIVE'}`);
-    
-    // Get workspace analysis
-    const bases = ns.analyzeWorkspace();
-    if (!bases || bases.length === 0) return;
-    
-    const maxBases = options.maxBases || 1;
-    const maxTables = options.maxTablesPerBase || 1;
-    const maxRecords = options.maxRecords || 5;
-    
-    // Process top bases
-    bases.slice(0, maxBases).forEach(base => {
-      Logger.log(`\n📦 Processing: ${base.name}`);
-      
-      base.topTables.slice(0, maxTables).forEach(table => {
-        if (options.testMode) {
-          Logger.log(`  Would archive: ${table.name}`);
-          return;
-        }
-        
-        ns.archiveTable({
-          baseId: base.id,
-          tableName: table.name,
-          attachmentFieldName: table.attachmentField,
-          linkFieldName: 'Box_Link',
-          maxRecords
-        });
-      });
-    });
-  };
-  
-  /**
-   * Get archival statistics
-   */
-  ns.getStats = function() {
-    const stats = ConfigManager.getState(STATS_KEY) || [];
-    return stats;
-  };
-  
-  /**
    * Show recent archival statistics
    */
   ns.showStats = function() {
     Logger.log('📊 === Recent Airtable Archival Stats ===');
     
-    const stats = ns.getStats();
+    const stats = ConfigManager.getState(STATS_KEY) || [];
     if (stats.length === 0) {
       Logger.log('No archival stats available yet');
       return;
@@ -449,6 +399,7 @@ const AirtableManager = (function() {
         const boxFile = JSON.parse(uploadResponse.getContentText()).entries[0];
         
         // Create shared link
+        const sharedLinkAccess = ConfigManager.getProperty('BOX_AIRTABLE_SHARED_LINK_ACCESS');
         const linkResponse = UrlFetchApp.fetch(`${ConfigManager.BOX_API_BASE_URL}/files/${boxFile.id}`, {
           method: 'PUT',
           headers: {
@@ -456,7 +407,7 @@ const AirtableManager = (function() {
             'Content-Type': 'application/json'
           },
           payload: JSON.stringify({
-            shared_link: { access: 'open' }
+            shared_link: { access: sharedLinkAccess }
           }),
           muteHttpExceptions: true
         });
@@ -499,8 +450,7 @@ const AirtableManager = (function() {
             stats.recordsProcessed || 0,
             stats.recordsSkipped || 0,
             stats.errors || 0,
-            (stats.executionTimeMs || 0) / 1000,
-            ConfigManager.BUILD_NUMBER
+            (stats.executionTimeMs || 0) / 1000
           ]);
         }
       }

@@ -63,7 +63,8 @@ const BoxerApp = {
         return { success: false, error: 'Health check failed' };
       }
       
-      if (!ConfigManager.getProperty('AIRTABLE_API_KEY')) {
+      const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
+      if (!apiKey) {
         Logger.log('⚠️ Airtable not configured - skipping');
         return { success: true, skipped: true };
       }
@@ -71,12 +72,13 @@ const BoxerApp = {
       const config = {
         baseId: ConfigManager.getProperty('AIRTABLE_BASE_ID'),
         tableName: ConfigManager.getProperty('AIRTABLE_TABLE_NAME'),
-        attachmentFieldName: 'Attachments',
-        linkFieldName: 'Box_Link',
+        attachmentFieldName: ConfigManager.getProperty('AIRTABLE_ATTACHMENT_FIELD'),
+        linkFieldName: ConfigManager.getProperty('AIRTABLE_LINK_FIELD'),
         maxRecords: 5
       };
       
-      return AirtableManager.archiveTable(config);
+      const boxToken = getValidAccessToken();
+      return AirtableManager.archiveTable(config, apiKey, boxToken);
       
     } catch (error) {
       Logger.log(`❌ Airtable archival failed: ${error.toString()}`);
@@ -277,10 +279,10 @@ const BoxerApp = {
   // === VERSION MANAGEMENT ===
   
   /**
-   * Show current build information
+   * Show current script version
    */
-  showBuild() {
-    return VersionManager.showCurrentBuild();
+  showVersion() {
+    return VersionManager.showCurrentVersion();
   },
   
   /**
@@ -295,7 +297,8 @@ const BoxerApp = {
    * Process outdated files
    */
   updateOutdatedFiles(maxFiles = 25) {
-    return VersionManager.processAllOutdatedFiles(maxFiles);
+    const accessToken = getValidAccessToken();
+    return VersionManager.processOutdatedFiles(accessToken, maxFiles);
   },
   
   // === REPORT MANAGEMENT ===
@@ -322,20 +325,24 @@ const BoxerApp = {
    * Analyze Airtable workspace
    */
   analyzeAirtable() {
-    return AirtableManager.analyzeWorkspace();
+    const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
+    return AirtableManager.analyzeWorkspace(apiKey);
   },
   
   /**
    * Archive specific Airtable table
    */
   archiveTable(baseId, tableName, maxRecords = 5) {
-    return AirtableManager.archiveTable({
+    const config = {
       baseId,
       tableName,
-      attachmentFieldName: 'Attachments',
-      linkFieldName: 'Box_Link',
+      attachmentFieldName: ConfigManager.getProperty('AIRTABLE_ATTACHMENT_FIELD'),
+      linkFieldName: ConfigManager.getProperty('AIRTABLE_LINK_FIELD'),
       maxRecords
-    });
+    };
+    const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
+    const boxToken = getValidAccessToken();
+    return AirtableManager.archiveTable(config, apiKey, boxToken);
   }
 };
 
@@ -397,37 +404,9 @@ function checkSystemHealth_() {
   }
 }
 
-// === LEGACY COMPATIBILITY FUNCTIONS ===
-// These functions maintain compatibility with existing triggers
-
 /**
- * Legacy function for time-based triggers
- * @deprecated Use BoxerApp.processImages() instead
+ * Makes the BoxerApp.test() method executable from the Apps Script IDE.
  */
-function add_metadata_to_images() {
-  return BoxerApp.processImages();
-}
-
-/**
- * Legacy function for Airtable archival
- * @deprecated Use BoxerApp.archiveAirtable() instead
- */
-function archive_airtable_attachments() {
-  return BoxerApp.archiveAirtable();
-}
-
-/**
- * Legacy function for legal document detection
- * @deprecated Use BoxerApp.processLegalDocs() instead
- */
-function add_metadata_to_legal_docs() {
-  return BoxerApp.processLegalDocs();
-}
-
-/**
- * Legacy setup function
- * @deprecated Use BoxerApp.setup() instead
- */
-function setupBoxer() {
-  return BoxerApp.setup();
+function runBoxerTest() {
+  return BoxerApp.test();
 }

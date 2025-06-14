@@ -137,17 +137,12 @@ const BoxReportManager = (function() {
         if (cacheFolderId) {
           try {
             folder = DriveApp.getFolderById(cacheFolderId);
-            // Ensure folder is named "Boxer"
-            if (folder.getName() !== 'Boxer') {
-              folder.setName('Boxer');
-            }
           } catch (e) {
-            Logger.log('⚠️ Could not access Boxer folder. Using root folder.');
+            Logger.log('⚠️ Could not access Boxer cache folder. Using root folder.');
             folder = DriveApp.getRootFolder();
           }
         }
 
-        // Keep the original Box report filename
         const fileName = `boxer_report_cache_${latestReport.id}_${new Date().toISOString().slice(0, 10)}.csv`;
         const driveFile = folder.createFile(fileName, reportContent);
         
@@ -259,10 +254,7 @@ const BoxReportManager = (function() {
         // Check if it's an image file and has a valid ID
         if (itemName && itemId && ConfigManager.isImageFile(itemName) && /^\d+$/.test(itemId)) {
           
-          const hasMetadata = metadata && (
-            metadata.includes(ConfigManager.getProperty('BOX_IMAGE_METADATA_ID')) ||
-            metadata.includes('comprehensiveImageMetadata') // Legacy name
-          );
+          const hasMetadata = metadata && metadata.includes(ConfigManager.getProperty('BOX_IMAGE_METADATA_ID'));
           
           if (hasMetadata) {
             filesWithMetadataCount++;
@@ -461,14 +453,13 @@ const BoxReportManager = (function() {
       
       const fileDetails = JSON.parse(response.getContentText());
       
-      // Check if file already has current metadata
+      // Check if file already has up-to-date metadata
       const currentMetadata = BoxFileOperations.getCurrentMetadata(file.id, accessToken);
-      const needsProcessing = !currentMetadata || 
-                           currentMetadata.processingStage === ConfigManager.PROCESSING_STAGE_UNPROCESSED ||
-                           currentMetadata.buildNumber !== ConfigManager.BUILD_NUMBER;
-      
+      const finalStages = [ConfigManager.PROCESSING_STAGE_AI, ConfigManager.PROCESSING_STAGE_COMPLETE, 'human_reviewed'];
+      const needsProcessing = !currentMetadata || !finalStages.includes(currentMetadata.processingStage);
+
       if (!needsProcessing) {
-        Logger.log(`⏭️ Skipping ${file.name} (already processed)`);
+        Logger.log(`⏭️ Skipping ${file.name} (already processed with stage: ${currentMetadata.processingStage})`);
         return 'skipped';
       }
       
@@ -512,8 +503,7 @@ const BoxReportManager = (function() {
             stats.filesProcessed || 0,
             stats.filesSkipped || 0,
             stats.filesErrored || 0,
-            (stats.executionTimeMs || 0) / 1000,
-            ConfigManager.BUILD_NUMBER
+            (stats.executionTimeMs || 0) / 1000
           ]);
         }
       }
@@ -595,16 +585,3 @@ const BoxReportManager = (function() {
   
   return ns;
 })();
-
-// Convenience functions for easy access
-function runBoxReportProcessing() {
-  return BoxReportManager.runReportBasedProcessing();
-}
-
-function showBoxerStats() {
-  return BoxReportManager.showProcessingStats();
-}
-
-function resetBoxerCheckpoint() {
-  return BoxReportManager.resetProcessingCheckpoint();
-}

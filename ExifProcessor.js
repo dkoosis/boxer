@@ -85,7 +85,7 @@ const ExifProcessor = (function() {
    * Initialize cUseful library utilities
    * @private
    */
-  function init_utils_() {
+  function initUtils_() {
     if (utils_ === null) {
       if (typeof cUseful !== 'undefined') {
         utils_ = cUseful;
@@ -105,9 +105,9 @@ const ExifProcessor = (function() {
    * Extract basic file information from image bytes
    * @private
    */
-  function extract_basic_file_info_(image_bytes) {
-    const basic_info = {
-      fileSize: image_bytes.length,
+  function extractBasicFileInfo_(imageBytes) {
+    const basicInfo = {
+      fileSize: imageBytes.length,
       format: 'Unknown'
     };
     
@@ -117,7 +117,7 @@ const ExifProcessor = (function() {
       let matches = true;
       
       for (let i = 0; i < signature.length; i++) {
-        if (signature[i] !== null && image_bytes[i] !== signature[i]) {
+        if (signature[i] !== null && imageBytes[i] !== signature[i]) {
           matches = false;
           break;
         }
@@ -125,53 +125,53 @@ const ExifProcessor = (function() {
       
       if (matches) {
         if (format.startsWith('TIFF')) {
-          basic_info.format = 'TIFF';
+          basicInfo.format = 'TIFF';
         } else {
-          basic_info.format = format;
+          basicInfo.format = format;
         }
         break;
       }
     }
     
-    return basic_info;
+    return basicInfo;
   }
 
   /**
    * Find EXIF segment in JPEG/TIFF data
    * @private
    */
-  function find_exif_segment_(image_bytes) {
+  function findExifSegment_(imageBytes) {
     try {
-      if (image_bytes.length < 12) return null;
+      if (imageBytes.length < 12) return null;
       
       // For JPEG files
-      if (image_bytes[0] === 0xFF && image_bytes[1] === 0xD8) {
+      if (imageBytes[0] === 0xFF && imageBytes[1] === 0xD8) {
         let offset = 2;
-        const max_search_offset = Math.min(image_bytes.length - 4, 65536);
+        const maxSearchOffset = Math.min(imageBytes.length - 4, 65536);
         
-        while (offset < max_search_offset) {
-          if (image_bytes[offset] === 0xFF) {
-            const marker_type = image_bytes[offset + 1];
+        while (offset < maxSearchOffset) {
+          if (imageBytes[offset] === 0xFF) {
+            const markerType = imageBytes[offset + 1];
             
-            if (marker_type === 0xE1) { // APP1 marker (commonly EXIF)
-              const length = (image_bytes[offset + 2] << 8) | image_bytes[offset + 3];
-              const exif_header_offset = offset + 4;
+            if (markerType === 0xE1) { // APP1 marker (commonly EXIF)
+              const length = (imageBytes[offset + 2] << 8) | imageBytes[offset + 3];
+              const exifHeaderOffset = offset + 4;
               
               // Check for "Exif" identifier
-              if (exif_header_offset + 6 < image_bytes.length &&
-                  image_bytes[exif_header_offset] === 0x45 && // 'E'
-                  image_bytes[exif_header_offset + 1] === 0x78 && // 'x'
-                  image_bytes[exif_header_offset + 2] === 0x69 && // 'i'
-                  image_bytes[exif_header_offset + 3] === 0x66) { // 'f'
+              if (exifHeaderOffset + 6 < imageBytes.length &&
+                  imageBytes[exifHeaderOffset] === 0x45 && // 'E'
+                  imageBytes[exifHeaderOffset + 1] === 0x78 && // 'x'
+                  imageBytes[exifHeaderOffset + 2] === 0x69 && // 'i'
+                  imageBytes[exifHeaderOffset + 3] === 0x66) { // 'f'
                 
                 // Return TIFF header part (skip "Exif\0\0")
-                return image_bytes.slice(exif_header_offset + 6, offset + 2 + length);
+                return imageBytes.slice(exifHeaderOffset + 6, offset + 2 + length);
               }
             }
             
             // Move to next marker
-            const segment_length = (image_bytes[offset + 2] << 8) | image_bytes[offset + 3];
-            offset += 2 + segment_length;
+            const segmentLength = (imageBytes[offset + 2] << 8) | imageBytes[offset + 3];
+            offset += 2 + segmentLength;
           } else {
             offset++;
           }
@@ -179,9 +179,9 @@ const ExifProcessor = (function() {
       }
       
       // For TIFF files - the whole file is the EXIF data
-      if ((image_bytes[0] === 0x49 && image_bytes[1] === 0x49) || // Little endian
-          (image_bytes[0] === 0x4D && image_bytes[1] === 0x4D)) { // Big endian
-        return image_bytes;
+      if ((imageBytes[0] === 0x49 && imageBytes[1] === 0x49) || // Little endian
+          (imageBytes[0] === 0x4D && imageBytes[1] === 0x4D)) { // Big endian
+        return imageBytes;
       }
       
       return null;
@@ -195,42 +195,42 @@ const ExifProcessor = (function() {
    * Parse TIFF structure from EXIF data
    * @private
    */
-  function parse_tiff_structure_(exif_data) {
+  function parseTiffStructure_(exifData) {
     try {
-      if (!exif_data || exif_data.length < 8) return null;
+      if (!exifData || exifData.length < 8) return null;
       
-      const is_little_endian = exif_data[0] === 0x49 && exif_data[1] === 0x49;
-      const tiff_magic = is_little_endian ? 
-        (exif_data[2] | (exif_data[3] << 8)) :
-        ((exif_data[2] << 8) | exif_data[3]);
+      const isLittleEndian = exifData[0] === 0x49 && exifData[1] === 0x49;
+      const tiffMagic = isLittleEndian ? 
+        (exifData[2] | (exifData[3] << 8)) :
+        ((exifData[2] << 8) | exifData[3]);
       
-      if (tiff_magic !== 42) return null; // Not valid TIFF
+      if (tiffMagic !== 42) return null; // Not valid TIFF
       
-      const first_ifd_offset = is_little_endian ?
-        (exif_data[4] | (exif_data[5] << 8) | (exif_data[6] << 16) | (exif_data[7] << 24)) :
-        ((exif_data[4] << 24) | (exif_data[5] << 16) | (exif_data[6] << 8) | exif_data[7]);
+      const firstIfdOffset = isLittleEndian ?
+        (exifData[4] | (exifData[5] << 8) | (exifData[6] << 16) | (exifData[7] << 24)) :
+        ((exifData[4] << 24) | (exifData[5] << 16) | (exifData[6] << 8) | exifData[7]);
       
-      const parsed_data = {
-        endianness: is_little_endian ? 'little' : 'big',
-        ifd0: parse_ifd_(exif_data, first_ifd_offset, is_little_endian),
-        exif_ifd: null,
-        gps_ifd: null
+      const parsedData = {
+        endianness: isLittleEndian ? 'little' : 'big',
+        ifd0: parseIfd_(exifData, firstIfdOffset, isLittleEndian),
+        exifIfd: null,
+        gpsIfd: null
       };
       
       // Look for EXIF and GPS sub-IFDs
-      if (parsed_data.ifd0) {
-        if (parsed_data.ifd0['34665']) { // EXIF IFD pointer
-          const exif_offset = parsed_data.ifd0['34665'].value;
-          parsed_data.exif_ifd = parse_ifd_(exif_data, exif_offset, is_little_endian);
+      if (parsedData.ifd0) {
+        if (parsedData.ifd0['34665']) { // EXIF IFD pointer
+          const exifOffset = parsedData.ifd0['34665'].value;
+          parsedData.exifIfd = parseIfd_(exifData, exifOffset, isLittleEndian);
         }
         
-        if (parsed_data.ifd0['34853']) { // GPS IFD pointer
-          const gps_offset = parsed_data.ifd0['34853'].value;
-          parsed_data.gps_ifd = parse_ifd_(exif_data, gps_offset, is_little_endian);
+        if (parsedData.ifd0['34853']) { // GPS IFD pointer
+          const gpsOffset = parsedData.ifd0['34853'].value;
+          parsedData.gpsIfd = parseIfd_(exifData, gpsOffset, isLittleEndian);
         }
       }
       
-      return parsed_data;
+      return parsedData;
     } catch (error) {
       Logger.log(`Error parsing TIFF structure: ${error.toString()}`);
       return null;
@@ -241,36 +241,36 @@ const ExifProcessor = (function() {
    * Parse Individual IFD (Image File Directory)
    * @private
    */
-  function parse_ifd_(data, offset, is_little_endian) {
+  function parseIfd_(data, offset, isLittleEndian) {
     try {
       if (offset + 2 >= data.length) return null;
       
-      const entry_count = is_little_endian ?
+      const entryCount = isLittleEndian ?
         (data[offset] | (data[offset + 1] << 8)) :
         ((data[offset] << 8) | data[offset + 1]);
       
       const entries = {};
-      let entry_offset = offset + 2;
+      let entryOffset = offset + 2;
       
-      for (let i = 0; i < entry_count; i++) {
-        if (entry_offset + 12 > data.length) break;
+      for (let i = 0; i < entryCount; i++) {
+        if (entryOffset + 12 > data.length) break;
         
-        const tag = is_little_endian ?
-          (data[entry_offset] | (data[entry_offset + 1] << 8)) :
-          ((data[entry_offset] << 8) | data[entry_offset + 1]);
+        const tag = isLittleEndian ?
+          (data[entryOffset] | (data[entryOffset + 1] << 8)) :
+          ((data[entryOffset] << 8) | data[entryOffset + 1]);
         
-        const type = is_little_endian ?
-          (data[entry_offset + 2] | (data[entry_offset + 3] << 8)) :
-          ((data[entry_offset + 2] << 8) | data[entry_offset + 3]);
+        const type = isLittleEndian ?
+          (data[entryOffset + 2] | (data[entryOffset + 3] << 8)) :
+          ((data[entryOffset + 2] << 8) | data[entryOffset + 3]);
         
-        const count = is_little_endian ?
-          (data[entry_offset + 4] | (data[entry_offset + 5] << 8) | 
-           (data[entry_offset + 6] << 16) | (data[entry_offset + 7] << 24)) :
-          ((data[entry_offset + 4] << 24) | (data[entry_offset + 5] << 16) | 
-           (data[entry_offset + 6] << 8) | data[entry_offset + 7]);
+        const count = isLittleEndian ?
+          (data[entryOffset + 4] | (data[entryOffset + 5] << 8) | 
+           (data[entryOffset + 6] << 16) | (data[entryOffset + 7] << 24)) :
+          ((data[entryOffset + 4] << 24) | (data[entryOffset + 5] << 16) | 
+           (data[entryOffset + 6] << 8) | data[entryOffset + 7]);
         
-        const value_offset = entry_offset + 8;
-        const value = parse_tag_value_(data, type, count, value_offset, is_little_endian);
+        const valueOffset = entryOffset + 8;
+        const value = parseTagValue_(data, type, count, valueOffset, isLittleEndian);
         
         entries[tag] = {
           tag: tag,
@@ -280,7 +280,7 @@ const ExifProcessor = (function() {
           tagName: EXIF_TAGS[tag] || ('Unknown_' + tag)
         };
         
-        entry_offset += 12;
+        entryOffset += 12;
       }
       
       return entries;
@@ -294,64 +294,64 @@ const ExifProcessor = (function() {
    * Parse tag value based on type
    * @private
    */
-  function parse_tag_value_(data, type, count, value_offset, is_little_endian) {
+  function parseTagValue_(data, type, count, valueOffset, isLittleEndian) {
     try {
-      const type_size = TYPE_SIZES[type] || 1;
-      const total_size = type_size * count;
+      const typeSize = TYPE_SIZES[type] || 1;
+      const totalSize = typeSize * count;
       
       // If value fits in 4 bytes, it's stored directly
-      if (total_size <= 4) {
+      if (totalSize <= 4) {
         if (type === EXIF_TYPES.ASCII) {
           let str = '';
           for (let i = 0; i < Math.min(count, 4); i++) {
-            const char_code = data[value_offset + i];
-            if (char_code === 0) break;
-            str += String.fromCharCode(char_code);
+            const charCode = data[valueOffset + i];
+            if (charCode === 0) break;
+            str += String.fromCharCode(charCode);
           }
           return str;
         } else if (type === EXIF_TYPES.SHORT) {
-          return is_little_endian ?
-            (data[value_offset] | (data[value_offset + 1] << 8)) :
-            ((data[value_offset] << 8) | data[value_offset + 1]);
+          return isLittleEndian ?
+            (data[valueOffset] | (data[valueOffset + 1] << 8)) :
+            ((data[valueOffset] << 8) | data[valueOffset + 1]);
         } else if (type === EXIF_TYPES.LONG) {
-          return is_little_endian ?
-            (data[value_offset] | (data[value_offset + 1] << 8) | 
-             (data[value_offset + 2] << 16) | (data[value_offset + 3] << 24)) :
-            ((data[value_offset] << 24) | (data[value_offset + 1] << 16) | 
-             (data[value_offset + 2] << 8) | data[value_offset + 3]);
+          return isLittleEndian ?
+            (data[valueOffset] | (data[valueOffset + 1] << 8) | 
+             (data[valueOffset + 2] << 16) | (data[valueOffset + 3] << 24)) :
+            ((data[valueOffset] << 24) | (data[valueOffset + 1] << 16) | 
+             (data[valueOffset + 2] << 8) | data[valueOffset + 3]);
         } else {
-          return data[value_offset];
+          return data[valueOffset];
         }
       } else {
         // Value is stored at offset
-        const actual_offset = is_little_endian ?
-          (data[value_offset] | (data[value_offset + 1] << 8) | 
-           (data[value_offset + 2] << 16) | (data[value_offset + 3] << 24)) :
-          ((data[value_offset] << 24) | (data[value_offset + 1] << 16) | 
-           (data[value_offset + 2] << 8) | data[value_offset + 3]);
+        const actualOffset = isLittleEndian ?
+          (data[valueOffset] | (data[valueOffset + 1] << 8) | 
+           (data[valueOffset + 2] << 16) | (data[valueOffset + 3] << 24)) :
+          ((data[valueOffset] << 24) | (data[valueOffset + 1] << 16) | 
+           (data[valueOffset + 2] << 8) | data[valueOffset + 3]);
         
-        if (actual_offset + total_size > data.length) return null;
+        if (actualOffset + totalSize > data.length) return null;
         
         if (type === EXIF_TYPES.ASCII) {
           let str = '';
           for (let i = 0; i < count; i++) {
-            const char_code = data[actual_offset + i];
-            if (char_code === 0) break;
-            str += String.fromCharCode(char_code);
+            const charCode = data[actualOffset + i];
+            if (charCode === 0) break;
+            str += String.fromCharCode(charCode);
           }
           return str;
         } else if (type === EXIF_TYPES.RATIONAL) {
-          const numerator = is_little_endian ?
-            (data[actual_offset] | (data[actual_offset + 1] << 8) | 
-             (data[actual_offset + 2] << 16) | (data[actual_offset + 3] << 24)) :
-            ((data[actual_offset] << 24) | (data[actual_offset + 1] << 16) | 
-             (data[actual_offset + 2] << 8) | data[actual_offset + 3]);
+          const numerator = isLittleEndian ?
+            (data[actualOffset] | (data[actualOffset + 1] << 8) | 
+             (data[actualOffset + 2] << 16) | (data[actualOffset + 3] << 24)) :
+            ((data[actualOffset] << 24) | (data[actualOffset + 1] << 16) | 
+             (data[actualOffset + 2] << 8) | data[actualOffset + 3]);
           
-          const denominator = is_little_endian ?
-            (data[actual_offset + 4] | (data[actual_offset + 5] << 8) | 
-             (data[actual_offset + 6] << 16) | (data[actual_offset + 7] << 24)) :
-            ((data[actual_offset + 4] << 24) | (data[actual_offset + 5] << 16) | 
-             (data[actual_offset + 6] << 8) | data[actual_offset + 7]);
+          const denominator = isLittleEndian ?
+            (data[actualOffset + 4] | (data[actualOffset + 5] << 8) | 
+             (data[actualOffset + 6] << 16) | (data[actualOffset + 7] << 24)) :
+            ((data[actualOffset + 4] << 24) | (data[actualOffset + 5] << 16) | 
+             (data[actualOffset + 6] << 8) | data[actualOffset + 7]);
           
           return denominator !== 0 ? numerator / denominator : 0;
         }
@@ -368,11 +368,11 @@ const ExifProcessor = (function() {
    * Organize parsed TIFF data into meaningful metadata
    * @private
    */
-  function organize_metadata_(tiff_structure, basic_info) {
+  function organizeMetadata_(tiffStructure, basicInfo) {
     try {
       const organized = {
         hasExif: true,
-        fileInfo: basic_info,
+        fileInfo: basicInfo,
         camera: {},
         image: {},
         settings: {},
@@ -380,30 +380,30 @@ const ExifProcessor = (function() {
         technical: {}
       };
       
-      if (!tiff_structure) {
+      if (!tiffStructure) {
         organized.hasExif = false;
         return organized;
       }
       
       // Process IFD0 (main image data)
-      if (tiff_structure.ifd0) {
-        process_ifd_data_(tiff_structure.ifd0, organized);
+      if (tiffStructure.ifd0) {
+        processIfdData_(tiffStructure.ifd0, organized);
       }
       
       // Process EXIF IFD (camera settings)
-      if (tiff_structure.exif_ifd) {
-        process_ifd_data_(tiff_structure.exif_ifd, organized);
+      if (tiffStructure.exifIfd) {
+        processIfdData_(tiffStructure.exifIfd, organized);
       }
       
       // Process GPS IFD
-      if (tiff_structure.gps_ifd) {
-        process_gps_data_(tiff_structure.gps_ifd, organized);
+      if (tiffStructure.gpsIfd) {
+        processGpsData_(tiffStructure.gpsIfd, organized);
       }
       
       return organized;
     } catch (error) {
       Logger.log(`Error organizing metadata: ${error.toString()}`);
-      return { hasExif: false, fileInfo: basic_info };
+      return { hasExif: false, fileInfo: basicInfo };
     }
   }
 
@@ -411,40 +411,40 @@ const ExifProcessor = (function() {
    * Process IFD data into organized structure
    * @private
    */
-  function process_ifd_data_(ifd, organized) {
+  function processIfdData_(ifd, organized) {
     for (const tag in ifd) {
       const entry = ifd[tag];
-      const tag_name = entry.tagName;
+      const tagName = entry.tagName;
       const value = entry.value;
       
       if (!value) continue;
       
       // Camera information
-      if (tag_name === 'Make') organized.camera.make = value;
-      else if (tag_name === 'Model') organized.camera.model = value;
-      else if (tag_name === 'Software') organized.camera.software = value;
-      else if (tag_name === 'LensMake') organized.camera.lensMake = value;
-      else if (tag_name === 'LensModel') organized.camera.lensModel = value;
+      if (tagName === 'Make') organized.camera.make = value;
+      else if (tagName === 'Model') organized.camera.model = value;
+      else if (tagName === 'Software') organized.camera.software = value;
+      else if (tagName === 'LensMake') organized.camera.lensMake = value;
+      else if (tagName === 'LensModel') organized.camera.lensModel = value;
       
       // Image dimensions and properties
-      else if (tag_name === 'ImageWidth') organized.image.width = value;
-      else if (tag_name === 'ImageLength') organized.image.height = value;
-      else if (tag_name === 'PixelXDimension') organized.image.pixelWidth = value;
-      else if (tag_name === 'PixelYDimension') organized.image.pixelHeight = value;
-      else if (tag_name === 'Orientation') organized.image.orientation = value;
+      else if (tagName === 'ImageWidth') organized.image.width = value;
+      else if (tagName === 'ImageLength') organized.image.height = value;
+      else if (tagName === 'PixelXDimension') organized.image.pixelWidth = value;
+      else if (tagName === 'PixelYDimension') organized.image.pixelHeight = value;
+      else if (tagName === 'Orientation') organized.image.orientation = value;
       
       // Camera settings
-      else if (tag_name === 'ExposureTime') organized.settings.exposureTime = value;
-      else if (tag_name === 'FNumber') organized.settings.fNumber = value;
-      else if (tag_name === 'ISOSpeedRatings') organized.settings.iso = value;
-      else if (tag_name === 'FocalLength') organized.settings.focalLength = value;
-      else if (tag_name === 'Flash') organized.settings.flash = value;
-      else if (tag_name === 'WhiteBalance') organized.settings.whiteBalance = value;
+      else if (tagName === 'ExposureTime') organized.settings.exposureTime = value;
+      else if (tagName === 'FNumber') organized.settings.fNumber = value;
+      else if (tagName === 'ISOSpeedRatings') organized.settings.iso = value;
+      else if (tagName === 'FocalLength') organized.settings.focalLength = value;
+      else if (tagName === 'Flash') organized.settings.flash = value;
+      else if (tagName === 'WhiteBalance') organized.settings.whiteBalance = value;
       
       // Date/time
-      else if (tag_name === 'DateTime') organized.technical.dateTime = value;
-      else if (tag_name === 'DateTimeOriginal') organized.technical.dateTimeOriginal = value;
-      else if (tag_name === 'DateTimeDigitized') organized.technical.dateTimeDigitized = value;
+      else if (tagName === 'DateTime') organized.technical.dateTime = value;
+      else if (tagName === 'DateTimeOriginal') organized.technical.dateTimeOriginal = value;
+      else if (tagName === 'DateTimeDigitized') organized.technical.dateTimeDigitized = value;
     }
   }
 
@@ -452,39 +452,39 @@ const ExifProcessor = (function() {
    * Process GPS data from GPS IFD
    * @private
    */
-  function process_gps_data_(gps_ifd, organized) {
+  function processGpsData_(gpsIfd, organized) {
     try {
-      let gps_lat = null, gps_lon = null, gps_alt = null;
-      let lat_ref = '', lon_ref = '', alt_ref = '';
+      let gpsLat = null, gpsLon = null, gpsAlt = null;
+      let latRef = '', lonRef = '', altRef = '';
       
-      for (const tag in gps_ifd) {
-        const entry = gps_ifd[tag];
-        const tag_name = entry.tagName;
+      for (const tag in gpsIfd) {
+        const entry = gpsIfd[tag];
+        const tagName = entry.tagName;
         const value = entry.value;
         
-        if (tag_name === 'GPSLatitudeRef') lat_ref = value;
-        else if (tag_name === 'GPSLongitudeRef') lon_ref = value;
-        else if (tag_name === 'GPSAltitudeRef') alt_ref = value;
-        else if (tag_name === 'GPSLatitude') gps_lat = value;
-        else if (tag_name === 'GPSLongitude') gps_lon = value;
-        else if (tag_name === 'GPSAltitude') gps_alt = value;
+        if (tagName === 'GPSLatitudeRef') latRef = value;
+        else if (tagName === 'GPSLongitudeRef') lonRef = value;
+        else if (tagName === 'GPSAltitudeRef') altRef = value;
+        else if (tagName === 'GPSLatitude') gpsLat = value;
+        else if (tagName === 'GPSLongitude') gpsLon = value;
+        else if (tagName === 'GPSAltitude') gpsAlt = value;
       }
       
       // Convert GPS coordinates to decimal degrees
-      if (gps_lat && lat_ref) {
-        const lat_decimal = convert_gps_coordinate_(gps_lat);
-        if (lat_ref === 'S') lat_decimal = -lat_decimal;
-        organized.gps.latitude = lat_decimal;
+      if (gpsLat && latRef) {
+        const latDecimal = convertGpsCoordinate_(gpsLat);
+        if (latRef === 'S') latDecimal = -latDecimal;
+        organized.gps.latitude = latDecimal;
       }
       
-      if (gps_lon && lon_ref) {
-        let lon_decimal = convert_gps_coordinate_(gps_lon);
-        if (lon_ref === 'W') lon_decimal = -lon_decimal;
-        organized.gps.longitude = lon_decimal;
+      if (gpsLon && lonRef) {
+        let lonDecimal = convertGpsCoordinate_(gpsLon);
+        if (lonRef === 'W') lonDecimal = -lonDecimal;
+        organized.gps.longitude = lonDecimal;
       }
       
-      if (gps_alt !== null) {
-        organized.gps.altitude = alt_ref === 1 ? -gps_alt : gps_alt;
+      if (gpsAlt !== null) {
+        organized.gps.altitude = altRef === 1 ? -gpsAlt : gpsAlt;
       }
       
     } catch (error) {
@@ -496,7 +496,7 @@ const ExifProcessor = (function() {
    * Convert GPS coordinate from degrees/minutes/seconds to decimal
    * @private
    */
-  function convert_gps_coordinate_(coordinate) {
+  function convertGpsCoordinate_(coordinate) {
     if (typeof coordinate === 'number') return coordinate;
     if (Array.isArray(coordinate) && coordinate.length >= 3) {
       return coordinate[0] + (coordinate[1] / 60) + (coordinate[2] / 3600);
@@ -508,39 +508,38 @@ const ExifProcessor = (function() {
    * Convert organized metadata to Box-compatible format
    * @private
    */
-  function convert_to_box_format_(metadata) {
+  function convertToBoxFormat_(metadata) {
     try {
-      const box_metadata = {
+      const boxMetadata = {
         processingStage: ConfigManager.PROCESSING_STAGE_EXIF,
         lastProcessedDate: new Date().toISOString(),
-        processingVersion: ConfigManager.SCRIPT_VERSION + '_enhanced',
-        buildNumber: ConfigManager.getCurrentBuild()
+        processingVersion: ConfigManager.getCurrentVersion() + '_enhanced'
       };
       
       if (!metadata.hasExif) {
-        box_metadata.processingStage = ConfigManager.PROCESSING_STAGE_FAILED;
-        box_metadata.technicalNotes = 'No EXIF data found in file';
-        return box_metadata;
+        boxMetadata.processingStage = ConfigManager.PROCESSING_STAGE_FAILED;
+        boxMetadata.technicalNotes = 'No EXIF data found in file';
+        return boxMetadata;
       }
       
       // File information
       if (metadata.fileInfo) {
-        if (metadata.fileInfo.filename) box_metadata.filename = metadata.fileInfo.filename;
-        if (metadata.fileInfo.fileSize) box_metadata.fileSize = metadata.fileInfo.fileSize;
-        if (metadata.fileInfo.format) box_metadata.fileFormat = metadata.fileInfo.format;
+        if (metadata.fileInfo.filename) boxMetadata.filename = metadata.fileInfo.filename;
+        if (metadata.fileInfo.fileSize) boxMetadata.fileSize = metadata.fileInfo.fileSize;
+        if (metadata.fileInfo.format) boxMetadata.fileFormat = metadata.fileInfo.format;
       }
       
       // Camera information
       if (metadata.camera) {
         if (metadata.camera.make && metadata.camera.model) {
-          box_metadata.cameraModel = `${metadata.camera.make} ${metadata.camera.model}`;
+          boxMetadata.cameraModel = `${metadata.camera.make} ${metadata.camera.model}`;
         } else if (metadata.camera.model) {
-          box_metadata.cameraModel = metadata.camera.model;
+          boxMetadata.cameraModel = metadata.camera.model;
         }
         
-        if (metadata.camera.software) box_metadata.cameraSoftware = metadata.camera.software;
+        if (metadata.camera.software) boxMetadata.cameraSoftware = metadata.camera.software;
         if (metadata.camera.lensMake || metadata.camera.lensModel) {
-          box_metadata.lensModel = `${metadata.camera.lensMake || ''} ${metadata.camera.lensModel || ''}`;
+          boxMetadata.lensModel = `${metadata.camera.lensMake || ''} ${metadata.camera.lensModel || ''}`;
         }
       }
       
@@ -550,57 +549,57 @@ const ExifProcessor = (function() {
         const height = metadata.image.pixelHeight || metadata.image.height;
         
         if (width && height) {
-          box_metadata.imageWidth = width;
-          box_metadata.imageHeight = height;
+          boxMetadata.imageWidth = width;
+          boxMetadata.imageHeight = height;
           
           // Calculate aspect ratio and megapixels
-          const gcd = calculate_gcd_(width, height);
-          box_metadata.aspectRatio = `${width / gcd}:${height / gcd}`;
-          box_metadata.megapixels = Math.round((width * height) / 1000000 * 10) / 10;
+          const gcd = calculateGcd_(width, height);
+          boxMetadata.aspectRatio = `${width / gcd}:${height / gcd}`;
+          boxMetadata.megapixels = Math.round((width * height) / 1000000 * 10) / 10;
         }
         
-        if (metadata.image.orientation) box_metadata.orientation = metadata.image.orientation;
+        if (metadata.image.orientation) boxMetadata.orientation = metadata.image.orientation;
       }
       
       // Camera settings
       if (metadata.settings) {
-        if (metadata.settings.exposureTime) box_metadata.exposureTime = metadata.settings.exposureTime;
-        if (metadata.settings.fNumber) box_metadata.fNumber = metadata.settings.fNumber;
-        if (metadata.settings.iso) box_metadata.isoSpeed = metadata.settings.iso;
-        if (metadata.settings.focalLength) box_metadata.focalLength = metadata.settings.focalLength;
-        if (metadata.settings.flash !== undefined) box_metadata.flashUsed = metadata.settings.flash > 0;
-        if (metadata.settings.whiteBalance !== undefined) box_metadata.whiteBalance = metadata.settings.whiteBalance;
+        if (metadata.settings.exposureTime) boxMetadata.exposureTime = metadata.settings.exposureTime;
+        if (metadata.settings.fNumber) boxMetadata.fNumber = metadata.settings.fNumber;
+        if (metadata.settings.iso) boxMetadata.isoSpeed = metadata.settings.iso;
+        if (metadata.settings.focalLength) boxMetadata.focalLength = metadata.settings.focalLength;
+        if (metadata.settings.flash !== undefined) boxMetadata.flashUsed = metadata.settings.flash > 0;
+        if (metadata.settings.whiteBalance !== undefined) boxMetadata.whiteBalance = metadata.settings.whiteBalance;
       }
       
       // Date taken (prefer DateTimeOriginal)
       if (metadata.technical) {
-        const date_taken = metadata.technical.dateTimeOriginal || 
+        const dateTaken = metadata.technical.dateTimeOriginal || 
                          metadata.technical.dateTimeDigitized || 
                          metadata.technical.dateTime;
-        if (date_taken) {
-          box_metadata.dateTaken = date_taken;
+        if (dateTaken) {
+          boxMetadata.dateTaken = dateTaken;
         }
       }
       
       // GPS coordinates
       if (metadata.gps) {
-        if (typeof metadata.gps.latitude === 'number') box_metadata.gpsLatitude = metadata.gps.latitude;
-        if (typeof metadata.gps.longitude === 'number') box_metadata.gpsLongitude = metadata.gps.longitude;
-        if (typeof metadata.gps.altitude === 'number') box_metadata.gpsAltitude = metadata.gps.altitude;
+        if (typeof metadata.gps.latitude === 'number') boxMetadata.gpsLatitude = metadata.gps.latitude;
+        if (typeof metadata.gps.longitude === 'number') boxMetadata.gpsLongitude = metadata.gps.longitude;
+        if (typeof metadata.gps.altitude === 'number') boxMetadata.gpsAltitude = metadata.gps.altitude;
       }
       
       // Technical notes
-      const technical_notes = [];
+      const technicalNotes = [];
       if (metadata.fileInfo && metadata.fileInfo.format) {
-        technical_notes.push(`Format: ${metadata.fileInfo.format}`);
+        technicalNotes.push(`Format: ${metadata.fileInfo.format}`);
       }
       
-      if (technical_notes.length > 0) {
-        box_metadata.technicalNotes = (box_metadata.technicalNotes ? 
-          box_metadata.technicalNotes + "; " : "") + technical_notes.join('; ');
+      if (technicalNotes.length > 0) {
+        boxMetadata.technicalNotes = (boxMetadata.technicalNotes ? 
+          boxMetadata.technicalNotes + "; " : "") + technicalNotes.join('; ');
       }
       
-      return box_metadata;
+      return boxMetadata;
     } catch (error) {
       Logger.log(`Error converting to Box format: ${error.toString()}`);
       return {
@@ -614,27 +613,27 @@ const ExifProcessor = (function() {
    * Calculate Greatest Common Divisor for aspect ratio
    * @private
    */
-  function calculate_gcd_(a, b) {
-    return b === 0 ? a : calculate_gcd_(b, a % b);
+  function calculateGcd_(a, b) {
+    return b === 0 ? a : calculateGcd_(b, a % b);
   }
 
   /**
    * Extract JPEG/TIFF metadata
    * @private
    */
-  function extract_jpeg_metadata_(image_bytes, basic_info) {
+  function extractJpegMetadata_(imageBytes, basicInfo) {
     try {
-      const exif_data_segment = find_exif_segment_(image_bytes);
-      if (!exif_data_segment) {
-        Logger.log(` ⚠️ No EXIF APP1 segment found in JPEG/TIFF structure for ${basic_info.filename}`);
-        return { hasExif: false, fileInfo: basic_info };
+      const exifDataSegment = findExifSegment_(imageBytes);
+      if (!exifDataSegment) {
+        Logger.log(` ⚠️ No EXIF APP1 segment found in JPEG/TIFF structure for ${basicInfo.filename}`);
+        return { hasExif: false, fileInfo: basicInfo };
       }
       
-      const tiff_structure = parse_tiff_structure_(exif_data_segment);
-      return organize_metadata_(tiff_structure, basic_info);
+      const tiffStructure = parseTiffStructure_(exifDataSegment);
+      return organizeMetadata_(tiffStructure, basicInfo);
     } catch (error) {
-      Logger.log(`Error extracting JPEG/TIFF EXIF metadata for ${basic_info.filename}: ${error.toString()}`);
-      return { hasExif: false, fileInfo: basic_info };
+      Logger.log(`Error extracting JPEG/TIFF EXIF metadata for ${basicInfo.filename}: ${error.toString()}`);
+      return { hasExif: false, fileInfo: basicInfo };
     }
   }
 
@@ -642,20 +641,20 @@ const ExifProcessor = (function() {
    * Extract metadata from other formats (PNG, WebP, etc.)
    * @private
    */
-  function extract_other_format_metadata_(image_bytes, basic_info) {
-    Logger.log(` ⚠️ Advanced EXIF extraction for ${basic_info.format} not fully implemented. Checking for common patterns.`);
+  function extractOtherFormatMetadata_(imageBytes, basicInfo) {
+    Logger.log(` ⚠️ Advanced EXIF extraction for ${basicInfo.format} not fully implemented. Checking for common patterns.`);
     
     // Try a generic search for TIFF header within the file as fallback
     // This is speculative and might not be standard for these formats
-    for (let i = 0; i < Math.min(image_bytes.length - 8, 1024); i++) {
-      if ((image_bytes[i] === 0x49 && image_bytes[i + 1] === 0x49) || // Little endian TIFF
-          (image_bytes[i] === 0x4D && image_bytes[i + 1] === 0x4D)) { // Big endian TIFF
+    for (let i = 0; i < Math.min(imageBytes.length - 8, 1024); i++) {
+      if ((imageBytes[i] === 0x49 && imageBytes[i + 1] === 0x49) || // Little endian TIFF
+          (imageBytes[i] === 0x4D && imageBytes[i + 1] === 0x4D)) { // Big endian TIFF
         try {
-          const potential_tiff = image_bytes.slice(i);
-          const tiff_structure = parse_tiff_structure_(potential_tiff);
-          if (tiff_structure) {
-            Logger.log(` ✅ Found embedded TIFF structure in ${basic_info.format} file`);
-            return organize_metadata_(tiff_structure, basic_info);
+          const potentialTiff = imageBytes.slice(i);
+          const tiffStructure = parseTiffStructure_(potentialTiff);
+          if (tiffStructure) {
+            Logger.log(` ✅ Found embedded TIFF structure in ${basicInfo.format} file`);
+            return organizeMetadata_(tiffStructure, basicInfo);
           }
         } catch (error) {
           // Continue searching
@@ -663,7 +662,7 @@ const ExifProcessor = (function() {
       }
     }
     
-    return { hasExif: false, fileInfo: basic_info };
+    return { hasExif: false, fileInfo: basicInfo };
   }
 
   // =============================================================================
@@ -672,124 +671,95 @@ const ExifProcessor = (function() {
 
   /**
    * Main function to extract and parse metadata from a file.
-   * This is the primary interface that replaces both the old EXIFParser and ExifExtraction.
-   * @param {string} file_id Box file ID
-   * @param {string} access_token Valid Box access token
+   * @param {string} fileId Box file ID
+   * @param {string} accessToken Valid Box access token
    * @param {string} filename The name of the file for logging
    * @returns {object|null} Box-formatted metadata object with enhanced EXIF data or null on error
    */
-  ns.extract_metadata = function(file_id, access_token, filename) {
-    const file_display_name = filename || file_id;
+  ns.extractMetadata = function(fileId, accessToken, filename) {
+    const fileDisplayName = filename || fileId;
     
-    if (!file_id || !access_token) {
-      Logger.log('ERROR: ExifProcessor.extract_metadata requires file_id and access_token');
+    if (!fileId || !accessToken) {
+      Logger.log('ERROR: ExifProcessor.extractMetadata requires fileId and accessToken');
       return null;
     }
     
-    const utils = init_utils_();
-    let image_bytes;
+    const utils = initUtils_();
+    let imageBytes;
     
     try {
-      Logger.log(` > Parsing comprehensive EXIF data from ${file_display_name}...`);
+      Logger.log(` > Parsing comprehensive EXIF data from ${fileDisplayName}...`);
       
-      const download_url = `${ConfigManager.BOX_API_BASE_URL}/files/${file_id}/content`;
+      const downloadUrl = `${ConfigManager.BOX_API_BASE_URL}/files/${fileId}/content`;
       const response = utils.rateLimitExpBackoff(function() {
-        return UrlFetchApp.fetch(download_url, {
-          headers: { 'Authorization': `Bearer ${access_token}` },
+        return UrlFetchApp.fetch(downloadUrl, {
+          headers: { 'Authorization': `Bearer ${accessToken}` },
           muteHttpExceptions: true
         });
       });
       
       if (response.getResponseCode() !== 200) {
-        Logger.log(`    Failed to download ${file_display_name} for metadata extraction. HTTP Code: ${response.getResponseCode()} Response: ${response.getContentText().substring(0, 200)}`);
+        Logger.log(`    Failed to download ${fileDisplayName} for metadata extraction. HTTP Code: ${response.getResponseCode()} Response: ${response.getContentText().substring(0, 200)}`);
         return null;
       }
       
-      const image_blob = response.getBlob();
-      image_bytes = new Uint8Array(image_blob.getBytes());
+      const imageBlob = response.getBlob();
+      imageBytes = new Uint8Array(imageBlob.getBytes());
       
-      const basic_info = extract_basic_file_info_(image_bytes);
-      basic_info.filename = file_display_name;
+      const basicInfo = extractBasicFileInfo_(imageBytes);
+      basicInfo.filename = fileDisplayName;
       
-      Logger.log(` > Format detected: ${basic_info.format || 'Unknown'} for ${file_display_name}. Size: ${image_bytes.length} bytes.`);
+      Logger.log(` > Format detected: ${basicInfo.format || 'Unknown'} for ${fileDisplayName}. Size: ${imageBytes.length} bytes.`);
 
-      let metadata_from_parser = null;
+      let metadataFromParser = null;
       
-      if (basic_info.format === 'JPEG' || basic_info.format === 'TIFF') {
-        metadata_from_parser = extract_jpeg_metadata_(image_bytes, basic_info);
-      } else if (['PNG', 'WEBP', 'HEIC', 'AVIF'].indexOf(basic_info.format) !== -1) {
-        metadata_from_parser = extract_other_format_metadata_(image_bytes, basic_info); 
+      if (basicInfo.format === 'JPEG' || basicInfo.format === 'TIFF') {
+        metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
+      } else if (['PNG', 'WEBP', 'HEIC', 'AVIF'].indexOf(basicInfo.format) !== -1) {
+        metadataFromParser = extractOtherFormatMetadata_(imageBytes, basicInfo); 
       } else {
         // Fallback for unknown formats - try to find EXIF anyway
-        metadata_from_parser = extract_jpeg_metadata_(image_bytes, basic_info);
-        if (!metadata_from_parser || !metadata_from_parser.hasExif) {
-          metadata_from_parser = { hasExif: false, fileInfo: basic_info };
+        metadataFromParser = extractJpegMetadata_(imageBytes, basicInfo);
+        if (!metadataFromParser || !metadataFromParser.hasExif) {
+          metadataFromParser = { hasExif: false, fileInfo: basicInfo };
         }
       }
 
-      if (metadata_from_parser) {
-        Logger.log(` > File parsed. EXIF found: ${metadata_from_parser.hasExif} for ${file_display_name}.`);
-        return convert_to_box_format_(metadata_from_parser);
+      if (metadataFromParser) {
+        Logger.log(` > File parsed. EXIF found: ${metadataFromParser.hasExif} for ${fileDisplayName}.`);
+        const converted = convertToBoxFormat_(metadataFromParser);
+        // This is a special case to create a combined return object for MetadataExtraction.js
+        return {
+            hasExif: metadataFromParser.hasExif,
+            metadata: converted
+        };
       } else {
-        Logger.log(` ⚠️ No processable EXIF structure identified in ${file_display_name}. Returning basic info.`);
-        return convert_to_box_format_({ hasExif: false, fileInfo: basic_info });
+        Logger.log(` ⚠️ No processable EXIF structure identified in ${fileDisplayName}. Returning basic info.`);
+        return { 
+            hasExif: false,
+            metadata: convertToBoxFormat_({ hasExif: false, fileInfo: basicInfo })
+        };
       }
       
     } catch (error) {
-      Logger.log(`    ERROR: Parsing EXIF from ${file_display_name} failed: ${error.toString()}${error.stack ? '\nStack: ' + error.stack : ''}`);
+      Logger.log(`    ERROR: Parsing EXIF from ${fileDisplayName} failed: ${error.toString()}${error.stack ? '\nStack: ' + error.stack : ''}`);
       
-      const error_basic_info = { 
-        filename: file_display_name, 
-        fileSize: (image_bytes ? image_bytes.length : 0), 
+      const errorBasicInfo = { 
+        filename: fileDisplayName, 
+        fileSize: (imageBytes ? imageBytes.length : 0), 
         format: 'unknown' 
       };
-      const box_error_format = convert_to_box_format_({ hasExif: false, fileInfo: error_basic_info });
+      const boxErrorFormat = convertToBoxFormat_({ hasExif: false, fileInfo: errorBasicInfo });
       
-      // Ensure technicalNotes exists before appending
-      box_error_format.technicalNotes = (box_error_format.technicalNotes || '') + 
+      boxErrorFormat.technicalNotes = (boxErrorFormat.technicalNotes || '') + 
         ` EXIF Parsing Error: ${String(error.message || error).substring(0, 100)}`;
       
-      return box_error_format;
+      return {
+          hasExif: false,
+          metadata: boxErrorFormat
+      };
     }
-  };
-
-  /**
-   * Legacy compatibility function - enhanced metadata extraction.
-   * @param {string} file_id Box file ID
-   * @param {string} access_token Valid Box access token
-   * @param {string} filename The name of the file for logging
-   * @returns {object|null} Enhanced EXIF data object for compatibility
-   */
-  ns.extract_enhanced_metadata = function(file_id, access_token, filename) {
-    const box_formatted_metadata = ns.extract_metadata(file_id, access_token, filename);
-    
-    if (!box_formatted_metadata) {
-      return null;
-    }
-    
-    // Return in legacy format for compatibility
-    return {
-      hasExif: box_formatted_metadata.processingStage !== ConfigManager.PROCESSING_STAGE_FAILED,
-      enhanced: true,
-      metadata: box_formatted_metadata,
-      extractionMethod: 'comprehensive_parser'
-    };
   };
 
   return ns;
 })();
-
-// =============================================================================
-// LEGACY COMPATIBILITY FUNCTIONS
-// =============================================================================
-
-/**
- * Legacy function name for compatibility with existing code.
- * @param {string} fileId Box file ID
- * @param {string} accessToken Valid Box access token
- * @param {string} filename The name of the file for logging
- * @returns {object|null} Enhanced EXIF data object
- */
-function extractMetadata(fileId, accessToken, filename) {
-  return ExifProcessor.extract_enhanced_metadata(fileId, accessToken, filename);
-}
