@@ -150,7 +150,7 @@ const BoxReportManager = (function() {
         return driveFile.getId();
 
       } catch (error) {
-        ErrorHandler.reportError(error, 'BoxReportManager.cacheReportToDrive', {
+        ErrorHandler.reportError(error, 'ReportManager.cacheReportToDrive', {
           reportId: latestReport ? latestReport.id : 'unknown'
         });
         return null;
@@ -296,7 +296,7 @@ const BoxReportManager = (function() {
       return [];
     }
   };
-
+  
   /**
    * Main report processing function
    * @returns {object|null} Processing results or null on error
@@ -304,124 +304,156 @@ const BoxReportManager = (function() {
   ns.runReportBasedProcessing = function() {
     const startTime = Date.now();
     Logger.log('🐕 === Boxer Report-Based Processing Started ===');
-    
+
     const accessToken = getValidAccessToken();
     if (!accessToken) return null;
 
-    // Resolve priority folder to its full path name if configured
-    let testFolderPath = '';
-    const testFolderId = ConfigManager.getProperty('BOX_PRIORITY_FOLDER');
+    let stats = {
+        reportFound: false,
+        filesInReport: 0,
+        filesProcessed: 0,
+        filesSkipped: 0,
+        filesErrored: 0,
+        executionTimeMs: 0
+    };
 
-    if (testFolderId) {
-      try {
-        const folderDetailsUrl = `${ConfigManager.BOX_API_BASE_URL}/folders/${testFolderId}?fields=name,path_collection`;
-        const folderResponse = UrlFetchApp.fetch(folderDetailsUrl, {
-          headers: { 'Authorization': `Bearer ${accessToken}` },
-          muteHttpExceptions: true
-        });
-
-        if (folderResponse.getResponseCode() === 200) {
-          const folderDetails = JSON.parse(folderResponse.getContentText());
-          const parentPath = folderDetails.path_collection.entries.map(p => p.name).join('/');
-          testFolderPath = parentPath ? `${parentPath}/${folderDetails.name}` : folderDetails.name;
-          Logger.log(`✅ Priority folder resolved to: "${testFolderPath}"`);
-        }
-      } catch (e) {
-        Logger.log(`⚠️ Could not resolve priority folder: ${e.toString()}`);
-      }
-    }
-
-    const stats = { reportFound: false, filesInReport: 0, filesProcessed: 0, filesSkipped: 0, filesErrored: 0, executionTimeMs: 0 };
-    
     try {
+        const reportInfo = _findAndCacheLatestReport(accessToken);
+        if (!reportInfo) {
+            stats.executionTimeMs = Date.now() - startTime;
+            return stats;
+        }
+        stats.reportFound = true;
+        
+        const filesToProcess = _getFilesToProcess(reportInfo.checkpoint, reportInfo.reportContent, accessToken);
+        stats.filesInReport = reportInfo.totalFiles;
+
+        if (filesToProcess.length === 0) {
+            Logger.log('🎉 No new files require processing at this time.');
+            stats.executionTimeMs = Date.now() - startTime;
+            return stats;
+        }
+        
+        const processingResult = _processBatch(filesToProcess, accessToken, startTime);
+        
+        // Update stats with results from the batch processing
+        stats.filesProcessed = processingResult.processed;
+        stats.filesSkipped = processingResult.skipped;
+        stats.filesErrored = processingResult.errored;
+        
+        _saveCheckpoint(reportInfo.checkpoint, processingResult.processedIds);
+
+        stats.executionTimeMs = Date.now() - startTime;
+        stats.checkpoint = reportInfo.checkpoint; // Return for Main.js
+
+        Logger.log('📊 === Processing Batch Complete ===');
+        Logger.log(`✅ Processed: ${stats.filesProcessed}, ⏭️ Skipped: ${stats.filesSkipped}, ❌ Errors: ${stats.filesErrored}`);
+        
+        ns.saveProcessingStats(stats);
+        return stats;
+
+    } catch (error) {
+        ErrorHandler.reportError(error, 'runReportBasedProcessing');
+        stats.executionTimeMs = Date.now() - startTime;
+        return stats;
+    }
+  };
+
+  /**
+   * Finds the latest report, handles caching, and returns report content and checkpoint.
+   * @private
+   */
+  function _findAndCacheLatestReport(accessToken) {
       const latestReport = ReportManager.findLatestReport(accessToken);
-      if (!latestReport) return stats;
-      stats.reportFound = true;
-      
-      // Load checkpoint from Cache Service
+      if (!latestReport) return null;
+
       let checkpoint = ConfigManager.getState(CHECKPOINT_KEY) || {};
       
       if (checkpoint.boxReportId !== latestReport.id) {
-        const newDriveFileId = ReportManager.cacheReportToDrive(checkpoint, latestReport, accessToken);
-        if (!newDriveFileId) return stats;
-        checkpoint = { 
-          boxReportId: latestReport.id, 
-          driveFileId: newDriveFileId, 
-          processedFileIds: [],
-          lastUpdated: new Date().toISOString()
-        };
+          const newDriveFileId = ReportManager.cacheReportToDrive(checkpoint, latestReport, accessToken);
+          if (!newDriveFileId) return null;
+          checkpoint = { 
+              boxReportId: latestReport.id, 
+              driveFileId: newDriveFileId, 
+              processedFileIds: [],
+              lastUpdated: new Date().toISOString()
+          };
       }
       
       const driveFile = DriveApp.getFileById(checkpoint.driveFileId);
       const reportContent = driveFile.getBlob().getDataAsString();
-      if (!ReportManager.verifyReport(latestReport, reportContent)) return stats;
       
+      if (!ReportManager.verifyReport(latestReport, reportContent)) return null;
+      
+      return { checkpoint, reportContent, totalFiles: reportContent.split('\n').length -1 };
+  }
+
+  /**
+   * Parses the report and filters out already processed files.
+   * @private
+   */
+  function _getFilesToProcess(checkpoint, reportContent, accessToken) {
       const allReportFiles = ns.parseReport(reportContent);
-      stats.filesInReport = allReportFiles.length;
-      
       const processedIds = new Set(checkpoint.processedFileIds || []);
       const filesToConsider = allReportFiles.filter(file => !processedIds.has(file.id));
       
-      let priorityFiles = [];
-      let generalFiles = [];
-
+      let testFolderPath = '';
+      const testFolderId = ConfigManager.getProperty('BOX_PRIORITY_FOLDER');
+      if (testFolderId) {
+          try {
+              const folderDetailsUrl = `${ConfigManager.BOX_API_BASE_URL}/folders/${testFolderId}?fields=name,path_collection`;
+              const folderResponse = UrlFetchApp.fetch(folderDetailsUrl, { headers: { 'Authorization': `Bearer ${accessToken}` }, muteHttpExceptions: true });
+              if (folderResponse.getResponseCode() === 200) {
+                  const folderDetails = JSON.parse(folderResponse.getContentText());
+                  const parentPath = folderDetails.path_collection.entries.map(p => p.name).join('/');
+                  testFolderPath = parentPath ? `${parentPath}/${folderDetails.name}` : folderDetails.name;
+                  Logger.log(`✅ Priority folder resolved to: "${testFolderPath}"`);
+              }
+          } catch (e) { /* Ignore error */ }
+      }
+      
       if (testFolderPath) {
-        filesToConsider.forEach(function(file) {
-          if (file.path && (file.path === testFolderPath || (file.path + '/').startsWith(testFolderPath + '/'))) {
-            priorityFiles.push(file);
-          } else {
-            generalFiles.push(file);
+          const priorityFiles = filesToConsider.filter(file => file.path && (file.path === testFolderPath || (file.path + '/').startsWith(testFolderPath + '/')));
+          const generalFiles = filesToConsider.filter(file => !priorityFiles.includes(file));
+          Logger.log(`Found ${priorityFiles.length} files within priority folder.`);
+          return priorityFiles.concat(generalFiles);
+      }
+      
+      return filesToConsider;
+  }
+
+  /**
+   * Processes a batch of files, respecting the execution time limit.
+   * @private
+   */
+  function _processBatch(filesToProcess, accessToken, startTime) {
+      Logger.log(`🔄 Processing up to ${BATCH_SIZE} files from ${filesToProcess.length} pending...`);
+      const filesToProcessNow = filesToProcess.slice(0, BATCH_SIZE);
+      const results = { processed: 0, skipped: 0, errored: 0, processedIds: [] };
+
+      for (const file of filesToProcessNow) {
+          if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
+              Logger.log('⏰ Execution time limit reached.');
+              break;
           }
-        });
-        Logger.log(`Found ${priorityFiles.length} files within priority folder: "${testFolderPath}"`);
-      } else {
-        generalFiles = filesToConsider;
+          const result = ns.processFileFromReport(file, accessToken);
+          results.processedIds.push(file.id);
+          if (result === 'processed') results.processed++;
+          else if (result === 'skipped') results.skipped++;
+          else results.errored++;
       }
+      return results;
+  }
 
-      const prioritizedFiles = priorityFiles.concat(generalFiles);
-      Logger.log(`📊 Total: ${allReportFiles.length}, Already Processed: ${processedIds.size}, To Process: ${prioritizedFiles.length}`);
-      
-      if (prioritizedFiles.length === 0) {
-        Logger.log('🎉 No files require processing at this time.');
-        return stats;
-      }
-      
-      const filesToProcessNow = prioritizedFiles.slice(0, BATCH_SIZE);
-      Logger.log(`🔄 Processing ${filesToProcessNow.length} files in this batch...`);
-
-      for (let i = 0; i < filesToProcessNow.length; i++) {
-        if (Date.now() - startTime > MAX_EXECUTION_TIME_MS) {
-          Logger.log('⏰ Execution time limit reached.');
-          break;
-        }
-        const file = filesToProcessNow[i];
-        const result = ns.processFileFromReport(file, accessToken);
-        checkpoint.processedFileIds.push(file.id);
-        if (result === 'processed') stats.filesProcessed++;
-        else if (result === 'skipped') stats.filesSkipped++;
-        else stats.filesErrored++;
-      }
-      
-      // Save checkpoint to Cache Service
+  /**
+   * Saves the updated checkpoint to the cache.
+   * @private
+   */
+  function _saveCheckpoint(checkpoint, newProcessedIds) {
+      checkpoint.processedFileIds = (checkpoint.processedFileIds || []).concat(newProcessedIds);
       checkpoint.lastUpdated = new Date().toISOString();
       ConfigManager.setState(CHECKPOINT_KEY, checkpoint);
-      
-      stats.executionTimeMs = Date.now() - startTime;
-      stats.checkpoint = checkpoint; // Return checkpoint for Main.js
-      
-      Logger.log('📊 === Processing Batch Complete ===');
-      Logger.log(`✅ Processed: ${stats.filesProcessed}, ⏭️ Skipped: ${stats.filesSkipped}, ❌ Errors: ${stats.filesErrored}`);
-      
-      // Save stats
-      ns.saveProcessingStats(stats);
-      
-      return stats;
-      
-    } catch (error) {
-      ErrorHandler.reportError(error, 'runReportBasedProcessing');
-      return stats;
-    }
-  };
+  }
 
   /**
    * Process a single file from the report
@@ -463,8 +495,8 @@ const BoxReportManager = (function() {
         return 'skipped';
       }
       
-      // Extract comprehensive metadata
-      const extractedMetadata = MetadataExtraction.extractMetadata(fileDetails, accessToken);
+      // Extract comprehensive metadata using the new orchestration function
+      const extractedMetadata = MetadataExtraction.orchestrateFullExtraction(fileDetails, accessToken);
       
       // Apply metadata to Box
       const success = BoxFileOperations.applyMetadata(file.id, extractedMetadata, accessToken);
@@ -546,8 +578,8 @@ const BoxReportManager = (function() {
         Logger.log(`  📊 Report Found: ${run.reportFound ? '✅' : '❌'}`);
         Logger.log(`  📁 Files in Report: ${run.filesInReport}`);
         Logger.log(`  ✅ Processed: ${run.filesProcessed}`);
-        Logger.log(`  ⏭️ Skipped: ${run.filesSkipped}`);
-        Logger.log(`  ❌ Errors: ${run.filesErrored}`);
+        Logger.log(`  ⏭️ Skipped: ${run.skipped}`);
+        Logger.log(`  ❌ Errors: ${run.errored}`);
         Logger.log(`  ⏱️ Time: ${(run.executionTimeMs / 1000).toFixed(1)}s`);
       });
       
