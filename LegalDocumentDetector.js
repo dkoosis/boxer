@@ -140,7 +140,7 @@ const LegalDocumentDetector = (function() {
     
     try {
       // Use Vision API to extract text (works for PDFs too)
-      const visionResult = analyzeImageWithVisionImproved(fileId, accessToken, filename);
+      const visionResult = VisionAnalysis.analyzeImageWithVision(fileId, accessToken, filename);
       
       if (visionResult && !visionResult.error && visionResult.text) {
         extractedText = visionResult.text;

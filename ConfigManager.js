@@ -25,12 +25,21 @@ const ConfigManager = (function() {
   ns.IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic', '.heif'];
   ns.MAX_VISION_API_FILE_SIZE_BYTES = 20 * 1024 * 1024;
   ns.DEFAULT_API_ITEM_LIMIT = 1000;
+
+  // Centralized status constants
+  ns.PROCESSING_STATUS = {
+    PROCESSED: 'processed',
+    SKIPPED: 'skipped',
+    ERROR: 'error',
+    ATTACHED: 'attached'
+  };
   
   // Processing stages
   ns.PROCESSING_STAGE_UNPROCESSED = 'unprocessed';
   ns.PROCESSING_STAGE_BASIC = 'basic_extracted';
   ns.PROCESSING_STAGE_EXIF = 'exif_extracted';
   ns.PROCESSING_STAGE_AI = 'ai_analyzed';
+  ns.PROCESSING_STAGE_REVIEWED = 'human_reviewed';
   ns.PROCESSING_STAGE_COMPLETE = 'complete';
   ns.PROCESSING_STAGE_FAILED = 'failed';
   

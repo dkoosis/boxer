@@ -14,37 +14,13 @@ const BoxerApp = {
    * Recommended Trigger: Every 2-4 hours
    */
   processImages() {
-    try {
-      Logger.log('🐕 === BOXER: Starting Image Metadata Processing ===');
-      Logger.log(`⏰ ${new Date().toISOString()}`);
-      
-      if (!ensureSystemReady_()) {
-        Logger.log('❌ System not ready - check configuration');
-        return { success: false, error: 'Configuration invalid' };
-      }
-      
-      if (!checkSystemHealth_()) {
-        Logger.log('❌ System health check failed');
-        return { success: false, error: 'Health check failed' };
-      }
-      
-      const checkpoint = ConfigManager.getState('REPORT_CHECKPOINT') || {};
+    return withSystemChecks_('Image Metadata Processing', () => {
       const result = BoxReportManager.runReportBasedProcessing();
-      
-      if (result) {
+      if (result && result.checkpoint) {
         ConfigManager.setState('REPORT_CHECKPOINT', result.checkpoint);
       }
-      
-      Logger.log('✅ Processing complete');
       return result;
-      
-    } catch (error) {
-      Logger.log(`❌ Processing failed: ${error.toString()}`);
-      if (typeof ErrorHandler !== 'undefined') {
-        ErrorHandler.reportError(error, 'BoxerApp.processImages');
-      }
-      return { success: false, error: error.toString() };
-    }
+    });
   },
   
   /**
@@ -52,17 +28,7 @@ const BoxerApp = {
    * Recommended Trigger: Every 2-4 hours
    */
   archiveAirtable() {
-    try {
-      Logger.log('📋 === BOXER: Starting Airtable Archival ===');
-      
-      if (!ensureSystemReady_()) {
-        return { success: false, error: 'Configuration invalid' };
-      }
-      
-      if (!checkSystemHealth_()) {
-        return { success: false, error: 'Health check failed' };
-      }
-      
+    return withSystemChecks_('Airtable Archival', () => {
       const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
       if (!apiKey) {
         Logger.log('⚠️ Airtable not configured - skipping');
@@ -74,19 +40,12 @@ const BoxerApp = {
         tableName: ConfigManager.getProperty('AIRTABLE_TABLE_NAME'),
         attachmentFieldName: ConfigManager.getProperty('AIRTABLE_ATTACHMENT_FIELD'),
         linkFieldName: ConfigManager.getProperty('AIRTABLE_LINK_FIELD'),
-        maxRecords: 5
+        maxRecords: ConfigManager.getProperty('AIRTABLE_PROCESSING_BATCH_SIZE') || 5
       };
       
       const boxToken = getValidAccessToken();
       return AirtableManager.archiveTable(config, apiKey, boxToken);
-      
-    } catch (error) {
-      Logger.log(`❌ Airtable archival failed: ${error.toString()}`);
-      if (typeof ErrorHandler !== 'undefined') {
-        ErrorHandler.reportError(error, 'BoxerApp.archiveAirtable');
-      }
-      return { success: false, error: error.toString() };
-    }
+    });
   },
   
   /**
@@ -94,31 +53,12 @@ const BoxerApp = {
    * Recommended Trigger: Daily
    */
   processLegalDocs() {
-    try {
-      Logger.log('⚖️ === BOXER: Starting Legal Document Detection ===');
-      
-      if (!ensureSystemReady_()) {
-        return { success: false, error: 'Configuration invalid' };
-      }
-      
-      if (!checkSystemHealth_()) {
-        return { success: false, error: 'Health check failed' };
-      }
-      
+    return withSystemChecks_('Legal Document Detection', () => {
       const token = getValidAccessToken();
       const folderId = ConfigManager.getProperty('BOX_PRIORITY_FOLDER') || '0';
-      
       const result = LegalDocumentDetector.processLegalDocumentsInFolder(folderId, token);
-      
       return result || { success: true };
-      
-    } catch (error) {
-      Logger.log(`❌ Legal detection failed: ${error.toString()}`);
-      if (typeof ErrorHandler !== 'undefined') {
-        ErrorHandler.reportError(error, 'BoxerApp.processLegalDocs');
-      }
-      return { success: false, error: error.toString() };
-    }
+    });
   },
   
   // === SETUP AND CONFIGURATION ===
@@ -174,7 +114,7 @@ const BoxerApp = {
       Logger.log('\n✅ All required properties configured!');
       Logger.log('\n📝 Next steps:');
       Logger.log('1. Run BoxerApp.initializeBoxAuth() to connect to Box');
-      Logger.log('2. Set up time-based triggers for BoxerApp.processImages()');
+      Logger.log('2. Set up time-based triggers for the global run...Trigger() functions');
     }
   },
   
@@ -349,6 +289,50 @@ const BoxerApp = {
 // === PRIVATE HELPER FUNCTIONS ===
 
 /**
+ * Executes a given processing function within a standard block of system checks and logging.
+ * @param {string} functionName The name of the process for logging purposes.
+ * @param {function} processingFunction The core function to execute.
+ * @returns {object} The result of the processing function or an error object.
+ * @private
+ */
+function withSystemChecks_(functionName, processingFunction) {
+  try {
+    Logger.log(`🐕 === BOXER: Starting ${functionName} ===`);
+    Logger.log(`⏰ ${new Date().toISOString()}`);
+
+    if (!ensureSystemReady_()) {
+      const errorMsg = 'System not ready - check configuration';
+      Logger.log(`❌ ${errorMsg}`);
+      if (typeof ErrorHandler !== 'undefined') {
+        ErrorHandler.notifyCriticalError(new Error(errorMsg), `withSystemChecks_ startup`);
+      }
+      return { success: false, error: errorMsg };
+    }
+
+    if (!checkSystemHealth_()) {
+      const errorMsg = 'System health check failed';
+      Logger.log(`❌ ${errorMsg}`);
+      if (typeof ErrorHandler !== 'undefined') {
+        ErrorHandler.notifyCriticalError(new Error(errorMsg), `withSystemChecks_ health`);
+      }
+      return { success: false, error: errorMsg };
+    }
+
+    const result = processingFunction();
+    Logger.log(`✅ ${functionName} complete`);
+    return result;
+
+  } catch (error) {
+    Logger.log(`❌ ${functionName} failed: ${error.toString()}`);
+    if (typeof ErrorHandler !== 'undefined') {
+      const simpleName = functionName.replace(/ /g, '');
+      ErrorHandler.reportError(error, `BoxerApp.${simpleName}`);
+    }
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
  * Ensures configuration is migrated and valid before any processing
  * @private
  */
@@ -403,6 +387,22 @@ function checkSystemHealth_() {
     return false;
   }
 }
+
+// === GLOBAL TRIGGER FUNCTIONS ===
+// Use these functions to set up your time-based triggers in the Apps Script editor.
+
+function runImageProcessingTrigger() {
+  return BoxerApp.processImages();
+}
+
+function runAirtableArchivalTrigger() {
+  return BoxerApp.archiveAirtable();
+}
+
+function runLegalDocDetectionTrigger() {
+  return BoxerApp.processLegalDocs();
+}
+
 
 /**
  * Makes the BoxerApp.test() method executable from the Apps Script IDE.
