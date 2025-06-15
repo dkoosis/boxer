@@ -368,6 +368,12 @@ const MetadataExtraction = (function() {
       if (metadata.subject) clean.subject = String(metadata.subject);
       if (metadata.aspectRatio) clean.aspectRatio = String(metadata.aspectRatio);
       
+      // Camera/EXIF fields
+      if (metadata.photographer) clean.photographer = String(metadata.photographer);
+      if (metadata.cameraSoftware) clean.cameraSoftware = String(metadata.cameraSoftware);
+      if (metadata.lensModel) clean.lensModel = String(metadata.lensModel);
+      if (metadata.orientation) clean.orientation = String(metadata.orientation);
+      
       // Float fields - ensure they're numbers
       if (typeof metadata.fileSizeMB === 'number' && !isNaN(metadata.fileSizeMB)) {
         clean.fileSizeMB = Number(metadata.fileSizeMB);
@@ -380,6 +386,26 @@ const MetadataExtraction = (function() {
       }
       if (typeof metadata.megapixels === 'number' && !isNaN(metadata.megapixels)) {
         clean.megapixels = Number(metadata.megapixels);
+      }
+      
+      // Camera settings fields
+      if (typeof metadata.exposureTime === 'number' && !isNaN(metadata.exposureTime)) {
+        clean.exposureTime = Number(metadata.exposureTime);
+      }
+      if (typeof metadata.fNumber === 'number' && !isNaN(metadata.fNumber)) {
+        clean.fNumber = Number(metadata.fNumber);
+      }
+      if (typeof metadata.isoSpeed === 'number' && !isNaN(metadata.isoSpeed)) {
+        clean.isoSpeed = Number(metadata.isoSpeed);
+      }
+      if (typeof metadata.focalLength === 'number' && !isNaN(metadata.focalLength)) {
+        clean.focalLength = Number(metadata.focalLength);
+      }
+      if (typeof metadata.flashUsed === 'boolean') {
+        clean.flashUsed = metadata.flashUsed;
+      }
+      if (typeof metadata.whiteBalance === 'number' && !isNaN(metadata.whiteBalance)) {
+        clean.whiteBalance = Number(metadata.whiteBalance);
       }
       
       // GPS coordinates
@@ -401,12 +427,41 @@ const MetadataExtraction = (function() {
       if (metadata.gpsRegion) clean.gpsRegion = String(metadata.gpsRegion);
       if (metadata.gpsCountry) clean.gpsCountry = String(metadata.gpsCountry);
       
+      // AI/Vision fields - CRITICAL FOR TEXT EXTRACTION TO WORK
+      if (metadata.aiDetectedObjects) clean.aiDetectedObjects = String(metadata.aiDetectedObjects);
+      if (metadata.aiSceneDescription) clean.aiSceneDescription = String(metadata.aiSceneDescription);
+      if (metadata.extractedText) clean.extractedText = String(metadata.extractedText);
+      if (metadata.dominantColors) clean.dominantColors = String(metadata.dominantColors);
+      if (typeof metadata.aiConfidenceScore === 'number' && !isNaN(metadata.aiConfidenceScore)) {
+        clean.aiConfidenceScore = Number(metadata.aiConfidenceScore);
+      }
+      
+      // Content/Business fields
+      if (metadata.projectName) clean.projectName = String(metadata.projectName);
+      if (metadata.clientName) clean.clientName = String(metadata.clientName);
+      if (metadata.eventName) clean.eventName = String(metadata.eventName);
+      if (metadata.peopleInImage) clean.peopleInImage = String(metadata.peopleInImage);
+      if (metadata.artistName) clean.artistName = String(metadata.artistName);
+      if (metadata.manualKeywords) clean.manualKeywords = String(metadata.manualKeywords);
+      if (metadata.notes) clean.notes = String(metadata.notes);
+      
       // Date fields - Box expects full ISO datetime for date type fields
       if (metadata.dateTaken) {
         try {
           const date = new Date(metadata.dateTaken);
           if (!isNaN(date.getTime())) {
             clean.dateTaken = date.toISOString(); // Full ISO string for Box date fields
+          }
+        } catch (e) {
+          // Skip invalid dates
+        }
+      }
+      
+      if (metadata.eventDate) {
+        try {
+          const eventDate = new Date(metadata.eventDate);
+          if (!isNaN(eventDate.getTime())) {
+            clean.eventDate = eventDate.toISOString();
           }
         } catch (e) {
           // Skip invalid dates
@@ -449,10 +504,43 @@ const MetadataExtraction = (function() {
         clean.department = 'general';
       }
       
+      const validLocations = ['main_lobby', 'studio_1', 'fabrication_workshop', 'metal_shop', 'wood_shop', 'paint_booth', 'assembly_area', 'storage_warehouse', 'office_space', 'conference_room', 'gallery_space', 'outdoor_yard', 'loading_dock', 'unknown'];
+      if (validLocations.indexOf(metadata.facilityLocation) !== -1) {
+        clean.facilityLocation = metadata.facilityLocation;
+      } else {
+        clean.facilityLocation = 'unknown';
+      }
+      
+      const validUsageRights = ['internal_only', 'marketing_approved', 'client_shared', 'public_domain', 'pending_approval'];
+      if (validUsageRights.indexOf(metadata.usageRights) !== -1) {
+        clean.usageRights = metadata.usageRights;
+      } else {
+        clean.usageRights = 'internal_only';
+      }
+      
+      const validQualityRatings = ['excellent', 'good', 'fair', 'poor', 'unrated'];
+      if (validQualityRatings.indexOf(metadata.qualityRating) !== -1) {
+        clean.qualityRating = metadata.qualityRating;
+      } else {
+        clean.qualityRating = 'unrated';
+      }
+      
+      const validImportance = ['critical', 'high', 'medium', 'low', 'archive'];
+      if (validImportance.indexOf(metadata.importance) !== -1) {
+        clean.importance = metadata.importance;
+      } else {
+        clean.importance = 'medium';
+      }
+      
+      const validNeedsReview = ['yes', 'no', 'completed'];
+      if (validNeedsReview.indexOf(metadata.needsReview) !== -1) {
+        clean.needsReview = metadata.needsReview;
+      } else {
+        clean.needsReview = 'no';
+      }
+      
       // Add other essential fields
       if (metadata.processingVersion) clean.processingVersion = String(metadata.processingVersion);
-      // REMOVED: buildNumber is no longer used
-      // if (metadata.buildNumber) clean.buildNumber = String(metadata.buildNumber);
       
       return clean;
       
@@ -463,7 +551,7 @@ const MetadataExtraction = (function() {
         processingStage: 'basic_extracted',
         contentType: 'other',
         department: 'general',
-        lastProcessedDate: new Date().toISOString().split('T')[0]
+        lastProcessedDate: new Date().toISOString()
       };
     }
   };
@@ -545,8 +633,6 @@ const MetadataExtraction = (function() {
         processingStage: ConfigManager.PROCESSING_STAGE_BASIC,
         lastProcessedDate: new Date().toISOString(), // Full ISO datetime
         processingVersion: ConfigManager.SCRIPT_VERSION + '_basic',
-        // REMOVED: buildNumber is no longer used
-        // buildNumber: ConfigManager.getCurrentBuild(),
         needsReview: contentAnalysis.needsReview || 'no'
       };
       
@@ -582,8 +668,6 @@ const MetadataExtraction = (function() {
     try {
       // Check if processing needed 
       const currentMetadata = BoxFileOperations.getCurrentMetadata(fileEntry.id, accessToken);
-      // REMOVED: check for buildNumber as it no longer exists.
-      // The VersionManager is responsible for more advanced re-processing logic.
       const needsProcessing = !currentMetadata || 
                            currentMetadata.processingStage === ConfigManager.PROCESSING_STAGE_UNPROCESSED;
       
@@ -667,7 +751,7 @@ const MetadataExtraction = (function() {
         
         const listData = JSON.parse(response.getContentText());
         const imageFileEntries = listData.entries.filter(function(item) {
-          return item.type === 'file' && BoxFileOperations.isImageFile(item.name);
+          return item.type === 'file' && ConfigManager.isImageFile(item.name);
         });        
         Logger.log(`Found ${imageFileEntries.length} image(s) in folder ${folderId}`);
         
@@ -760,8 +844,6 @@ const MetadataExtraction = (function() {
     // Finalize processing metadata
     combinedMetadata.lastProcessedDate = new Date().toISOString(); // Use current timestamp
     combinedMetadata.processingVersion = ConfigManager.SCRIPT_VERSION + '_enhanced';
-    // REMOVED: buildNumber is no longer used
-    // combinedMetadata.buildNumber = ConfigManager.getCurrentBuild();
 
     // Apply sanitization and return
     return ns.sanitizeMetadataForBox(combinedMetadata);
