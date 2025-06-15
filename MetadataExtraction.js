@@ -451,7 +451,8 @@ const MetadataExtraction = (function() {
       
       // Add other essential fields
       if (metadata.processingVersion) clean.processingVersion = String(metadata.processingVersion);
-      if (metadata.buildNumber) clean.buildNumber = String(metadata.buildNumber);
+      // REMOVED: buildNumber is no longer used
+      // if (metadata.buildNumber) clean.buildNumber = String(metadata.buildNumber);
       
       return clean;
       
@@ -544,7 +545,8 @@ const MetadataExtraction = (function() {
         processingStage: ConfigManager.PROCESSING_STAGE_BASIC,
         lastProcessedDate: new Date().toISOString(), // Full ISO datetime
         processingVersion: ConfigManager.SCRIPT_VERSION + '_basic',
-        buildNumber: ConfigManager.getCurrentBuild(),
+        // REMOVED: buildNumber is no longer used
+        // buildNumber: ConfigManager.getCurrentBuild(),
         needsReview: contentAnalysis.needsReview || 'no'
       };
       
@@ -578,18 +580,18 @@ const MetadataExtraction = (function() {
     const utils = initUtils_();
     
     try {
-      // Check if processing needed (including build updates)
+      // Check if processing needed 
       const currentMetadata = BoxFileOperations.getCurrentMetadata(fileEntry.id, accessToken);
+      // REMOVED: check for buildNumber as it no longer exists.
+      // The VersionManager is responsible for more advanced re-processing logic.
       const needsProcessing = !currentMetadata || 
-                           currentMetadata.processingStage === ConfigManager.PROCESSING_STAGE_UNPROCESSED ||
-                           currentMetadata.buildNumber !== ConfigManager.getCurrentBuild();
+                           currentMetadata.processingStage === ConfigManager.PROCESSING_STAGE_UNPROCESSED;
       
       if (!needsProcessing) {
         return; // Skip if up-to-date
       }
       
-      const reason = !currentMetadata ? 'new' : 
-                   currentMetadata.buildNumber !== ConfigManager.getCurrentBuild() ? 'build_update' : 'incomplete';
+      const reason = !currentMetadata ? 'new' : 'incomplete';
       Logger.log(`🐕 Processing ${fileEntry.name} (${reason})`);
       
       // Fetch full file details with robust error handling
@@ -759,7 +761,8 @@ const MetadataExtraction = (function() {
     // Finalize processing metadata
     combinedMetadata.lastProcessedDate = new Date().toISOString(); // Use current timestamp
     combinedMetadata.processingVersion = ConfigManager.SCRIPT_VERSION + '_enhanced';
-    combinedMetadata.buildNumber = ConfigManager.getCurrentBuild();
+    // REMOVED: buildNumber is no longer used
+    // combinedMetadata.buildNumber = ConfigManager.getCurrentBuild();
 
     // Apply sanitization and return
     return ns.sanitizeMetadataForBox(combinedMetadata);
