@@ -10,16 +10,22 @@ const BoxerApp = {
   // === MAIN ENTRY POINTS (for triggers) ===
   
   /**
+   * Build processing queue from weekly Box report
+   * Recommended Trigger: Weekly (e.g., Monday 2 AM)
+   */
+  buildQueue() {
+    return withSystemChecks_('Queue Building', () => {
+      return BoxReportManager.buildProcessingQueue();
+    });
+  },
+  
+  /**
    * Process Box images with metadata (for time-based trigger)
    * Recommended Trigger: Every 2-4 hours
    */
   processImages() {
     return withSystemChecks_('Image Metadata Processing', () => {
-      const result = BoxReportManager.runReportBasedProcessing();
-      if (result && result.checkpoint) {
-        ConfigManager.setState('REPORT_CHECKPOINT', result.checkpoint);
-      }
-      return result;
+      return BoxReportManager.runReportBasedProcessing();
     });
   },
   
@@ -114,7 +120,9 @@ const BoxerApp = {
       Logger.log('\n✅ All required properties configured!');
       Logger.log('\n📝 Next steps:');
       Logger.log('1. Run BoxerApp.initializeBoxAuth() to connect to Box');
-      Logger.log('2. Set up time-based triggers for the global run...Trigger() functions');
+      Logger.log('2. Set up triggers:');
+      Logger.log('   - Weekly: runQueueBuildingTrigger()');
+      Logger.log('   - Every 2-4 hours: runImageProcessingTrigger()');
     }
   },
   
@@ -253,10 +261,12 @@ const BoxerApp = {
   },
   
   /**
-   * Reset processing checkpoint
+   * Build new processing queue manually
+   * (Usually runs automatically weekly)
    */
-  resetCheckpoint() {
-    return BoxReportManager.resetProcessingCheckpoint();
+  rebuildQueue() {
+    Logger.log('🔄 Manually rebuilding processing queue...');
+    return BoxReportManager.buildProcessingQueue();
   },
   
   // === AIRTABLE MANAGEMENT ===
@@ -391,18 +401,37 @@ function checkSystemHealth_() {
 // === GLOBAL TRIGGER FUNCTIONS ===
 // Use these functions to set up your time-based triggers in the Apps Script editor.
 
+/**
+ * Weekly trigger to build processing queue
+ * Set this to run weekly (e.g., Monday 2 AM)
+ */
+function runQueueBuildingTrigger() {
+  return BoxerApp.buildQueue();
+}
+
+/**
+ * Regular trigger to process images
+ * Set this to run every 2-4 hours
+ */
 function runImageProcessingTrigger() {
   return BoxerApp.processImages();
 }
 
+/**
+ * Regular trigger for Airtable archival
+ * Set this to run every 2-4 hours
+ */
 function runAirtableArchivalTrigger() {
   return BoxerApp.archiveAirtable();
 }
 
+/**
+ * Daily trigger for legal document detection
+ * Set this to run daily
+ */
 function runLegalDocDetectionTrigger() {
   return BoxerApp.processLegalDocs();
 }
-
 
 /**
  * Makes the BoxerApp.test() method executable from the Apps Script IDE.
