@@ -323,8 +323,6 @@ const Diagnostics = (function() {
     }
   };
 
-  
-
   /**
    * Diagnose Google Drive issues
    */
@@ -350,15 +348,16 @@ const Diagnostics = (function() {
       validation.errors.forEach(e => Logger.log(`  ${e}`));
     }
   };
-// In Diagnostics.js, inside the Diagnostics = (function() { ... })(); block
 
   /**
    * Test processing on a specific folder of images
    */
   ns.runImageProcessingTest = function() {
     Logger.log('🧪 === Testing Image Processing on Sample Data ===');
+    Logger.log('⚡ FORCE REPROCESSING MODE - All images will be reprocessed regardless of existing metadata');
     const maxFilesToProcess = 25; // Safety limit for a test run
     let processedCount = 0;
+    const results = [];
 
     try {
       const accessToken = getValidAccessToken();
@@ -382,22 +381,151 @@ const Diagnostics = (function() {
         return { success: true, message: 'No images found' };
       }
 
-      Logger.log(`Found ${imageFiles.length} images. Processing up to ${maxFilesToProcess}...`);
+      Logger.log(`Found ${imageFiles.length} images. Force-processing up to ${maxFilesToProcess}...\n`);
 
       for (const image of imageFiles.slice(0, maxFilesToProcess)) {
-        Logger.log(`--- Processing: ${image.name} (ID: ${image.id}) ---`);
+        Logger.log(`\n🔄 === PROCESSING: ${image.name} (ID: ${image.id}) ===`);
         
-        // The report-based processing function can be reused here
-        const result = BoxReportManager.processFileFromReport(image, accessToken);
-        
-        if (result === 'processed' || result === 'skipped') {
-          processedCount++;
+        try {
+          // Get full file details
+          const fileDetailsUrl = `${ConfigManager.BOX_API_BASE_URL}/files/${image.id}?fields=id,name,size,path_collection,created_at,modified_at,parent`;
+          const response = UrlFetchApp.fetch(fileDetailsUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+            muteHttpExceptions: true
+          });
+          
+          if (response.getResponseCode() !== 200) {
+            Logger.log(`❌ Failed to get file details (HTTP: ${response.getResponseCode()})`);
+            results.push({ file: image.name, status: 'error', error: 'Failed to get file details' });
+            continue;
+          }
+          
+          const fileDetails = JSON.parse(response.getContentText());
+          
+          // Force full metadata extraction (orchestrateFullExtraction does all steps)
+          Logger.log('📊 Extracting comprehensive metadata...');
+          const extractedMetadata = MetadataExtraction.orchestrateFullExtraction(fileDetails, accessToken);
+          
+          // Log what we extracted
+          Logger.log('\n📋 EXTRACTED DATA:');
+          
+          // Basic info
+          Logger.log('  📄 Basic Info:');
+          Logger.log(`     - Format: ${extractedMetadata.fileFormat || 'unknown'}`);
+          Logger.log(`     - Size: ${extractedMetadata.fileSizeMB || 0} MB`);
+          Logger.log(`     - Dimensions: ${extractedMetadata.imageWidth || '?'} x ${extractedMetadata.imageHeight || '?'}`);
+          
+          // EXIF data
+          if (extractedMetadata.cameraModel || extractedMetadata.dateTaken) {
+            Logger.log('  📷 EXIF Data:');
+            if (extractedMetadata.cameraModel) Logger.log(`     - Camera: ${extractedMetadata.cameraModel}`);
+            if (extractedMetadata.dateTaken) Logger.log(`     - Date Taken: ${extractedMetadata.dateTaken}`);
+            if (extractedMetadata.exposureTime) Logger.log(`     - Exposure: ${extractedMetadata.exposureTime}`);
+            if (extractedMetadata.fNumber) Logger.log(`     - F-Stop: f/${extractedMetadata.fNumber}`);
+            if (extractedMetadata.isoSpeed) Logger.log(`     - ISO: ${extractedMetadata.isoSpeed}`);
+          } else {
+            Logger.log('  📷 EXIF Data: None found');
+          }
+          
+          // GPS data
+          if (extractedMetadata.gpsLatitude && extractedMetadata.gpsLongitude) {
+            Logger.log('  📍 GPS Data:');
+            Logger.log(`     - Coordinates: ${extractedMetadata.gpsLatitude}, ${extractedMetadata.gpsLongitude}`);
+            if (extractedMetadata.gpsLocation) Logger.log(`     - Location: ${extractedMetadata.gpsLocation}`);
+            if (extractedMetadata.gpsCity) Logger.log(`     - City: ${extractedMetadata.gpsCity}`);
+          } else {
+            Logger.log('  📍 GPS Data: None found');
+          }
+          
+          // AI Vision data
+          if (extractedMetadata.aiDetectedObjects || extractedMetadata.aiSceneDescription) {
+            Logger.log('  🤖 AI Vision Analysis:');
+            if (extractedMetadata.aiDetectedObjects) {
+              Logger.log(`     - Objects: ${extractedMetadata.aiDetectedObjects}`);
+            }
+            if (extractedMetadata.aiSceneDescription) {
+              Logger.log(`     - Scene: ${extractedMetadata.aiSceneDescription}`);
+            }
+            if (extractedMetadata.aiConfidenceScore) {
+              Logger.log(`     - Confidence: ${extractedMetadata.aiConfidenceScore}`);
+            }
+          } else {
+            Logger.log('  🤖 AI Vision Analysis: Not performed or no results');
+          }
+          
+          // Text extraction - check for 'extractedText' field (not 'extractedText')
+          if (extractedMetadata.extractedText && extractedMetadata.extractedText.length > 0) {
+            Logger.log('  📝 Extracted Text:');
+            const textPreview = extractedMetadata.extractedText.substring(0, 200);
+            Logger.log(`     "${textPreview}${extractedMetadata.extractedText.length > 200 ? '...' : ''}"`);
+            Logger.log(`     (Total length: ${extractedMetadata.extractedText.length} chars)`);
+          } else {
+            Logger.log('  📝 Extracted Text: None found');
+            // Debug: show all metadata fields to find the text
+            Logger.log('  🔍 Debug - All metadata fields:');
+            Object.keys(extractedMetadata).forEach(key => {
+              if (typeof extractedMetadata[key] === 'string' && extractedMetadata[key].length > 50) {
+                Logger.log(`     - ${key}: "${extractedMetadata[key].substring(0, 50)}..."`);
+              }
+            });
+          }
+          
+          // Apply metadata (force update even if exists)
+          Logger.log('\n💾 Applying metadata to Box...');
+          const success = BoxFileOperations.applyMetadata(image.id, extractedMetadata, accessToken);
+          
+          if (success) {
+            Logger.log(`✅ Successfully processed and updated: ${image.name}`);
+            results.push({ 
+              file: image.name, 
+              status: 'success',
+              hasExif: !!(extractedMetadata.cameraModel || extractedMetadata.dateTaken),
+              hasGps: !!(extractedMetadata.gpsLatitude && extractedMetadata.gpsLongitude),
+              hasAI: !!(extractedMetadata.aiDetectedObjects || extractedMetadata.aiSceneDescription),
+              hasText: !!(extractedMetadata.extractedText && extractedMetadata.extractedText.length > 0)
+            });
+            processedCount++;
+          } else {
+            Logger.log(`❌ Failed to apply metadata for: ${image.name}`);
+            results.push({ file: image.name, status: 'error', error: 'Failed to apply metadata' });
+          }
+          
+        } catch (error) {
+          Logger.log(`❌ Error processing ${image.name}: ${error.toString()}`);
+          results.push({ file: image.name, status: 'error', error: error.toString() });
         }
-        Logger.log(`--- Result for ${image.name}: ${result} ---`);
+        
+        // Add small delay between files
+        if (processedCount < imageFiles.length - 1) {
+          Utilities.sleep(1000);
+        }
       }
 
-      Logger.log(`\n🎉 Test Complete. Processed ${processedCount} of ${imageFiles.length} images found.`);
-      return { success: true, processed: processedCount, found: imageFiles.length };
+      // Summary
+      Logger.log('\n\n📊 === TEST SUMMARY ===');
+      Logger.log(`Total files found: ${imageFiles.length}`);
+      Logger.log(`Files processed: ${processedCount}`);
+      Logger.log(`Success rate: ${Math.round(processedCount / Math.min(imageFiles.length, maxFilesToProcess) * 100)}%`);
+      
+      // Feature detection summary
+      const withExif = results.filter(r => r.hasExif).length;
+      const withGps = results.filter(r => r.hasGps).length;
+      const withAI = results.filter(r => r.hasAI).length;
+      const withText = results.filter(r => r.hasText).length;
+      
+      Logger.log('\n📈 Feature Detection:');
+      Logger.log(`  📷 EXIF data found: ${withExif} files`);
+      Logger.log(`  📍 GPS data found: ${withGps} files`);
+      Logger.log(`  🤖 AI objects detected: ${withAI} files`);
+      Logger.log(`  📝 Text extracted: ${withText} files`);
+      
+      Logger.log('\n🎉 Test Complete!');
+      return { 
+        success: true, 
+        processed: processedCount, 
+        found: imageFiles.length,
+        results: results
+      };
 
     } catch (error) {
       Logger.log(`❌ Test failed with an exception: ${error.toString()}`);
@@ -408,4 +536,3 @@ const Diagnostics = (function() {
 
   return ns;
 })();
-

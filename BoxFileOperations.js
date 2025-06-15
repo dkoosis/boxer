@@ -114,7 +114,7 @@ const BoxFileOperations = (function() {
         const data = JSON.parse(response.getContentText());
         
         data.entries.forEach(function(item) {
-          if (item.type === 'file' && ns.isImageFile(item.name)) {
+          if (item.type === 'file' && ConfigManager.isImageFile(item.name)) {
             let pathString = 'All Files';
             if (item.path_collection && item.path_collection.entries && item.path_collection.entries.length > 1) {
               pathString = item.path_collection.entries.slice(1).map(p => p.name).join('/');

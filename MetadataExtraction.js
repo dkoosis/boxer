@@ -668,8 +668,7 @@ const MetadataExtraction = (function() {
         const listData = JSON.parse(response.getContentText());
         const imageFileEntries = listData.entries.filter(function(item) {
           return item.type === 'file' && BoxFileOperations.isImageFile(item.name);
-        });
-        
+        });        
         Logger.log(`Found ${imageFileEntries.length} image(s) in folder ${folderId}`);
         
         imageFileEntries.forEach(function(fileEntry, index) {
@@ -728,7 +727,7 @@ const MetadataExtraction = (function() {
     }
 
     // Analyze with Vision API, using the renamed function from VisionAnalysis
-    const skipVisionFormats = ['HEIC', 'HEIF', 'TIFF'];
+    const skipVisionFormats = ['TIFF'];
     if (skipVisionFormats.indexOf(combinedMetadata.fileFormat) !== -1) {
       Logger.log(`⏭️ Skipping Vision API for ${combinedMetadata.fileFormat} format: ${filename}`);
       combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 

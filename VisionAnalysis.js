@@ -88,6 +88,10 @@ function parseVisionApiResponse(visionApiResponse) {
       
       // Clean up text for better storage
       analysis.text = analysis.text.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+      
+      Logger.log(`  📝 Extracted text (${analysis.text.length} chars): "${analysis.text.substring(0, 100)}${analysis.text.length > 100 ? '...' : ''}"`);
+    } else {
+      Logger.log('  📝 No text detected in image');
     }
     
     // Parse dominant colors with better descriptions
@@ -286,7 +290,110 @@ function analyzeImageWithVision(fileId, accessToken, filename) {
 
     const imageBlob = downloadResponse.getBlob();
     const imageBytes = imageBlob.getBytes();
-    const imageSize = imageBytes.length;
+    
+    // Check if file is empty before processing
+    if (imageBytes.length === 0) {
+      Logger.log(`  Image ${fileDisplayName} is empty (0 bytes)`);
+      return { error: 'FILE_EMPTY', message: `Image file ${fileDisplayName} is empty.`};
+    }
+
+    // Check if this is a HEIC/HEIF file that needs conversion
+    const fileExtension = filename ? filename.split('.').pop().toUpperCase() : '';
+    const needsConversion = ['HEIC', 'HEIF'].includes(fileExtension);
+    
+    let base64Image;
+    let imageSize;
+    
+    if (needsConversion) {
+      Logger.log(`  🔄 HEIC/HEIF detected - requesting JPEG representation from Box...`);
+      
+      try {
+        // Request JPEG representation from Box
+        const representationUrl = `${ConfigManager.BOX_API_BASE_URL}/files/${fileId}?fields=representations`;
+        const repResponse = utils.rateLimitExpBackoff(function() {
+          return UrlFetchApp.fetch(representationUrl, {
+            headers: { 
+              'Authorization': `Bearer ${accessToken}`,
+              'X-Rep-Hints': '[jpg?dimensions=2048x2048]' // Request JPEG up to 2048x2048
+            },
+            muteHttpExceptions: true
+          });
+        });
+        
+        if (repResponse.getResponseCode() !== 200) {
+          Logger.log(`  ❌ Failed to get representation info: ${repResponse.getResponseCode()}`);
+          Logger.log(`  Response: ${repResponse.getContentText().substring(0, 500)}`);
+          return { error: 'REPRESENTATION_FAILED', message: `Could not get JPEG representation for HEIC file ${fileDisplayName}` };
+        }
+        
+        const repData = JSON.parse(repResponse.getContentText());
+        const representations = repData.representations ? repData.representations.entries : [];
+        const jpegRep = representations.find(r => r.representation === 'jpg');
+        
+        if (!jpegRep) {
+          Logger.log(`  ❌ No JPEG representation available for this file`);
+          Logger.log(`  Available representations: ${representations.map(r => r.representation).join(', ')}`);
+          return { error: 'NO_JPEG_REPRESENTATION', message: `Box cannot create JPEG representation for ${fileDisplayName}` };
+        }
+        
+        if (!jpegRep || jpegRep.status.state !== 'success') {
+          Logger.log(`  ⏳ JPEG representation not ready, waiting...`);
+          Utilities.sleep(2000); // Wait for representation to generate
+          
+          // Try to fetch the actual representation
+          const jpegUrl = jpegRep ? jpegRep.content.url_template.replace('{+asset_path}', '') : null;
+          if (!jpegUrl) {
+            return { error: 'NO_JPEG_URL', message: `No JPEG URL available for ${fileDisplayName}` };
+          }
+          
+          const jpegResponse = utils.rateLimitExpBackoff(function() {
+            return UrlFetchApp.fetch(jpegUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` },
+              muteHttpExceptions: true
+            });
+          });
+          
+          if (jpegResponse.getResponseCode() !== 200) {
+            Logger.log(`  ❌ Failed to download JPEG representation: ${jpegResponse.getResponseCode()}`);
+            return { error: 'JPEG_DOWNLOAD_FAILED', message: `Could not download JPEG representation for ${fileDisplayName}` };
+          }
+          
+          const jpegBytes = jpegResponse.getBlob().getBytes();
+          imageSize = jpegBytes.length;
+          base64Image = Utilities.base64Encode(jpegBytes);
+          Logger.log(`  ✅ Successfully converted HEIC to JPEG (${Math.round(imageSize / 1024)} KB)`);
+          
+        } else if (jpegRep.status.state === 'success') {
+          // Representation is ready, fetch it
+          const jpegUrl = jpegRep.content.url_template.replace('{+asset_path}', '');
+          const jpegResponse = utils.rateLimitExpBackoff(function() {
+            return UrlFetchApp.fetch(jpegUrl, {
+              headers: { 'Authorization': `Bearer ${accessToken}` },
+              muteHttpExceptions: true
+            });
+          });
+          
+          if (jpegResponse.getResponseCode() !== 200) {
+            Logger.log(`  ❌ Failed to download ready JPEG: ${jpegResponse.getResponseCode()}`);
+            return { error: 'JPEG_DOWNLOAD_FAILED', message: `Could not download JPEG representation for ${fileDisplayName}` };
+          }
+          
+          const jpegBytes = jpegResponse.getBlob().getBytes();
+          imageSize = jpegBytes.length;
+          base64Image = Utilities.base64Encode(jpegBytes);
+          Logger.log(`  ✅ Used existing JPEG representation (${Math.round(imageSize / 1024)} KB)`);
+        }
+        
+      } catch (conversionError) {
+        Logger.log(`  ❌ HEIC conversion error: ${conversionError.toString()}`);
+        return { error: 'CONVERSION_ERROR', message: `Failed to convert HEIC file ${fileDisplayName}: ${conversionError.toString()}` };
+      }
+      
+    } else {
+      // Original flow for non-HEIC files
+      imageSize = imageBytes.length;
+      base64Image = Utilities.base64Encode(imageBytes);
+    }
 
     if (imageSize > ConfigManager.MAX_VISION_API_FILE_SIZE_BYTES) {
       const sizeMB = Math.round(imageSize / (1024 * 1024) * 10) / 10;
@@ -299,15 +406,13 @@ function analyzeImageWithVision(fileId, accessToken, filename) {
       return { error: 'FILE_EMPTY', message: `Image file ${fileDisplayName} is empty.`};
     }
 
-    const base64Image = Utilities.base64Encode(imageBytes);
-
     const visionApiPayload = {
       requests: [{
         image: { content: base64Image },
         features: [
           { type: 'OBJECT_LOCALIZATION', maxResults: 25 },
           { type: 'LABEL_DETECTION', maxResults: 30 },
-          { type: 'TEXT_DETECTION', maxResults: 15 },
+          { type: 'TEXT_DETECTION', maxResults: 50 },
           { type: 'IMAGE_PROPERTIES' },
           { type: 'SAFE_SEARCH_DETECTION' },
           { type: 'FACE_DETECTION', maxResults: 10 }
@@ -340,6 +445,18 @@ function analyzeImageWithVision(fileId, accessToken, filename) {
         }
 
         let analysis = parseVisionApiResponse(visionData.responses[0]);
+        
+        // Debug logging for text detection
+        const responseKeys = Object.keys(visionData.responses[0]);
+        Logger.log(`  🔍 Vision API response contains: ${responseKeys.join(', ')}`);
+        
+        if (visionData.responses[0].textAnnotations) {
+          Logger.log(`  📝 Text detection found ${visionData.responses[0].textAnnotations.length} text regions`);
+        } else if (visionData.responses[0].fullTextAnnotation) {
+          Logger.log(`  📝 Full text annotation found`);
+        } else {
+          Logger.log(`  📝 No text annotations in response`);
+        }
 
         if (visionData.responses[0].faceAnnotations) {
           analysis.faces = visionData.responses[0].faceAnnotations.length;
