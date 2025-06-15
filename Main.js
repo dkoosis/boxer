@@ -2,10 +2,6 @@
 // Central orchestrator for the Boxer system
 // All scheduled triggers should point to the functions in this file
 
-/*
-TODO: Text extraction seems not to be working?
-*/
-
 /**
  * BoxerApp namespace - all public functions organized here
  */
@@ -35,26 +31,51 @@ const BoxerApp = {
   
   /**
    * Archive Airtable attachments (for time-based trigger)
-   * Recommended Trigger: Every 2-4 hours
+   * This runs weekly to archive old attachments from configured bases
+   * Recommended Trigger: Weekly
    */
   archiveAirtable() {
-    return withSystemChecks_('Airtable Archival', () => {
+    return withSystemChecks_('Airtable Weekly Archival', () => {
       const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
       if (!apiKey) {
         Logger.log('⚠️ Airtable not configured - skipping');
         return { success: true, skipped: true };
       }
       
-      const config = {
-        baseId: ConfigManager.getProperty('AIRTABLE_BASE_ID'),
-        tableName: ConfigManager.getProperty('AIRTABLE_TABLE_NAME'),
-        attachmentFieldName: ConfigManager.getProperty('AIRTABLE_ATTACHMENT_FIELD'),
-        linkFieldName: ConfigManager.getProperty('AIRTABLE_LINK_FIELD'),
-        maxRecords: ConfigManager.getProperty('AIRTABLE_PROCESSING_BATCH_SIZE') || 5
-      };
+      // Get list of bases to archive from configuration
+      const basesToArchive = ConfigManager.getProperty('AIRTABLE_BASES_TO_ARCHIVE');
+      if (!basesToArchive) {
+        Logger.log('⚠️ No bases configured for archival');
+        Logger.log('💡 Configure with: BoxerApp.configureAirtableArchival(["Base Name 1", "Base Name 2"])');
+        return { success: true, skipped: true };
+      }
       
+      const baseIds = basesToArchive.split(',').map(id => id.trim());
       const boxToken = getValidAccessToken();
-      return AirtableManager.archiveTable(config, apiKey, boxToken);
+      const results = [];
+      
+      Logger.log(`📦 Processing ${baseIds.length} configured base(s)`);
+      
+      // Archive each configured base
+      for (const baseId of baseIds) {
+        const config = { baseId };
+        const result = AirtableManager.archiveBase(config, apiKey, boxToken);
+        results.push(result);
+      }
+      
+      // Summary
+      const totalFiles = results.reduce((sum, r) => sum + (r.totalFilesArchived || 0), 0);
+      const totalBytes = results.reduce((sum, r) => sum + (r.totalBytesArchived || 0), 0);
+      
+      Logger.log(`\n📊 Weekly Archival Complete: ${totalFiles} files (${formatBytes(totalBytes)}) from ${results.length} bases`);
+      
+      return {
+        success: true,
+        basesProcessed: results.length,
+        totalFilesArchived: totalFiles,
+        totalBytesArchived: totalBytes,
+        results: results
+      };
     });
   },
   
@@ -127,6 +148,7 @@ const BoxerApp = {
       Logger.log('2. Set up triggers:');
       Logger.log('   - Weekly: runQueueBuildingTrigger()');
       Logger.log('   - Every 2-4 hours: runImageProcessingTrigger()');
+      Logger.log('   - Weekly: runAirtableArchivalTrigger()');
     }
   },
   
@@ -168,6 +190,52 @@ const BoxerApp = {
     
     ConfigManager.setProperty('AIRTABLE_API_KEY', apiKey);
     Logger.log('✅ Airtable API key saved');
+  },
+  
+  /**
+   * Configure Airtable bases for weekly archival
+   * @param {string|string[]} baseIdsOrNames Base IDs or names to archive weekly
+   */
+  configureAirtableArchival(baseIdsOrNames) {
+    Logger.log('🔧 === Configuring Airtable Archival ===');
+    
+    const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
+    if (!apiKey) {
+      Logger.log('❌ Set Airtable API key first with: BoxerApp.setAirtableApiKey("YOUR_KEY")');
+      return;
+    }
+    
+    // If passed names, resolve to IDs
+    const baseIds = [];
+    const names = Array.isArray(baseIdsOrNames) ? baseIdsOrNames : [baseIdsOrNames];
+    
+    for (const nameOrId of names) {
+      if (nameOrId.startsWith('app')) {
+        baseIds.push(nameOrId);
+        Logger.log(`✅ Added base ID: ${nameOrId}`);
+      } else {
+        // Look up by name
+        const id = findBaseIdByName(nameOrId, apiKey);
+        if (id) {
+          baseIds.push(id);
+          Logger.log(`✅ Found "${nameOrId}" → ${id}`);
+        } else {
+          Logger.log(`❌ Base "${nameOrId}" not found`);
+        }
+      }
+    }
+    
+    if (baseIds.length > 0) {
+      ConfigManager.setProperty('AIRTABLE_BASES_TO_ARCHIVE', baseIds.join(','));
+      Logger.log(`\n✅ Configured ${baseIds.length} bases for weekly archival`);
+      Logger.log('These will be processed by the weekly trigger');
+      
+      // Set default age if not already set
+      if (!ConfigManager.getProperty('ARCHIVE_AGE_MONTHS')) {
+        ConfigManager.setProperty('ARCHIVE_AGE_MONTHS', '12'); // Default to 1 year
+        Logger.log('📅 Set default archive age to 12 months (1 year)');
+      }
+    }
   },
   
   /**
@@ -226,6 +294,14 @@ const BoxerApp = {
         Logger.log(`  ${icon} ${prop.key}${req}`);
       });
     });
+    
+    // Show Airtable-specific configuration
+    const basesToArchive = ConfigManager.getProperty('AIRTABLE_BASES_TO_ARCHIVE');
+    if (basesToArchive) {
+      Logger.log('\n📦 AIRTABLE ARCHIVAL:');
+      Logger.log(`  Configured bases: ${basesToArchive.split(',').length}`);
+      Logger.log(`  Archive age: ${ConfigManager.getProperty('ARCHIVE_AGE_MONTHS') || '6'} months`);
+    }
   },
   
   // === VERSION MANAGEMENT ===
@@ -284,23 +360,123 @@ const BoxerApp = {
   },
   
   /**
-   * Archive specific Airtable table
+   * List configured bases for archival
    */
-  archiveTable(baseId, tableName, maxRecords = 5) {
-    const config = {
-      baseId,
-      tableName,
-      attachmentFieldName: ConfigManager.getProperty('AIRTABLE_ATTACHMENT_FIELD'),
-      linkFieldName: ConfigManager.getProperty('AIRTABLE_LINK_FIELD'),
-      maxRecords
-    };
+  showAirtableConfig() {
+    Logger.log('📦 === Airtable Archival Configuration ===');
+    
+    const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
+    if (!apiKey) {
+      Logger.log('❌ Airtable API key not configured');
+      return;
+    }
+    
+    const basesToArchive = ConfigManager.getProperty('AIRTABLE_BASES_TO_ARCHIVE');
+    if (!basesToArchive) {
+      Logger.log('⚠️ No bases configured for archival');
+      Logger.log('💡 Configure with: BoxerApp.configureAirtableArchival(["Base Name"])');
+      return;
+    }
+    
+    const baseIds = basesToArchive.split(',');
+    Logger.log(`\n📋 Configured bases (${baseIds.length}):`);
+    
+    baseIds.forEach((baseId, i) => {
+      const baseName = getBaseName_(baseId, apiKey);
+      Logger.log(`${i+1}. ${baseName} (${baseId})`);
+    });
+    
+    Logger.log(`\n📅 Archive age: ${ConfigManager.getProperty('ARCHIVE_AGE_MONTHS') || '6'} months`);
+    Logger.log('\n💡 These bases will be processed by the weekly trigger');
+  },
+  
+  /**
+   * Manually archive a specific base (for testing or one-off runs)
+   */
+  archiveSpecificBase(baseNameOrId) {
     const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
     const boxToken = getValidAccessToken();
-    return AirtableManager.archiveTable(config, apiKey, boxToken);
+    
+    if (!apiKey || !boxToken) {
+      Logger.log('❌ Missing credentials');
+      return;
+    }
+    
+    // Resolve name to ID if needed
+    let baseId = baseNameOrId;
+    if (!baseNameOrId.startsWith('app')) {
+      baseId = findBaseIdByName(baseNameOrId, apiKey);
+      if (!baseId) {
+        Logger.log(`❌ Base "${baseNameOrId}" not found`);
+        return;
+      }
+    }
+    
+    return AirtableManager.archiveBase({ baseId }, apiKey, boxToken);
   }
 };
 
 // === PRIVATE HELPER FUNCTIONS ===
+
+/**
+ * Find base ID by name
+ * @private
+ */
+function findBaseIdByName(baseName, apiKey) {
+  try {
+    const response = UrlFetchApp.fetch('https://api.airtable.com/v0/meta/bases', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+      muteHttpExceptions: true
+    });
+    
+    if (response.getResponseCode() !== 200) {
+      Logger.log(`❌ Failed to list bases: ${response.getResponseCode()}`);
+      return null;
+    }
+    
+    const bases = JSON.parse(response.getContentText()).bases || [];
+    const base = bases.find(b => b.name === baseName);
+    
+    if (!base) {
+      Logger.log(`Available bases: ${bases.map(b => b.name).join(', ')}`);
+    }
+    
+    return base ? base.id : null;
+  } catch (error) {
+    Logger.log(`Error finding base: ${error.toString()}`);
+    return null;
+  }
+}
+
+/**
+ * Get base name from ID (helper for display)
+ * @private
+ */
+function getBaseName_(baseId, apiKey) {
+  try {
+    const response = UrlFetchApp.fetch('https://api.airtable.com/v0/meta/bases', {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+    
+    const bases = JSON.parse(response.getContentText()).bases || [];
+    const base = bases.find(b => b.id === baseId);
+    return base ? base.name : baseId;
+  } catch (error) {
+    return baseId;
+  }
+}
+
+/**
+ * Format bytes to human readable
+ * @private
+ */
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
 
 /**
  * Executes a given processing function within a standard block of system checks and logging.
@@ -422,8 +598,8 @@ function runImageProcessingTrigger() {
 }
 
 /**
- * Regular trigger for Airtable archival
- * Set this to run every 2-4 hours
+ * Weekly trigger for Airtable archival
+ * Set this to run weekly (e.g., Sunday night)
  */
 function runAirtableArchivalTrigger() {
   return BoxerApp.archiveAirtable();
@@ -444,18 +620,67 @@ function runBoxerTest() {
   return BoxerApp.test();
 }
 
+/**
+ * Run Airtable analysis
+ */
 function runAirtableAnalysis() {
   return BoxerApp.analyzeAirtable();
 }
 
-// In Main.js, at the end of the file
+/**
+ * Check Airtable setup
+ */
+function checkAirtableSetup() {
+  Logger.log('🔍 === Checking Airtable Setup ===');
+  
+  // Check API key
+  const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
+  Logger.log(`API Key: ${apiKey ? '✅ Set' : '❌ Missing'}`);
+  
+  // Check Box token
+  try {
+    const token = getValidAccessToken();
+    Logger.log(`Box Auth: ${token ? '✅ Valid' : '❌ Invalid'}`);
+  } catch (e) {
+    Logger.log(`Box Auth: ❌ Error - ${e.toString()}`);
+  }
+  
+  // Check archive folder
+  const archiveFolder = ConfigManager.getProperty('BOX_AIRTABLE_ARCHIVE_FOLDER');
+  Logger.log(`Archive Folder: ${archiveFolder ? `✅ Set (${archiveFolder})` : '⚠️ Not set (will use root)'}`);
+  
+  // Check field names
+  Logger.log(`Attachment Field: ${ConfigManager.getProperty('AIRTABLE_ATTACHMENT_FIELD') || 'Attachments'}`);
+  Logger.log(`Link Field: ${ConfigManager.getProperty('AIRTABLE_LINK_FIELD') || 'Box_Link'}`);
+  
+  // Check shared link access level
+  const linkAccess = ConfigManager.getProperty('BOX_AIRTABLE_SHARED_LINK_ACCESS') || 'company';
+  Logger.log(`Shared Link Access: ${linkAccess}`);
+  
+  // Check configured bases
+  const basesToArchive = ConfigManager.getProperty('AIRTABLE_BASES_TO_ARCHIVE');
+  Logger.log(`\nConfigured Bases: ${basesToArchive ? basesToArchive.split(',').length + ' bases' : '❌ None configured'}`);
+  
+  Logger.log('\n💡 If anything is missing, set it with:');
+  Logger.log('  ConfigManager.setProperty("PROPERTY_NAME", "value")');
+  Logger.log('  BoxerApp.configureAirtableArchival(["Base Name"])');
+}
 
 /**
- * Makes the test for image processing executable from the Apps Script IDE.
- * Select this function from the dropdown menu and click "Run".
+ * Test archiving the CP CRM base
+ */
+function testArchiveCPCRM() {
+  // First configure it
+  BoxerApp.configureAirtableArchival('CP CRM - Production Database_Current');
+  
+  // Then run the archival
+  return BoxerApp.archiveAirtable();
+}
+
+/**
+ * Run image processing test
  */
 function runImageProcessingTest() {
-  // This calls the diagnostic function, wrapped in the standard system checks.
   return withSystemChecks_('Test Image Processing', () => {
     return Diagnostics.runImageProcessingTest();
   });

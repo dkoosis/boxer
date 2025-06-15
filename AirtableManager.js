@@ -10,7 +10,12 @@ const AirtableManager = (function() {
   // Configuration
   const MAX_FILE_SIZE_MB = 50;
   const STATS_KEY = 'AIRTABLE_STATS';
-  const ARCHIVE_AGE_MONTHS = 6; // Only archive records older than this
+  
+  // Get configurable archive age
+  const getArchiveAgeMonths = () => {
+    const configured = ConfigManager.getProperty('ARCHIVE_AGE_MONTHS');
+    return configured ? parseInt(configured) : 6; // Default to 6 months
+  };
   
   /**
    * Analyze entire workspace
@@ -89,7 +94,7 @@ const AirtableManager = (function() {
     const batchId = new Date().toISOString(); // Unique batch ID
     
     Logger.log(`📦 === Archiving ${config.tableName} ===`);
-    Logger.log(`🕐 Only archiving records older than ${ARCHIVE_AGE_MONTHS} months`);
+    Logger.log(`🕐 Only archiving records older than ${getArchiveAgeMonths()} months`);
     
     if (!apiKey || !boxToken) {
       return { success: false, error: 'Missing credentials' };
@@ -100,8 +105,14 @@ const AirtableManager = (function() {
       filesArchived: 0,
       errors: 0,
       recordsTooNew: 0,
+      bytesArchived: 0,
       executionTimeMs: 0
     };
+    
+    // Track bytes if requested
+    if (config.trackStats) {
+      config._bytesArchived = 0;
+    }
     
     try {
       // Ensure the link field exists
@@ -122,6 +133,9 @@ const AirtableManager = (function() {
       // Get base name for metadata
       const baseName = getBaseName_(config.baseId, apiKey);
       
+      // Get human-friendly table name for folder creation
+      const tableName = getTableName_(config.baseId, config.tableName, apiKey);
+      
       // Get table ID for proper URLs
       const tableId = getTableId_(config.baseId, config.tableName, apiKey);
       if (tableId) {
@@ -138,7 +152,11 @@ const AirtableManager = (function() {
       Logger.log(`📋 Found ${records.length} records to process`);
       
       // Ensure Box folder exists
-      const targetFolderId = ensureBoxFolder_({...config, baseName: baseName}, boxToken);
+      const targetFolderId = ensureBoxFolder_({
+        ...config, 
+        baseName: baseName,
+        tableName: tableName  // Use resolved table name
+      }, boxToken);
       if (!targetFolderId) {
         return { success: false, error: 'Failed to create Box folder' };
       }
@@ -151,12 +169,16 @@ const AirtableManager = (function() {
           batchId: batchId,
           baseName: baseName,
           linkFieldName: linkFieldName,
-          tableId: tableId
+          tableId: tableId,
+          trackStats: config.trackStats
         }, targetFolderId, apiKey, boxToken);
         
         if (result.success) {
           stats.recordsProcessed++;
           stats.filesArchived += result.filesArchived || 0;
+          if (result.bytesArchived) {
+            stats.bytesArchived += result.bytesArchived;
+          }
         } else if (result.tooNew) {
           stats.recordsTooNew++;
         } else {
@@ -206,6 +228,128 @@ const AirtableManager = (function() {
     });
   };
   
+  /**
+ * Archive old attachments from an Airtable base
+ * This is the main production function for weekly runs
+ * @param {object} config Configuration object
+ * @param {string} apiKey Airtable API Key  
+ * @param {string} boxToken Valid Box access token
+ */
+ns.archiveBase = function(config, apiKey, boxToken) {
+  const BATCH_SIZE = parseInt(ConfigManager.getProperty('AIRTABLE_PROCESSING_BATCH_SIZE')) || 50;
+  const RATE_LIMIT_MS = parseInt(ConfigManager.getProperty('AIRTABLE_SLEEP_DELAY_MS')) || 2000;
+  const startTime = Date.now();
+  const batchId = new Date().toISOString();
+  
+  if (!apiKey || !boxToken) {
+    return { success: false, error: 'Missing credentials' };
+  }
+  
+  const baseStats = {
+    baseId: config.baseId,
+    baseName: null,
+    tablesProcessed: 0,
+    tablesWithAttachments: 0,
+    totalRecordsProcessed: 0,
+    totalFilesArchived: 0,
+    totalBytesArchived: 0,
+    totalRecordsTooNew: 0,
+    totalErrors: 0,
+    executionTimeMs: 0,
+    tableResults: []
+  };
+  
+  try {
+    // Get base name
+    baseStats.baseName = getBaseName_(config.baseId, apiKey);
+    Logger.log(`📦 === Archiving Base: ${baseStats.baseName} ===`);
+    Logger.log(`🕐 Archiving attachments older than ${getArchiveAgeMonths()} months`);
+    
+    // Get all tables in base
+    const tablesUrl = `https://api.airtable.com/v0/meta/bases/${config.baseId}/tables`;
+    const tablesResponse = UrlFetchApp.fetch(tablesUrl, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+    
+    if (tablesResponse.getResponseCode() !== 200) {
+      throw new Error(`Failed to fetch tables: ${tablesResponse.getResponseCode()}`);
+    }
+    
+    const tables = JSON.parse(tablesResponse.getContentText()).tables || [];
+    Logger.log(`📋 Found ${tables.length} tables`);
+    
+    // Process each table
+    for (const table of tables) {
+      // Check if table has attachment fields
+      const attachmentFields = table.fields.filter(f => f.type === 'multipleAttachments');
+      
+      if (attachmentFields.length === 0) {
+        continue; // Skip tables without attachments
+      }
+      
+      baseStats.tablesWithAttachments++;
+      
+      // Process each attachment field in the table
+      for (const attachmentField of attachmentFields) {
+        const tableConfig = {
+          baseId: config.baseId,
+          tableName: table.id,
+          attachmentFieldName: attachmentField.name,
+          linkFieldName: ConfigManager.getProperty('AIRTABLE_LINK_FIELD') || 'Box_Link',
+          maxRecords: BATCH_SIZE
+        };
+        
+        // Archive this table/field combination
+        const tableResult = ns.archiveTable(tableConfig, apiKey, boxToken);
+        
+        if (tableResult.success) {
+          baseStats.totalRecordsProcessed += tableResult.recordsProcessed || 0;
+          baseStats.totalFilesArchived += tableResult.filesArchived || 0;
+          baseStats.totalBytesArchived += tableResult.bytesArchived || 0;
+          baseStats.totalRecordsTooNew += tableResult.recordsTooNew || 0;
+          baseStats.totalErrors += tableResult.errors || 0;
+          
+          if (tableResult.filesArchived > 0) {
+            baseStats.tableResults.push({
+              tableName: table.name,
+              fieldName: attachmentField.name,
+              filesArchived: tableResult.filesArchived,
+              bytesArchived: tableResult.bytesArchived || 0
+            });
+          }
+        }
+      }
+      
+      baseStats.tablesProcessed++;
+    }
+    
+  } catch (error) {
+    Logger.log(`❌ Error: ${error.toString()}`);
+    baseStats.error = error.toString();
+  }
+  
+  baseStats.executionTimeMs = Date.now() - startTime;
+  
+  // Log summary
+  Logger.log('\n📊 === Archival Summary ===');
+  Logger.log(`Base: ${baseStats.baseName}`);
+  Logger.log(`Tables: ${baseStats.tablesProcessed} processed, ${baseStats.tablesWithAttachments} had attachments`);
+  Logger.log(`Files: ${baseStats.totalFilesArchived} archived (${formatBytes(baseStats.totalBytesArchived)})`);
+  Logger.log(`Records: ${baseStats.totalRecordsProcessed} processed, ${baseStats.totalRecordsTooNew} too recent`);
+  Logger.log(`Time: ${(baseStats.executionTimeMs/1000).toFixed(1)}s`);
+  
+  saveStats_(baseStats);
+  return { success: true, ...baseStats };
+};
+
+// Add helper function for bytes formatting
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
   // Private helper functions
   
   function analyzeBase_(base, apiKey) {
@@ -286,23 +430,39 @@ const AirtableManager = (function() {
   
   function fetchRecords_(config, apiKey) {
     try {
-      const url = `https://api.airtable.com/v0/${config.baseId}/${encodeURIComponent(config.tableName)}${config.viewName ? `?view=${encodeURIComponent(config.viewName)}` : ''}`;
+      // Build URL with optional view parameter
+      let url = `https://api.airtable.com/v0/${config.baseId}/${encodeURIComponent(config.tableName)}`;
+      
+      // Add view parameter if specified
+      const params = [];
+      if (config.viewName) {
+        params.push(`view=${encodeURIComponent(config.viewName)}`);
+      }
+      
+      if (params.length > 0) {
+        url += '?' + params.join('&');
+      }
+      
+      Logger.log(`📋 Fetching records from: ${url}`);
       
       const response = UrlFetchApp.fetch(url, {
         headers: { 'Authorization': `Bearer ${apiKey}` },
         muteHttpExceptions: true
       });
       
-      if (response.getResponseCode() !== 200) return [];
+      if (response.getResponseCode() !== 200) {
+        Logger.log(`❌ Failed to fetch records: ${response.getResponseCode()}`);
+        return [];
+      }
       
       const records = JSON.parse(response.getContentText()).records || [];
       
-      // Calculate cutoff date (6 months ago)
+      // Calculate cutoff date
       const cutoffDate = new Date();
-      cutoffDate.setMonth(cutoffDate.getMonth() - ARCHIVE_AGE_MONTHS);
+      cutoffDate.setMonth(cutoffDate.getMonth() - getArchiveAgeMonths());
       
       // Filter to records with attachments but no link, and old enough
-      return records.filter(r => {
+      const filteredRecords = records.filter(r => {
         const attachments = r.fields[config.attachmentFieldName];
         const hasLink = r.fields[config.linkFieldName];
         
@@ -313,7 +473,12 @@ const AirtableManager = (function() {
         return attachments && attachments.length > 0 && !hasLink && isOldEnough;
       });
       
+      Logger.log(`📊 Found ${records.length} total records, ${filteredRecords.length} need archiving`);
+      
+      return filteredRecords;
+      
     } catch (error) {
+      Logger.log(`❌ Error fetching records: ${error.toString()}`);
       return [];
     }
   }
@@ -337,18 +502,48 @@ const AirtableManager = (function() {
   }
   
   /**
-   * Get table ID for building proper Airtable URLs
+   * Get table name from API
    * @private
    */
-  function getTableId_(baseId, tableName, apiKey) {
+  function getTableName_(baseId, tableNameOrId, apiKey) {
     try {
+      // If it doesn't look like an ID, assume it's already a name
+      if (!tableNameOrId.startsWith('tbl')) {
+        return tableNameOrId;
+      }
+      
       const url = `https://api.airtable.com/v0/meta/bases/${baseId}/tables`;
       const response = UrlFetchApp.fetch(url, {
         headers: { 'Authorization': `Bearer ${apiKey}` }
       });
       
       const tables = JSON.parse(response.getContentText()).tables || [];
-      const table = tables.find(t => t.name === tableName);
+      const table = tables.find(t => t.id === tableNameOrId);
+      return table ? table.name : tableNameOrId;
+    } catch (error) {
+      Logger.log(`Could not resolve table name: ${error.toString()}`);
+      return tableNameOrId;
+    }
+  }
+  
+  /**
+   * Get table ID for building proper Airtable URLs
+   * @private
+   */
+  function getTableId_(baseId, tableName, apiKey) {
+    try {
+      // If tableName already looks like an ID, return it
+      if (tableName.startsWith('tbl')) {
+        return tableName;
+      }
+      
+      const url = `https://api.airtable.com/v0/meta/bases/${baseId}/tables`;
+      const response = UrlFetchApp.fetch(url, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      
+      const tables = JSON.parse(response.getContentText()).tables || [];
+      const table = tables.find(t => t.name === tableName || t.id === tableName);
       return table ? table.id : null;
     } catch (error) {
       Logger.log(`Error getting table ID: ${error.toString()}`);
@@ -359,7 +554,7 @@ const AirtableManager = (function() {
   /**
    * Ensures the Box link field exists in the table, creating it if necessary
    * @param {string} baseId Airtable base ID
-   * @param {string} tableName Table name
+   * @param {string} tableName Table name or ID
    * @param {string} linkFieldName Name of the field to create
    * @param {string} apiKey Airtable API key
    * @returns {boolean} True if field exists or was created
@@ -379,12 +574,17 @@ const AirtableManager = (function() {
       }
       
       const tables = JSON.parse(schemaResponse.getContentText()).tables || [];
-      const table = tables.find(t => t.name === tableName);
+      
+      // Find table by either name or ID
+      const table = tables.find(t => t.name === tableName || t.id === tableName);
       
       if (!table) {
         Logger.log(`❌ Table "${tableName}" not found`);
+        Logger.log(`Available tables: ${tables.map(t => `${t.name} (${t.id})`).join(', ')}`);
         return false;
       }
+      
+      Logger.log(`✅ Found table: ${table.name} (${table.id})`);
       
       // Check if field already exists
       const fieldExists = table.fields.some(f => f.name === linkFieldName);
@@ -394,7 +594,7 @@ const AirtableManager = (function() {
       }
       
       // Create the field
-      Logger.log(`📝 Creating field "${linkFieldName}" in table "${tableName}"...`);
+      Logger.log(`📝 Creating field "${linkFieldName}" in table "${table.name}"...`);
       
       const createFieldUrl = `https://api.airtable.com/v0/meta/bases/${baseId}/tables/${table.id}/fields`;
       const createResponse = UrlFetchApp.fetch(createFieldUrl, {
@@ -440,7 +640,10 @@ const AirtableManager = (function() {
       // Use base name if available, otherwise fall back to base ID
       const baseFolderName = config.baseName || config.baseId;
       
-      Logger.log(`📁 Creating folder structure: /Airtable/${baseFolderName}/${config.tableName}/`);
+      // Use table name if available, otherwise fall back to table name from config
+      const tableFolderName = config.tableName || 'Unknown_Table';
+      
+      Logger.log(`📁 Creating folder structure: /Airtable/${baseFolderName}/${tableFolderName}/`);
       
       // Find or create each level
       const airtableId = findOrCreateFolder_('Airtable', rootId, boxToken);
@@ -449,7 +652,7 @@ const AirtableManager = (function() {
       const baseId = findOrCreateFolder_(baseFolderName, airtableId, boxToken);
       Logger.log(`  ✅ Base folder ID: ${baseId}`);
       
-      const tableFolderId = findOrCreateFolder_(config.tableName, baseId, boxToken);
+      const tableFolderId = findOrCreateFolder_(tableFolderName, baseId, boxToken);
       Logger.log(`  ✅ Table folder ID: ${tableFolderId}`);
       
       return tableFolderId;
@@ -521,7 +724,7 @@ const AirtableManager = (function() {
     
     // Check age again (in case of race conditions)
     const cutoffDate = new Date();
-    cutoffDate.setMonth(cutoffDate.getMonth() - ARCHIVE_AGE_MONTHS);
+    cutoffDate.setMonth(cutoffDate.getMonth() - getArchiveAgeMonths());
     const recordDate = new Date(record.createdTime || '2000-01-01');
     
     if (recordDate >= cutoffDate) {
@@ -532,6 +735,7 @@ const AirtableManager = (function() {
     try {
       const attachments = record.fields[config.attachmentFieldName];
       const uploadedFiles = [];
+      let totalBytesArchived = 0;
       
       // Build correct Airtable URL
       const recordUrl = config.tableId ? 
@@ -609,6 +813,7 @@ const AirtableManager = (function() {
             boxLink: uploadResult.link,
             boxFileId: uploadResult.fileId
           });
+          totalBytesArchived += (att.size || 0);
         }
       }
       
@@ -658,7 +863,11 @@ const AirtableManager = (function() {
           }
         });
         
-        return { success: true, filesArchived: uploadedFiles.length };
+        return { 
+          success: true, 
+          filesArchived: uploadedFiles.length,
+          bytesArchived: totalBytesArchived
+        };
       }
       
       return { success: false, error: 'Failed to update record' };
