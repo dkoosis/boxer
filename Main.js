@@ -447,3 +447,16 @@ function runBoxerTest() {
 function runAirtableAnalysis() {
   return BoxerApp.analyzeAirtable();
 }
+
+// In Main.js, at the end of the file
+
+/**
+ * Makes the test for image processing executable from the Apps Script IDE.
+ * Select this function from the dropdown menu and click "Run".
+ */
+function runImageProcessingTest() {
+  // This calls the diagnostic function, wrapped in the standard system checks.
+  return withSystemChecks_('Test Image Processing', () => {
+    return Diagnostics.runImageProcessingTest();
+  });
+}

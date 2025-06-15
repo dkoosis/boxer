@@ -323,6 +323,8 @@ const Diagnostics = (function() {
     }
   };
 
+  
+
   /**
    * Diagnose Google Drive issues
    */
@@ -348,6 +350,62 @@ const Diagnostics = (function() {
       validation.errors.forEach(e => Logger.log(`  ${e}`));
     }
   };
+// In Diagnostics.js, inside the Diagnostics = (function() { ... })(); block
+
+  /**
+   * Test processing on a specific folder of images
+   */
+  ns.runImageProcessingTest = function() {
+    Logger.log('🧪 === Testing Image Processing on Sample Data ===');
+    const maxFilesToProcess = 25; // Safety limit for a test run
+    let processedCount = 0;
+
+    try {
+      const accessToken = getValidAccessToken();
+      if (!accessToken) {
+        Logger.log('❌ Could not get Box access token.');
+        return { success: false, error: 'No access token' };
+      }
+
+      const testFolderId = ConfigManager.getProperty('BOX_TEST_DATA_FOLDER');
+      if (!testFolderId) {
+        Logger.log('❌ BOX_TEST_DATA_FOLDER is not set in Script Properties.');
+        Logger.log('💡 Please add it and set the value to your Box folder ID.');
+        return { success: false, error: 'Test folder not configured' };
+      }
+
+      Logger.log(`📁 Processing images in folder ID: ${testFolderId}`);
+      const imageFiles = BoxFileOperations.findAllImageFiles(testFolderId, accessToken);
+      
+      if (imageFiles.length === 0) {
+        Logger.log('✅ No image files found in the test folder.');
+        return { success: true, message: 'No images found' };
+      }
+
+      Logger.log(`Found ${imageFiles.length} images. Processing up to ${maxFilesToProcess}...`);
+
+      for (const image of imageFiles.slice(0, maxFilesToProcess)) {
+        Logger.log(`--- Processing: ${image.name} (ID: ${image.id}) ---`);
+        
+        // The report-based processing function can be reused here
+        const result = BoxReportManager.processFileFromReport(image, accessToken);
+        
+        if (result === 'processed' || result === 'skipped') {
+          processedCount++;
+        }
+        Logger.log(`--- Result for ${image.name}: ${result} ---`);
+      }
+
+      Logger.log(`\n🎉 Test Complete. Processed ${processedCount} of ${imageFiles.length} images found.`);
+      return { success: true, processed: processedCount, found: imageFiles.length };
+
+    } catch (error) {
+      Logger.log(`❌ Test failed with an exception: ${error.toString()}`);
+      ErrorHandler.reportError(error, 'Diagnostics.runImageProcessingTest');
+      return { success: false, error: error.toString() };
+    }
+  };
 
   return ns;
 })();
+

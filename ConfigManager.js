@@ -152,6 +152,14 @@ PRIORITY_FOLDER_TREE: {
       default: 'Folder and File Tree run on',
       validate: val => val && val.length > 0
     },
+
+    BOX_TEST_DATA_FOLDER: {
+      required: false,
+      category: 'box_config',
+      description: 'Box folder ID with sample images for testing processing.',
+      default: '',
+      validate: () => true // No special validation needed
+    },
     
     BOX_PRIORITY_FOLDER: {
       required: false,
