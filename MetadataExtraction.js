@@ -734,7 +734,7 @@ const MetadataExtraction = (function() {
       combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
         `Vision API skipped - ${combinedMetadata.fileFormat} format not supported`;
     } else {
-      const visionAnalysis = VisionAnalysis.analyzeImageWithVision(fileId, accessToken, filename);
+      const visionAnalysis = analyzeImageWithVision(fileId, accessToken, filename);
 
       if (visionAnalysis && !visionAnalysis.error) {
         combinedMetadata.aiDetectedObjects = visionAnalysis.objects ? 

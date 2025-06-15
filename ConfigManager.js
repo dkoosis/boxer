@@ -82,6 +82,14 @@ const ConfigManager = (function() {
       autoCreate: () => createTrackingSheet()
     },
     
+PRIORITY_FOLDER_TREE: {
+  required: false,
+  category: 'box_config',
+  description: 'Folder path substring for priority processing',
+  default: '0_SHARED RESOURCES',
+  validate: val => !val || val.length > 0
+},
+
     // Box Authentication
     BOX_CLIENT_ID: {
       required: true,

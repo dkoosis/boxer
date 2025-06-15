@@ -60,13 +60,16 @@ const BoxReportManager = (function() {
       
       Logger.log(`🎯 Files needing processing: ${needsProcessing.length}`);
       
-      // Sort with shared_resources first
+      // Get priority folder tree
+      const priorityFolderTree = ConfigManager.getProperty('PRIORITY_FOLDER_TREE');
+      
+      // Sort with priority folders first
       needsProcessing.sort((a, b) => {
-        const aShared = a.path && a.path.includes('shared_resources');
-        const bShared = b.path && b.path.includes('shared_resources');
+        const aPriority = a.path && priorityFolderTree && a.path.includes(priorityFolderTree);
+        const bPriority = b.path && priorityFolderTree && b.path.includes(priorityFolderTree);
         
-        if (aShared && !bShared) return -1;
-        if (!aShared && bShared) return 1;
+        if (aPriority && !bPriority) return -1;
+        if (!aPriority && bPriority) return 1;
         
         // Within same category, newer paths tend to sort later alphabetically
         return b.path.localeCompare(a.path);
@@ -78,8 +81,8 @@ const BoxReportManager = (function() {
       Logger.log(`📦 Queue size: ${queue.length} files`);
       if (queue.length > 0) {
         Logger.log(`   First item: ${queue[0].name} (${queue[0].path})`);
-        const sharedCount = queue.filter(f => f.path && f.path.includes('shared_resources')).length;
-        Logger.log(`   Shared resources: ${sharedCount} files`);
+        const priorityCount = queue.filter(f => f.path && priorityFolderTree && f.path.includes(priorityFolderTree)).length;
+        Logger.log(`   Priority folder files: ${priorityCount}`);
       }
       
       // Save queue to Drive
@@ -343,8 +346,11 @@ const BoxReportManager = (function() {
         Logger.log(`   Processed: ${stats.queueSize - queue.length} files`);
         
         if (queue.length > 0) {
-          const sharedCount = queue.filter(f => f.path && f.path.includes('shared_resources')).length;
-          Logger.log(`   Shared resources remaining: ${sharedCount}`);
+          const priorityFolderTree = ConfigManager.getProperty('PRIORITY_FOLDER_TREE');
+          if (priorityFolderTree) {
+            const priorityCount = queue.filter(f => f.path && f.path.includes(priorityFolderTree)).length;
+            Logger.log(`   Priority folder remaining: ${priorityCount}`);
+          }
         }
       }
       
