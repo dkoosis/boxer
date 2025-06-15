@@ -65,6 +65,14 @@ const ConfigManager = (function() {
         return cacheFolder.getId();
       }
     },
+
+    BOX_ARCHIVE_METADATA_ID: {
+      required: false,
+      category: 'box_config',
+      description: 'Box metadata template key for archived files',
+      default: 'boxerArchiveMetadata',
+      validate: val => !val || val.length > 0
+    },
     
     BOXER_TRACKING_SHEET: {
       required: true,

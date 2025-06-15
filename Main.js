@@ -2,6 +2,10 @@
 // Central orchestrator for the Boxer system
 // All scheduled triggers should point to the functions in this file
 
+/*
+TODO: Text extraction seems not to be working?
+*/
+
 /**
  * BoxerApp namespace - all public functions organized here
  */
@@ -438,4 +442,8 @@ function runLegalDocDetectionTrigger() {
  */
 function runBoxerTest() {
   return BoxerApp.test();
+}
+
+function runAirtableAnalysis() {
+  return BoxerApp.analyzeAirtable();
 }

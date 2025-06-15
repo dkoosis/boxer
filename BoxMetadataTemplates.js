@@ -195,6 +195,106 @@ function createOptimalImageMetadataTemplate(accessToken) {
 }
 
 /**
+ * Creates the archive metadata template for Airtable/other system archives
+ * @param {string} accessToken Valid Box access token
+ * @returns {object|null} Created template object or null on failure
+ */
+function createArchiveMetadataTemplate(accessToken) {
+  if (!accessToken) {
+    Logger.log('ERROR: createArchiveMetadataTemplate - accessToken is required');
+    return null;
+  }
+  
+  const templateData = {
+    scope: ConfigManager.getBoxMetadataScope(),
+    templateKey: 'boxerArchiveMetadata',
+    displayName: 'Boxer Archive Metadata',
+    fields: [
+      // Source System Info
+      { key: 'sourceSystem', displayName: 'Source System', type: 'enum', 
+        description: 'System where file was originally stored',
+        options: [
+          { key: 'airtable', displayName: 'Airtable' },
+          { key: 'asana', displayName: 'Asana' },
+          { key: 'slack', displayName: 'Slack' },
+          { key: 'other', displayName: 'Other' }
+        ]
+      },
+      { key: 'sourceBaseId', displayName: 'Base/Workspace ID', type: 'string', description: 'ID of source base or workspace' },
+      { key: 'sourceBaseName', displayName: 'Base/Workspace Name', type: 'string', description: 'Name of source base or workspace' },
+      { key: 'sourceTableName', displayName: 'Table/Project Name', type: 'string', description: 'Table or project name' },
+      { key: 'sourceRecordId', displayName: 'Record/Task ID', type: 'string', description: 'Original record or task ID' },
+      { key: 'sourceRecordName', displayName: 'Record/Task Name', type: 'string', description: 'Original record or task name' },
+      { key: 'sourceRecordUrl', displayName: 'Link to Original', type: 'string', description: 'URL to view original record' },
+      
+      // Original Context
+      { key: 'recordPrimaryField', displayName: 'Primary Field Value', type: 'string', description: 'Main identifying field from record' },
+      { key: 'recordKeyData', displayName: 'Key Record Data', type: 'string', description: 'Important fields from original record (JSON)' },
+      { key: 'recordCreatedDate', displayName: 'Record Created', type: 'date', description: 'When original record was created' },
+      { key: 'recordModifiedDate', displayName: 'Record Modified', type: 'date', description: 'When original record was last modified' },
+      
+      // Archive Info
+      { key: 'archiveDate', displayName: 'Archive Date', type: 'date', description: 'When file was archived to Box' },
+      { key: 'archiveReason', displayName: 'Archive Reason', type: 'enum',
+        description: 'Why file was archived',
+        options: [
+          { key: 'storage_reduction', displayName: 'Storage Reduction' },
+          { key: 'performance', displayName: 'Performance Optimization' },
+          { key: 'backup', displayName: 'Backup' },
+          { key: 'migration', displayName: 'System Migration' },
+          { key: 'manual', displayName: 'Manual Archive' }
+        ]
+      },
+      { key: 'originalFilename', displayName: 'Original Filename', type: 'string', description: 'Original name in source system' },
+      { key: 'originalFileSize', displayName: 'Original Size (bytes)', type: 'float', description: 'File size in source system' },
+      
+      // Processing
+      { key: 'archiveVersion', displayName: 'Archive Script Version', type: 'string', description: 'Version of archival script' },
+      { key: 'archiveBatch', displayName: 'Archive Batch ID', type: 'string', description: 'Batch identifier for bulk archives' },
+      { key: 'retainOriginal', displayName: 'Original Retained', type: 'enum', 
+        description: 'Was original kept in source system?',
+        options: [
+          { key: 'yes', displayName: 'Yes' },
+          { key: 'no', displayName: 'No' }
+        ]
+      }
+    ]
+  };
+
+  const url = `${ConfigManager.BOX_API_BASE_URL}/metadata_templates/schema`;
+  const options = {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    payload: JSON.stringify(templateData),
+    muteHttpExceptions: true
+  };
+  
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+
+    if (responseCode === 201) {
+      const createdTemplate = JSON.parse(responseText);
+      Logger.log(`✅ Created archive metadata template: ${createdTemplate.displayName} (Key: ${createdTemplate.templateKey})`);
+      return createdTemplate;
+    } else if (responseCode === 409) {
+      Logger.log(`Archive template '${templateData.templateKey}' already exists. Fetching existing template.`);
+      return checkTemplateExists(templateData.templateKey, accessToken);
+    } else {
+      Logger.log(`ERROR: Failed to create archive template. HTTP Code: ${responseCode}, Response: ${responseText}`);
+      return null;
+    }
+  } catch (error) {
+    Logger.log(`EXCEPTION creating archive template: ${error.toString()}`);
+    return null;
+  }
+}
+
+/**
  * Lists all existing enterprise metadata templates.
  * @param {string} accessToken Valid Box access token
  * @returns {object[]} Array of template objects or empty array on failure
@@ -299,6 +399,35 @@ function getOrCreateImageTemplate(accessToken) {
     Logger.log(`Using template: ${template.displayName} (Key: ${template.templateKey})`);
   } else {
     Logger.log(`ERROR: Failed to get or create template '${ConfigManager.BOX_METADATA_TEMPLATE_KEY}'. Check admin permissions.`);
+  }
+  
+  return template;
+}
+
+/**
+ * Gets the archive metadata template, creating it if it doesn't exist.
+ * @param {string} accessToken Valid Box access token
+ * @returns {object|null} Template object or null on failure
+ */
+function getOrCreateArchiveTemplate(accessToken) {
+  if (!accessToken) {
+    Logger.log('ERROR: getOrCreateArchiveTemplate - accessToken is required');
+    return null;
+  }
+  
+  const templateKey = 'boxerArchiveMetadata';
+  Logger.log(`Ensuring archive template '${templateKey}' exists`);
+  let template = checkTemplateExists(templateKey, accessToken);
+  
+  if (!template) {
+    Logger.log(`Archive template '${templateKey}' not found, creating`);
+    template = createArchiveMetadataTemplate(accessToken);
+  }
+  
+  if (template) {
+    Logger.log(`Using archive template: ${template.displayName} (Key: ${template.templateKey})`);
+  } else {
+    Logger.log(`ERROR: Failed to get or create archive template '${templateKey}'. Check admin permissions.`);
   }
   
   return template;
