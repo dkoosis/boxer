@@ -65,22 +65,21 @@ const ConfigManager = (function() {
         return cacheFolder.getId();
       }
     },
-    
-AIRTABLE_BASES_TO_ARCHIVE: {
-  required: false,
-  category: 'airtable',
-  description: 'Comma-separated list of Airtable base IDs to archive weekly',
-  default: '',
-  validate: val => true
-},
 
-AIRTABLE_ARCHIVE_AGE_DAYS: {
-  required: false,
-  category: 'airtable',
-  description: 'Archive attachments older than this many days',
-  default: '365',
-  validate: val => !val || (!isNaN(parseInt(val)) && parseInt(val) > 0)
-},
+    AIRTABLE_BASES_TO_ARCHIVE: {
+      required: false,
+      category: 'airtable',
+      description: 'Comma-separated list of Airtable base IDs to archive weekly',
+      default: '',
+      validate: val => true
+    },
+    ARCHIVE_AGE_MONTHS: {
+      required: false,
+      category: 'airtable',
+      description: 'Archive attachments older than this many months',
+      default: '6',
+      validate: val => !val || (!isNaN(parseInt(val)) && parseInt(val) > 0)
+    },
     BOX_ARCHIVE_METADATA_ID: {
       required: false,
       category: 'box_config',

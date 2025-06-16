@@ -372,7 +372,11 @@ const MetadataExtraction = (function() {
       if (metadata.photographer) clean.photographer = String(metadata.photographer);
       if (metadata.cameraSoftware) clean.cameraSoftware = String(metadata.cameraSoftware);
       if (metadata.lensModel) clean.lensModel = String(metadata.lensModel);
-      if (metadata.orientation) clean.orientation = String(metadata.orientation);
+      
+      // FIXED: orientation should be a number, not string
+      if (metadata.orientation && !isNaN(parseInt(metadata.orientation))) {
+        clean.orientation = Number(metadata.orientation);
+      }
       
       // Float fields - ensure they're numbers
       if (typeof metadata.fileSizeMB === 'number' && !isNaN(metadata.fileSizeMB)) {
@@ -401,9 +405,14 @@ const MetadataExtraction = (function() {
       if (typeof metadata.focalLength === 'number' && !isNaN(metadata.focalLength)) {
         clean.focalLength = Number(metadata.focalLength);
       }
+      
+      // FIXED: flashUsed boolean to enum conversion
       if (typeof metadata.flashUsed === 'boolean') {
-        clean.flashUsed = metadata.flashUsed;
+        clean.flashUsed = metadata.flashUsed ? 'yes' : 'no';
+      } else if (metadata.flashUsed !== undefined && metadata.flashUsed !== null) {
+        clean.flashUsed = 'unknown';
       }
+      
       if (typeof metadata.whiteBalance === 'number' && !isNaN(metadata.whiteBalance)) {
         clean.whiteBalance = Number(metadata.whiteBalance);
       }
@@ -812,10 +821,34 @@ const MetadataExtraction = (function() {
 
     // Analyze with Vision API, using the renamed function from VisionAnalysis
     const skipVisionFormats = ['TIFF'];
-    if (skipVisionFormats.indexOf(combinedMetadata.fileFormat) !== -1) {
+    const maxVisionSizeMB = 20; // Vision API limit
+    
+    // Track what processing was done
+    let processingNotes = [];
+    
+    // Check file size before attempting Vision API
+    if (combinedMetadata.fileSizeMB && combinedMetadata.fileSizeMB > maxVisionSizeMB) {
+      Logger.log(`⏭️ Skipping Vision API for ${filename} - file too large (${combinedMetadata.fileSizeMB.toFixed(1)} MB > ${maxVisionSizeMB} MB)`);
+      processingNotes.push(`Vision API skipped: file size ${combinedMetadata.fileSizeMB.toFixed(1)}MB exceeds ${maxVisionSizeMB}MB limit`);
+      
+      // Set AI fields to indicate not processed
+      combinedMetadata.aiDetectedObjects = 'Not processed - file too large';
+      combinedMetadata.aiSceneDescription = 'Not processed - file too large';
+      combinedMetadata.extractedText = '';
+      combinedMetadata.aiConfidenceScore = 0;
+      
+      combinedMetadata.processingStage = ConfigManager.PROCESSING_STAGE_EXIF; // Stay at EXIF stage
+      
+    } else if (skipVisionFormats.indexOf(combinedMetadata.fileFormat) !== -1) {
       Logger.log(`⏭️ Skipping Vision API for ${combinedMetadata.fileFormat} format: ${filename}`);
-      combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
-        `Vision API skipped - ${combinedMetadata.fileFormat} format not supported`;
+      processingNotes.push(`Vision API skipped: ${combinedMetadata.fileFormat} format not supported`);
+      
+      // Set AI fields to indicate not processed
+      combinedMetadata.aiDetectedObjects = `Not processed - ${combinedMetadata.fileFormat} not supported`;
+      combinedMetadata.aiSceneDescription = `Not processed - ${combinedMetadata.fileFormat} not supported`;
+      combinedMetadata.extractedText = '';
+      combinedMetadata.aiConfidenceScore = 0;
+      
     } else {
       const visionAnalysis = analyzeImageWithVision(fileId, accessToken, filename);
 
@@ -829,6 +862,8 @@ const MetadataExtraction = (function() {
           visionAnalysis.dominantColors.map(c => `${c.rgb} (${c.score}, ${c.pixelFraction})`).join('; ') : '';
         combinedMetadata.aiConfidenceScore = visionAnalysis.confidenceScore || 0;
         combinedMetadata.processingStage = ConfigManager.PROCESSING_STAGE_AI;
+        
+        processingNotes.push('Vision API processed successfully');
 
         // Apply AI-driven content enhancements
         const aiEnhancements = ns.enhanceContentAnalysisWithAI(combinedMetadata, visionAnalysis, filename, combinedMetadata.folderPath);
@@ -836,10 +871,32 @@ const MetadataExtraction = (function() {
 
       } else if (visionAnalysis && visionAnalysis.error) {
         Logger.log(`  Vision API error for ${filename}: ${visionAnalysis.message || visionAnalysis.error}`);
-        combinedMetadata.notes = (combinedMetadata.notes ? combinedMetadata.notes + "; " : "") + 
-          `Vision API Error: ${visionAnalysis.message || visionAnalysis.error}`;
+        processingNotes.push(`Vision API error: ${visionAnalysis.message || visionAnalysis.error}`);
+        
+        // Set AI fields to indicate error
+        combinedMetadata.aiDetectedObjects = `Error: ${visionAnalysis.error}`;
+        combinedMetadata.aiSceneDescription = `Error: ${visionAnalysis.error}`;
+        combinedMetadata.extractedText = '';
+        combinedMetadata.aiConfidenceScore = 0;
       }
     }
+    
+    // Add processing summary to notes
+    const processingSummary = [
+      `Processed: ${new Date().toISOString()}`,
+      `EXIF: ${exifData && exifData.hasExif ? 'extracted' : 'not found'}`,
+      `GPS: ${combinedMetadata.gpsLatitude ? 'found & geocoded' : 'not found'}`
+    ];
+    
+    if (processingNotes.length > 0) {
+      processingSummary.push(...processingNotes);
+    }
+    
+    // Combine with any existing notes
+    combinedMetadata.notes = [
+      combinedMetadata.notes,
+      processingSummary.join('; ')
+    ].filter(n => n).join(' | ');
     
     // Finalize processing metadata
     combinedMetadata.lastProcessedDate = new Date().toISOString(); // Use current timestamp

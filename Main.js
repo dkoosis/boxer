@@ -57,17 +57,39 @@ const BoxerApp = {
       Logger.log(`📦 Processing ${baseIds.length} configured base(s)`);
       
       // Archive each configured base
-      for (const baseId of baseIds) {
-        const config = { baseId };
-        const result = AirtableManager.archiveBase(config, apiKey, boxToken);
-        results.push(result);
-      }
-      
+// Archive each configured base
+for (let i = 0; i < baseIds.length; i++) {
+  const baseId = baseIds[i];
+  const config = { baseId };
+  Logger.log(`\n🔄 [${i + 1}/${baseIds.length}] Processing base: ${baseId}`);
+  
+  const result = AirtableManager.archiveBase(config, apiKey, boxToken);
+  results.push(result);
+  
+  // Log space recovered for this base
+  if (result.success && result.totalFilesArchived > 0) {
+    Logger.log(`\n✅ BASE COMPLETE: ${result.baseName || baseId}`);
+    Logger.log(`   📦 Files archived: ${result.totalFilesArchived}`);
+    Logger.log(`   💾 Space recovered: ${formatBytes(result.totalBytesArchived)}`);
+    Logger.log(`   ⏱️ Time taken: ${(result.executionTimeMs/1000).toFixed(1)}s`);
+  } else if (result.success) {
+    Logger.log(`\n✅ BASE COMPLETE: ${result.baseName || baseId} - No files needed archiving`);
+  } else {
+    Logger.log(`\n❌ BASE FAILED: ${result.baseName || baseId} - ${result.error || 'Unknown error'}`);
+  }
+}      
       // Summary
       const totalFiles = results.reduce((sum, r) => sum + (r.totalFilesArchived || 0), 0);
       const totalBytes = results.reduce((sum, r) => sum + (r.totalBytesArchived || 0), 0);
       
-      Logger.log(`\n📊 Weekly Archival Complete: ${totalFiles} files (${formatBytes(totalBytes)}) from ${results.length} bases`);
+      Logger.log(`\n📊 Weekly Archival Complete:`);
+      Logger.log(`   📚 Bases processed: ${results.length}`);
+      Logger.log(`   📦 Total files archived: ${totalFiles}`);
+      Logger.log(`   💾 Total space recovered: ${formatBytes(totalBytes)}`);
+
+      if (totalBytes > 0) {
+        Logger.log(`\n✨ Freed up ${formatBytes(totalBytes)} in Airtable!`);
+      }      
       
       return {
         success: true,

@@ -300,25 +300,31 @@ ns.archiveBase = function(config, apiKey, boxToken) {
         };
         
         // Archive this table/field combination
-        const tableResult = ns.archiveTable(tableConfig, apiKey, boxToken);
-        
-        if (tableResult.success) {
-          baseStats.totalRecordsProcessed += tableResult.recordsProcessed || 0;
-          baseStats.totalFilesArchived += tableResult.filesArchived || 0;
-          baseStats.totalBytesArchived += tableResult.bytesArchived || 0;
-          baseStats.totalRecordsTooNew += tableResult.recordsTooNew || 0;
-          baseStats.totalErrors += tableResult.errors || 0;
-          
-          if (tableResult.filesArchived > 0) {
-            baseStats.tableResults.push({
-              tableName: table.name,
-              fieldName: attachmentField.name,
-              filesArchived: tableResult.filesArchived,
-              bytesArchived: tableResult.bytesArchived || 0
-            });
-          }
-        }
-      }
+// Archive this table/field combination
+const tableResult = ns.archiveTable(tableConfig, apiKey, boxToken);
+
+  if (tableResult.success) {
+    baseStats.totalRecordsProcessed += tableResult.recordsProcessed || 0;
+    baseStats.totalFilesArchived += tableResult.filesArchived || 0;
+    baseStats.totalBytesArchived += tableResult.bytesArchived || 0;
+    baseStats.totalRecordsTooNew += tableResult.recordsTooNew || 0;
+    baseStats.totalErrors += tableResult.errors || 0;
+    
+    if (tableResult.filesArchived > 0) {
+      Logger.log(`   ✅ Table "${table.name}" - ${tableResult.filesArchived} files, ${formatBytes(tableResult.bytesArchived || 0)} recovered`);
+      baseStats.tableResults.push({
+        tableName: table.name,
+        fieldName: attachmentField.name,
+        filesArchived: tableResult.filesArchived,
+        bytesArchived: tableResult.bytesArchived || 0
+      });
+    } else {
+      Logger.log(`   ⏭️ Table "${table.name}" - No files needed archiving`);
+    }
+  } else {
+    Logger.log(`   ❌ Table "${table.name}" - Failed to archive`);
+  }      
+}
       
       baseStats.tablesProcessed++;
     }
@@ -331,13 +337,15 @@ ns.archiveBase = function(config, apiKey, boxToken) {
   baseStats.executionTimeMs = Date.now() - startTime;
   
   // Log summary
-  Logger.log('\n📊 === Archival Summary ===');
-  Logger.log(`Base: ${baseStats.baseName}`);
-  Logger.log(`Tables: ${baseStats.tablesProcessed} processed, ${baseStats.tablesWithAttachments} had attachments`);
-  Logger.log(`Files: ${baseStats.totalFilesArchived} archived (${formatBytes(baseStats.totalBytesArchived)})`);
-  Logger.log(`Records: ${baseStats.totalRecordsProcessed} processed, ${baseStats.totalRecordsTooNew} too recent`);
-  Logger.log(`Time: ${(baseStats.executionTimeMs/1000).toFixed(1)}s`);
-  
+// Log summary
+Logger.log('\n📊 === Archival Summary ===');
+Logger.log(`Base: ${baseStats.baseName}`);
+Logger.log(`Tables: ${baseStats.tablesProcessed} processed, ${baseStats.tablesWithAttachments} had attachments`);
+Logger.log(`Files: ${baseStats.totalFilesArchived} archived`);
+Logger.log(`💾 Space recovered from Airtable: ${formatBytes(baseStats.totalBytesArchived)}`);
+Logger.log(`📦 Space added to Box: ${formatBytes(baseStats.totalBytesArchived)}`);
+Logger.log(`Records: ${baseStats.totalRecordsProcessed} processed, ${baseStats.totalRecordsTooNew} too recent`);
+Logger.log(`Time: ${(baseStats.executionTimeMs/1000).toFixed(1)}s`);  
   saveStats_(baseStats);
   return { success: true, ...baseStats };
 };

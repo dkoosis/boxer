@@ -536,3 +536,195 @@ const Diagnostics = (function() {
 
   return ns;
 })();
+// Run this to see your current template:
+function checkBoxMetadataTemplate() {
+  const token = getValidAccessToken();
+  const templateKey = ConfigManager.getProperty('BOX_IMAGE_METADATA_ID');
+  const scope = ConfigManager.getBoxMetadataScope();
+  
+  const url = `https://api.box.com/2.0/metadata_templates/${scope}/${templateKey}/schema`;
+  
+  const response = UrlFetchApp.fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  
+  const template = JSON.parse(response.getContentText());
+  
+  Logger.log('=== Box Metadata Template Fields ===');
+  template.fields.forEach(field => {
+    Logger.log(`${field.key} (${field.type})`);
+  });
+}
+
+/**
+ * Adds missing camera/EXIF fields to the existing Box metadata template
+ * Run this function to update your template with the missing fields
+ */
+function addMissingMetadataFields() {
+  const accessToken = getValidAccessToken();
+  const templateKey = ConfigManager.getProperty('BOX_IMAGE_METADATA_ID');
+  const scope = ConfigManager.getBoxMetadataScope();
+  
+  Logger.log('=== Adding Missing Metadata Fields ===');
+  
+  // Fields to add
+  const fieldsToAdd = [
+    {
+      key: 'cameraSoftware',
+      displayName: 'Camera Software',
+      type: 'string',
+      description: 'Camera or processing software used'
+    },
+    {
+      key: 'lensModel',
+      displayName: 'Lens Model',
+      type: 'string',
+      description: 'Lens model used for the photo'
+    },
+    {
+      key: 'orientation',
+      displayName: 'Orientation',
+      type: 'float',
+      description: 'EXIF orientation value (1-8)'
+    },
+    {
+      key: 'exposureTime',
+      displayName: 'Exposure Time',
+      type: 'float',
+      description: 'Exposure time in seconds'
+    },
+    {
+      key: 'fNumber',
+      displayName: 'F-Number',
+      type: 'float',
+      description: 'F-stop value (aperture)'
+    },
+    {
+      key: 'isoSpeed',
+      displayName: 'ISO Speed',
+      type: 'float',
+      description: 'ISO sensitivity value'
+    },
+    {
+      key: 'focalLength',
+      displayName: 'Focal Length',
+      type: 'float',
+      description: 'Focal length in millimeters'
+    },
+    {
+      key: 'flashUsed',
+      displayName: 'Flash Used',
+      type: 'enum',
+      description: 'Whether flash was used',
+      options: [
+        { key: 'yes', displayName: 'Yes' },
+        { key: 'no', displayName: 'No' },
+        { key: 'unknown', displayName: 'Unknown' }
+      ]
+    },
+    {
+      key: 'whiteBalance',
+      displayName: 'White Balance',
+      type: 'float',
+      description: 'White balance setting'
+    }
+  ];
+  
+  const url = `https://api.box.com/2.0/metadata_templates/${scope}/${templateKey}/schema`;
+  
+  // Process each field
+  fieldsToAdd.forEach(field => {
+    try {
+      const addFieldOperation = [{
+        op: 'addField',
+        data: field
+      }];
+      
+      const response = UrlFetchApp.fetch(url, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        payload: JSON.stringify(addFieldOperation),
+        muteHttpExceptions: true
+      });
+      
+      if (response.getResponseCode() === 200) {
+        Logger.log(`✅ Added field: ${field.key}`);
+      } else {
+        const error = response.getContentText();
+        if (error.includes('field_already_exists')) {
+          Logger.log(`⏭️ Field already exists: ${field.key}`);
+        } else {
+          Logger.log(`❌ Failed to add ${field.key}: ${error}`);
+        }
+      }
+      
+      // Small delay between operations
+      Utilities.sleep(500);
+      
+    } catch (error) {
+      Logger.log(`❌ Error adding ${field.key}: ${error.toString()}`);
+    }
+  });
+  
+  Logger.log('\n✅ Template update complete!');
+  
+  // Verify the update
+  Logger.log('\n📋 Verifying template...');
+  checkBoxMetadataTemplate();
+}
+
+/**
+ * Alternative: If adding fields fails, you might need to recreate the template
+ * This function shows what the complete template should look like
+ */
+function showCompleteTemplateDefinition() {
+  Logger.log('=== Complete Template with All Fields ===');
+  Logger.log('If field addition fails, you may need to:');
+  Logger.log('1. Delete the existing template in Box');
+  Logger.log('2. Run createOptimalImageMetadataTemplate() again');
+  Logger.log('\nThe template in BoxMetadataTemplates.js should include these fields:');
+  
+  const missingFields = `
+      // Camera/EXIF technical fields
+      { key: 'cameraSoftware', displayName: 'Camera Software', type: 'string', description: 'Camera or processing software used' },
+      { key: 'lensModel', displayName: 'Lens Model', type: 'string', description: 'Lens model used for the photo' },
+      { key: 'orientation', displayName: 'Orientation', type: 'float', description: 'EXIF orientation value (1-8)' },
+      { key: 'exposureTime', displayName: 'Exposure Time', type: 'float', description: 'Exposure time in seconds' },
+      { key: 'fNumber', displayName: 'F-Number', type: 'float', description: 'F-stop value (aperture)' },
+      { key: 'isoSpeed', displayName: 'ISO Speed', type: 'float', description: 'ISO sensitivity value' },
+      { key: 'focalLength', displayName: 'Focal Length', type: 'float', description: 'Focal length in millimeters' },
+      { key: 'flashUsed', displayName: 'Flash Used', type: 'enum', description: 'Whether flash was used',
+        options: [
+          { key: 'yes', displayName: 'Yes' },
+          { key: 'no', displayName: 'No' },
+          { key: 'unknown', displayName: 'Unknown' }
+        ]
+      },
+      { key: 'whiteBalance', displayName: 'White Balance', type: 'float', description: 'White balance setting' },`;
+  
+  Logger.log(missingFields);
+}
+
+/**
+ * Fix for flashUsed boolean to enum conversion
+ * Since the template expects an enum but the code sends a boolean
+ */
+function updateFlashUsedHandling() {
+  Logger.log('To fix flashUsed, update sanitizeMetadataForBox in MetadataExtraction.js:');
+  Logger.log(`
+  // Replace this:
+  if (typeof metadata.flashUsed === 'boolean') {
+    clean.flashUsed = metadata.flashUsed;
+  }
+  
+  // With this:
+  if (typeof metadata.flashUsed === 'boolean') {
+    clean.flashUsed = metadata.flashUsed ? 'yes' : 'no';
+  } else if (metadata.flashUsed !== undefined) {
+    clean.flashUsed = 'unknown';
+  }
+  `);
+}
