@@ -31,11 +31,11 @@ const BoxerApp = {
   
   /**
    * Archive Airtable attachments (for time-based trigger)
-   * This runs weekly to archive old attachments from configured bases
+   * This runs weekly to archive old attachments and then sends a usage report.
    * Recommended Trigger: Weekly
    */
   archiveAirtable() {
-    return withSystemChecks_('Airtable Weekly Archival', () => {
+    return withSystemChecks_('Airtable Weekly Archival & Report', () => {
       const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
       if (!apiKey) {
         Logger.log('⚠️ Airtable not configured - skipping');
@@ -76,8 +76,7 @@ const BoxerApp = {
         } else {
           Logger.log(`\n❌ BASE FAILED: ${result.baseName || baseId} - ${result.error || 'Unknown error'}`);
         }
-      }
-      
+      }      
       // Summary
       const totalFiles = results.reduce((sum, r) => sum + (r.totalFilesArchived || 0), 0);
       const totalBytes = results.reduce((sum, r) => sum + (r.totalBytesArchived || 0), 0);
@@ -89,8 +88,12 @@ const BoxerApp = {
 
       if (totalBytes > 0) {
         Logger.log(`\n✨ Freed up ${formatBytes(totalBytes)} in Airtable!`);
-      }      
+      }
       
+      // After archival, send the usage report.
+      Logger.log('\n📧 Sending Airtable usage report...');
+      this.sendAirtableUsageReport();
+
       return {
         success: true,
         basesProcessed: results.length,
@@ -98,6 +101,24 @@ const BoxerApp = {
         totalBytesArchived: totalBytes,
         results: results
       };
+    });
+  },
+
+  /**
+   * Generates and emails the Airtable usage report.
+   * Can be run on a separate trigger.
+   */
+  sendAirtableUsageReport() {
+    return withSystemChecks_('Airtable Usage Report', () => {
+      const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
+      const recipientEmail = ConfigManager.getProperty('AIRTABLE_REPORT_RECIPIENT');
+      
+      if (!apiKey || !recipientEmail) {
+        Logger.log('⚠️ Airtable API key or recipient email not configured. Skipping report.');
+        return { success: false, error: 'Airtable not configured for reporting.' };
+      }
+      
+      return AirtableManager.generateUsageReportAndEmail(apiKey, recipientEmail);
     });
   },
   
@@ -323,6 +344,7 @@ const BoxerApp = {
       Logger.log('\n📦 AIRTABLE ARCHIVAL:');
       Logger.log(`  Configured bases: ${basesToArchive.split(',').length}`);
       Logger.log(`  Archive age: ${ConfigManager.getProperty('ARCHIVE_AGE_MONTHS') || '6'} months`);
+      Logger.log(`  Report Recipient: ${ConfigManager.getProperty('AIRTABLE_REPORT_RECIPIENT')}`);
     }
   },
   
@@ -379,19 +401,6 @@ const BoxerApp = {
   analyzeAirtable() {
     const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
     return AirtableManager.analyzeWorkspace(apiKey);
-  },
-  
-  /**
-   * Analyze specific Airtable base storage
-   * @param {string} baseId Base ID to analyze
-   */
-  analyzeAirtableBase(baseId) {
-    const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
-    if (!apiKey) {
-      Logger.log('❌ No Airtable API key configured');
-      return;
-    }
-    return AirtableManager.analyzeStorage(baseId, apiKey);
   },
   
   /**
@@ -562,18 +571,7 @@ function withSystemChecks_(functionName, processingFunction) {
  * @private
  */
 function ensureSystemReady_() {
-  // Check if migration is needed
-  const oldProps = ['TRACKING_SHEET_ID', 'BOX_OAUTH_CLIENT_ID', 'VISION_API_KEY'];
-  const needsMigration = oldProps.some(prop => 
-    ConfigManager.SCRIPT_PROPERTIES.getProperty(prop) !== null
-  );
-  
-  if (needsMigration) {
-    Logger.log('🔄 Migrating configuration to new format...');
-    const migrationResults = ConfigManager.migrate();
-    Logger.log(`✅ Migration complete: ${migrationResults.migrated.length} properties migrated`);
-  }
-  
+
   // Validate configuration
   const validation = ConfigManager.validate(true);
   
@@ -633,12 +631,21 @@ function runImageProcessingTrigger() {
 }
 
 /**
- * Weekly trigger for Airtable archival
+ * Weekly trigger for Airtable archival and reporting
  * Set this to run weekly (e.g., Sunday night)
  */
 function runAirtableArchivalTrigger() {
   return BoxerApp.archiveAirtable();
 }
+
+/**
+ * Standalone trigger for sending the Airtable usage report
+ * Set to run on its own schedule if desired (e.g., daily or weekly)
+ */
+function runAirtableUsageReportTrigger() {
+  return BoxerApp.sendAirtableUsageReport();
+}
+
 
 /**
  * Daily trigger for legal document detection
@@ -713,13 +720,6 @@ function testArchiveCPCRM() {
 }
 
 /**
- * Analyze CP CRM storage
- */
-function analyzeCPCRM() {
-  return BoxerApp.analyzeAirtableBase('appZDxOsDW7BzOJRg');
-}
-
-/**
  * Run image processing test
  */
 function runImageProcessingTest() {
@@ -727,3 +727,4 @@ function runImageProcessingTest() {
     return Diagnostics.runImageProcessingTest();
   });
 }
+

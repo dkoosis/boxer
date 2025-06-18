@@ -968,7 +968,23 @@ const AirtableManager = (function() {
       return baseId;
     }
   }
+  /**
+ * Sanitize folder name for Box compatibility
+ * @private
+ */
+function sanitizeFolderName_(name) {
+  if (!name) return 'Unknown';
   
+  // Replace invalid characters with safe alternatives
+  return name
+    .replace(/\//g, '-')      // Replace forward slashes with hyphens
+    .replace(/\\/g, '-')      // Replace backslashes with hyphens
+    .replace(/[\x00-\x1F\x7F]/g, '') // Remove non-printable ASCII
+    .replace(/^\.+|\.+$/g, '') // Remove leading/trailing dots
+    .replace(/^[\s]+|[\s]+$/g, '') // Remove leading/trailing whitespace
+    .replace(/[^\u0000-\uFFFF]/g, '') // Remove characters outside basic multilingual plane
+    .substring(0, 255); // Box has a 255 character limit for folder names
+}
   /**
    * Get table name from API
    * @private
@@ -1094,43 +1110,40 @@ const AirtableManager = (function() {
     }
   }
   
-  function ensureBoxFolder_(config, boxToken) {
-    try {
-      // Create folder structure: /Airtable/[BaseName]/[TableName]
-      let rootId = ConfigManager.getProperty('BOX_AIRTABLE_ARCHIVE_FOLDER');
-      
-      // Ensure we have a valid root ID
-      if (!rootId || rootId === '') {
-        Logger.log('📁 BOX_AIRTABLE_ARCHIVE_FOLDER not set, using Box root folder (0)');
-        rootId = '0'; // Box root folder
-      }
-      
-      // Use base name if available, otherwise fall back to base ID
-      const baseFolderName = config.baseName || config.baseId;
-      
-      // Use table name if available, otherwise fall back to table name from config
-      const tableFolderName = config.tableName || 'Unknown_Table';
-      
-      Logger.log(`📁 Creating folder structure: /Airtable/${baseFolderName}/${tableFolderName}/`);
-      
-      // Find or create each level
-      const airtableId = findOrCreateFolder_('Airtable', rootId, boxToken);
-      Logger.log(`  ✅ Airtable folder ID: ${airtableId}`);
-      
-      const baseId = findOrCreateFolder_(baseFolderName, airtableId, boxToken);
-      Logger.log(`  ✅ Base folder ID: ${baseId}`);
-      
-      const tableFolderId = findOrCreateFolder_(tableFolderName, baseId, boxToken);
-      Logger.log(`  ✅ Table folder ID: ${tableFolderId}`);
-      
-      return tableFolderId;
-      
-    } catch (error) {
-      Logger.log(`❌ Folder creation failed: ${error.toString()}`);
-      return null;
+function ensureBoxFolder_(config, boxToken) {
+  try {
+    // Create folder structure: /Airtable/[BaseName]/[TableName]
+    let rootId = ConfigManager.getProperty('BOX_AIRTABLE_ARCHIVE_FOLDER');
+    
+    // Ensure we have a valid root ID
+    if (!rootId || rootId === '') {
+      Logger.log('📁 BOX_AIRTABLE_ARCHIVE_FOLDER not set, using Box root folder (0)');
+      rootId = '0'; // Box root folder
     }
+    
+    // Sanitize folder names to remove invalid characters
+    const baseFolderName = sanitizeFolderName_(config.baseName || config.baseId);
+    const tableFolderName = sanitizeFolderName_(config.tableName || 'Unknown_Table');
+    
+    Logger.log(`📁 Creating folder structure: /Airtable/${baseFolderName}/${tableFolderName}/`);
+    
+    // Find or create each level
+    const airtableId = findOrCreateFolder_('Airtable', rootId, boxToken);
+    Logger.log(`  ✅ Airtable folder ID: ${airtableId}`);
+    
+    const baseId = findOrCreateFolder_(baseFolderName, airtableId, boxToken);
+    Logger.log(`  ✅ Base folder ID: ${baseId}`);
+    
+    const tableFolderId = findOrCreateFolder_(tableFolderName, baseId, boxToken);
+    Logger.log(`  ✅ Table folder ID: ${tableFolderId}`);
+    
+    return tableFolderId;
+    
+  } catch (error) {
+    Logger.log(`❌ Folder creation failed: ${error.toString()}`);
+    return null;
   }
-  
+}  
   function findOrCreateFolder_(name, parentId, boxToken) {
     // Validate inputs
     if (!name || !parentId || !boxToken) {
