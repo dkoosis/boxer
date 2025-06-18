@@ -1,26 +1,71 @@
 // File: AirtableManager.js
-// Unified Airtable to Box archival system
-// Enhanced with full large file support - no size limits
+// Unified Airtable to Box archival system with usage reporting
+// Enhanced with full large file support and comprehensive reporting
 
 const AirtableManager = (function() {
   'use strict';
   
   const ns = {};
   
-  // Configuration - REMOVED MAX_FILE_SIZE_MB limit
+  // Configuration - NO FILE SIZE LIMITS
   const STATS_KEY = 'AIRTABLE_STATS';
+  const TEAM_PLAN_RECORD_LIMIT = 50000;
+  const TEAM_PLAN_ATTACHMENT_LIMIT_GB = 20;
   
   // Get configurable archive age
   const getArchiveAgeMonths = () => {
     const configured = ConfigManager.getProperty('ARCHIVE_AGE_MONTHS');
     return configured ? parseInt(configured) : 6; // Default to 6 months
   };
+
+  /**
+   * Generates a detailed usage report for all Airtable bases and emails it.
+   * @param {string} apiKey Airtable API Key
+   * @param {string} recipientEmail Email address to send the report to
+   */
+  ns.generateUsageReportAndEmail = function(apiKey, recipientEmail) {
+    Logger.log('📊 === Generating Airtable Usage Report ===');
+    if (!apiKey) {
+      Logger.log('❌ No API key provided for usage report.');
+      return { success: false, error: 'API key required' };
+    }
+    if (!recipientEmail) {
+      Logger.log('❌ No recipient email provided for usage report.');
+      return { success: false, error: 'Recipient email required' };
+    }
+
+    try {
+      const allBases = ns.analyzeWorkspace(apiKey, true); // true for detailed analysis
+      if (!allBases) {
+        throw new Error('Failed to analyze workspace.');
+      }
+
+      const htmlReport = _formatHtmlReport(allBases);
+      const subject = `Airtable Usage Report - ${new Date().toLocaleDateString()}`;
+
+      MailApp.sendEmail({
+        to: recipientEmail,
+        subject: subject,
+        htmlBody: htmlReport,
+        name: 'Boxer for Airtable'
+      });
+
+      Logger.log(`✅ Successfully sent usage report to ${recipientEmail}`);
+      return { success: true, basesAnalyzed: allBases.length };
+
+    } catch (error) {
+      Logger.log(`❌ Error generating or sending usage report: ${error.toString()}`);
+      ErrorHandler.reportError(error, 'generateUsageReportAndEmail');
+      return { success: false, error: error.toString() };
+    }
+  };
   
   /**
    * Analyze entire workspace
    * @param {string} apiKey Airtable API Key
+   * @param {boolean} detailed Set to true to get record counts and attachment sizes
    */
-  ns.analyzeWorkspace = function(apiKey) {
+  ns.analyzeWorkspace = function(apiKey, detailed = false) {
     Logger.log('🔍 === Analyzing Airtable Workspace ===');
     
     if (!apiKey) {
@@ -53,29 +98,31 @@ const AirtableManager = (function() {
         // Add progress logging
         Logger.log(`\n[${index + 1}/${bases.length}] Analyzing base: ${base.name}`);
         
-        const analysis = analyzeBase_(base, apiKey);
+        const analysis = analyzeBase_(base, apiKey, detailed);
         if (analysis) results.push(analysis);
-        Utilities.sleep(1000);
+        Utilities.sleep(1000); // Prevent hitting rate limits
       });
       
-      // Sort by size
-      results.sort((a, b) => b.totalBytes - a.totalBytes);
+      // Sort by attachment size (descending)
+      results.sort((a, b) => b.totalAttachmentSize - a.totalAttachmentSize);
       
-      // Display summary
-      const totalGB = results.reduce((sum, b) => sum + b.totalBytes, 0) / 1e9;
+      // Display summary in logs
+      const totalGB = results.reduce((sum, b) => sum + b.totalAttachmentSize, 0) / 1e9;
       Logger.log(`\n📊 WORKSPACE TOTAL: ${totalGB.toFixed(2)} GB`);
       
       results.forEach((base, i) => {
-        Logger.log(`\n${i+1}. ${base.name}: ${(base.totalBytes/1e9).toFixed(2)} GB`);
-        base.topTables.forEach(t => 
-          Logger.log(`   - ${t.name}: ${(t.bytes/1e6).toFixed(0)} MB`)
-        );
+        Logger.log(`\n${i+1}. ${base.name}: ${base.totalRecords} records, ${(base.totalAttachmentSize/1e9).toFixed(2)} GB`);
+        if(base.tables) {
+          base.tables.forEach(t => 
+            Logger.log(`   - ${t.name}: ${t.recordCount} records, ${(t.attachmentSize/1e6).toFixed(0)} MB`)
+          );
+        }
       });
       
       return results;
       
     } catch (error) {
-      Logger.log(`❌ Error: ${error.toString()}`);
+      Logger.log(`❌ Error in analyzeWorkspace: ${error.toString()}`);
       return null;
     }
   };
@@ -615,8 +662,153 @@ const AirtableManager = (function() {
   };
 
   // Private helper functions
-  
-  function analyzeBase_(base, apiKey) {
+
+  function _formatHtmlReport(bases) {
+    let html = `
+    <html>
+      <head>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; color: #333; }
+          h1, h2 { color: #111; border-bottom: 1px solid #ddd; padding-bottom: 5px;}
+          h1 { font-size: 24px; }
+          h2 { font-size: 20px; margin-top: 30px; }
+          table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+          .summary { background-color: #f9f9f9; padding: 15px; border: 1px solid #eee; border-radius: 5px; margin-bottom: 15px; }
+          .flag { font-weight: bold; }
+          .flag.warn { color: orange; }
+          .flag.danger { color: red; }
+          .total-row { font-weight: bold; background-color: #f5f5f5; }
+        </style>
+      </head>
+      <body>
+        <h1>Airtable Usage Report - ${new Date().toLocaleDateString()}</h1>
+    `;
+
+    let workspaceTotalRecords = 0;
+    let workspaceTotalBytes = 0;
+
+    bases.forEach(base => {
+      workspaceTotalRecords += base.totalRecords;
+      workspaceTotalBytes += base.totalAttachmentSize;
+      
+      const recordPercent = Math.round((base.totalRecords / TEAM_PLAN_RECORD_LIMIT) * 100);
+      const attachmentPercent = Math.round((base.totalAttachmentSize / (TEAM_PLAN_ATTACHMENT_LIMIT_GB * 1e9)) * 100);
+
+      const recordFlag = recordPercent > 90 ? 'danger' : (recordPercent > 75 ? 'warn' : '');
+      const attachmentFlag = attachmentPercent > 90 ? 'danger' : (attachmentPercent > 75 ? 'warn' : '');
+
+      html += `
+        <h2>${base.name}</h2>
+        <div class="summary">
+          <strong>Total Records:</strong> <span class="flag ${recordFlag}">${base.totalRecords.toLocaleString()} / ${TEAM_PLAN_RECORD_LIMIT.toLocaleString()} (${recordPercent}%)</span><br>
+          <strong>Total Attachments:</strong> <span class="flag ${attachmentFlag}">${formatBytes(base.totalAttachmentSize)} / ${TEAM_PLAN_ATTACHMENT_LIMIT_GB} GB (${attachmentPercent}%)</span>
+        </div>
+      `;
+      
+      if (base.tables && base.tables.length > 0) {
+        html += `
+        <table>
+          <thead>
+            <tr>
+              <th>Table Name</th>
+              <th>Record Count</th>
+              <th>Attachment Size</th>
+              <th>Last Record Added</th>
+            </tr>
+          </thead>
+          <tbody>
+        `;
+        
+        // Sort tables by record count descending
+        base.tables.sort((a,b) => b.recordCount - a.recordCount);
+
+        base.tables.forEach(table => {
+          html += `
+            <tr>
+              <td>${table.name}</td>
+              <td>${table.recordCount.toLocaleString()}</td>
+              <td>${formatBytes(table.attachmentSize)}</td>
+              <td>${table.lastModified ? new Date(table.lastModified).toLocaleDateString() : 'N/A'}</td>
+            </tr>
+          `;
+        });
+        
+        html += `
+          </tbody>
+        </table>
+        `;
+      }
+    });
+
+    // Add workspace totals
+    const workspaceRecordPercent = Math.round((workspaceTotalRecords / TEAM_PLAN_RECORD_LIMIT) * 100);
+    const workspaceAttachmentPercent = Math.round((workspaceTotalBytes / (TEAM_PLAN_ATTACHMENT_LIMIT_GB * 1e9)) * 100);
+    
+    html += `
+      <h2>Workspace Totals</h2>
+      <div class="summary">
+        <strong>All Bases Combined:</strong><br>
+        Records: ${workspaceTotalRecords.toLocaleString()} / ${TEAM_PLAN_RECORD_LIMIT.toLocaleString()} (${workspaceRecordPercent}%)<br>
+        Attachments: ${formatBytes(workspaceTotalBytes)} / ${TEAM_PLAN_ATTACHMENT_LIMIT_GB} GB (${workspaceAttachmentPercent}%)
+      </div>
+    `;
+
+    html += `</body></html>`;
+    return html;
+  }
+
+  function _getTableStats(baseId, table, apiKey) {
+    let recordCount = 0;
+    let totalAttachmentSize = 0;
+    let lastModified = null;
+    let offset = null;
+
+    Logger.log(`    Scanning table: ${table.name}...`);
+    const attachmentField = table.fields.find(f => f.type === 'multipleAttachments');
+
+    do {
+      let url = `https://api.airtable.com/v0/${baseId}/${table.id}?pageSize=100`;
+      if(offset) {
+        url += `&offset=${offset}`;
+      }
+
+      const response = UrlFetchApp.fetch(url, {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+        muteHttpExceptions: true
+      });
+
+      if (response.getResponseCode() !== 200) {
+        Logger.log(`      Could not fetch records for table ${table.name}. Skipping.`);
+        break;
+      }
+
+      const data = JSON.parse(response.getContentText());
+      const records = data.records || [];
+      recordCount += records.length;
+
+      records.forEach(record => {
+        if (!lastModified || new Date(record.createdTime) > new Date(lastModified)) {
+          lastModified = record.createdTime;
+        }
+        if (attachmentField && record.fields[attachmentField.name]) {
+          record.fields[attachmentField.name].forEach(att => {
+            totalAttachmentSize += att.size || 0;
+          });
+        }
+      });
+      
+      offset = data.offset;
+      if(offset) Utilities.sleep(250); // Rate limit between pages
+
+    } while (offset);
+    
+    Logger.log(`      -> Found ${recordCount} records, ${formatBytes(totalAttachmentSize)}`);
+    return { recordCount, attachmentSize: totalAttachmentSize, lastModified };
+  }
+
+  function analyzeBase_(base, apiKey, detailed) {
     try {
       const response = UrlFetchApp.fetch(
         `https://api.airtable.com/v0/meta/bases/${base.id}/tables`,
@@ -629,32 +821,44 @@ const AirtableManager = (function() {
       const analysis = {
         id: base.id,
         name: base.name,
-        totalBytes: 0,
-        topTables: []
+        totalRecords: 0,
+        totalAttachmentSize: 0,
+        tables: []
       };
       
-      // Analyze tables with attachments
-      tables.forEach(table => {
-        const attachmentField = table.fields.find(f => f.type === 'multipleAttachments');
-        if (!attachmentField) return;
-        
-        Logger.log(`  → Found attachment field "${attachmentField.name}" in table "${table.name}"`);
-        
-        const tableBytes = estimateTableSize_(base.id, table, attachmentField.name, apiKey);
-        if (tableBytes > 0) {
-          analysis.topTables.push({
+      if (detailed) {
+        tables.forEach(table => {
+          const tableStats = _getTableStats(base.id, table, apiKey);
+          analysis.tables.push({
             name: table.name,
-            attachmentField: attachmentField.name,
-            bytes: tableBytes
+            id: table.id,
+            ...tableStats
           });
-          analysis.totalBytes += tableBytes;
-        }
-      });
+          analysis.totalRecords += tableStats.recordCount;
+          analysis.totalAttachmentSize += tableStats.attachmentSize;
+        });
+      } else {
+         // This is the old, faster estimation logic if detailed=false
+        tables.forEach(table => {
+            const attachmentField = table.fields.find(f => f.type === 'multipleAttachments');
+            if (!attachmentField) return;
+            const tableBytes = estimateTableSize_(base.id, table, attachmentField.name, apiKey);
+            if (tableBytes > 0) {
+              analysis.tables.push({
+                name: table.name,
+                attachmentField: attachmentField.name,
+                attachmentSize: tableBytes, // Note: key is different
+                recordCount: 0 // Not calculated in fast mode
+              });
+              analysis.totalAttachmentSize += tableBytes;
+            }
+        });
+      }
       
-      analysis.topTables.sort((a, b) => b.bytes - a.bytes);
       return analysis;
       
     } catch (error) {
+       Logger.log(`Error analyzing base ${base.name}: ${error.toString()}`);
       return null;
     }
   }
