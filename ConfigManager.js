@@ -1,6 +1,6 @@
 // File: ConfigManager.js
 // Unified configuration management for Boxer
-// Consolidates Config.js, ConfigValidator.js, and ConfigRepair.js
+// Updated with Airtable large file support
 
 const ConfigManager = (function() {
   'use strict';
@@ -73,6 +73,7 @@ const ConfigManager = (function() {
       default: '',
       validate: val => true
     },
+    
     ARCHIVE_AGE_MONTHS: {
       required: false,
       category: 'airtable',
@@ -80,6 +81,15 @@ const ConfigManager = (function() {
       default: '6',
       validate: val => !val || (!isNaN(parseInt(val)) && parseInt(val) > 0)
     },
+    
+    AIRTABLE_MAX_FILE_SIZE_MB: {
+      required: false,
+      category: 'airtable',
+      description: 'Maximum file size in MB to archive from Airtable (0 = no limit)',
+      default: '0',  // Changed default to 0 (no limit)
+      validate: val => !val || (!isNaN(parseInt(val)) && parseInt(val) >= 0)
+    },
+    
     BOX_ARCHIVE_METADATA_ID: {
       required: false,
       category: 'box_config',
@@ -104,13 +114,13 @@ const ConfigManager = (function() {
       autoCreate: () => createTrackingSheet()
     },
     
-PRIORITY_FOLDER_TREE: {
-  required: false,
-  category: 'box_config',
-  description: 'Folder path substring for priority processing',
-  default: '0_SHARED RESOURCES',
-  validate: val => !val || val.length > 0
-},
+    PRIORITY_FOLDER_TREE: {
+      required: false,
+      category: 'box_config',
+      description: 'Folder path substring for priority processing',
+      default: '0_SHARED RESOURCES',
+      validate: val => !val || val.length > 0
+    },
 
     // Box Authentication
     BOX_CLIENT_ID: {

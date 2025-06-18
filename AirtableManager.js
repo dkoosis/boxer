@@ -1,14 +1,13 @@
 // File: AirtableManager.js
 // Unified Airtable to Box archival system
-// Consolidates AirtableArchivalManager.js and AirtableArchiver.js
+// Enhanced with full large file support - no size limits
 
 const AirtableManager = (function() {
   'use strict';
   
   const ns = {};
   
-  // Configuration
-  const MAX_FILE_SIZE_MB = 50;
+  // Configuration - REMOVED MAX_FILE_SIZE_MB limit
   const STATS_KEY = 'AIRTABLE_STATS';
   
   // Get configurable archive age
@@ -82,6 +81,238 @@ const AirtableManager = (function() {
   };
   
   /**
+   * Analyze storage in detail
+   */
+  ns.analyzeStorage = function(baseId, apiKey) {
+    Logger.log('📊 === Detailed Airtable Storage Analysis ===');
+    
+    if (!apiKey) {
+      Logger.log('❌ No API key found');
+      return;
+    }
+    
+    const cutoffDate = new Date();
+    cutoffDate.setMonth(cutoffDate.getMonth() - getArchiveAgeMonths());
+    
+    Logger.log(`📅 Archive age threshold: ${getArchiveAgeMonths()} months`);
+    Logger.log(`📅 Will archive files created before: ${cutoffDate.toLocaleDateString()}`);
+    Logger.log(`🔍 Analyzing base: ${baseId}\n`);
+    
+    try {
+      // Get base name
+      const baseName = getBaseName_(baseId, apiKey);
+      Logger.log(`📦 Base Name: ${baseName}`);
+      
+      // Get all tables
+      const tablesUrl = `https://api.airtable.com/v0/meta/bases/${baseId}/tables`;
+      const tablesResponse = UrlFetchApp.fetch(tablesUrl, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      
+      const tables = JSON.parse(tablesResponse.getContentText()).tables || [];
+      Logger.log(`📋 Found ${tables.length} tables in base\n`);
+      
+      const analysis = {
+        totalAttachments: 0,
+        totalBytes: 0,
+        oldAttachments: 0,
+        oldBytes: 0,
+        newAttachments: 0,
+        newBytes: 0,
+        byFileType: {},
+        byTable: {},
+        tablesWithAttachments: 0,
+        largestFiles: []
+      };
+      
+      // Analyze each table
+      for (const table of tables) {
+        const attachmentFields = table.fields.filter(f => f.type === 'multipleAttachments');
+        
+        if (attachmentFields.length === 0) {
+          Logger.log(`⏭️ Table "${table.name}" - No attachment fields`);
+          continue;
+        }
+        
+        analysis.tablesWithAttachments++;
+        Logger.log(`\n📊 Analyzing table: ${table.name}`);
+        Logger.log(`   Attachment fields: ${attachmentFields.map(f => f.name).join(', ')}`);
+        
+        const tableStats = {
+          name: table.name,
+          totalFiles: 0,
+          totalBytes: 0,
+          oldFiles: 0,
+          oldBytes: 0,
+          newFiles: 0,
+          newBytes: 0,
+          byType: {},
+          recordsWithAttachments: 0,
+          recordsWithLinks: 0
+        };
+        
+        // Fetch records from this table
+        for (const field of attachmentFields) {
+          try {
+            const recordsUrl = `https://api.airtable.com/v0/${baseId}/${encodeURIComponent(table.id)}?fields[]=${encodeURIComponent(field.name)}&fields[]=${encodeURIComponent(ConfigManager.getProperty('AIRTABLE_LINK_FIELD') || 'Box_Link')}`;
+            
+            const recordsResponse = UrlFetchApp.fetch(recordsUrl, {
+              headers: { 'Authorization': `Bearer ${apiKey}` },
+              muteHttpExceptions: true
+            });
+            
+            if (recordsResponse.getResponseCode() !== 200) {
+              Logger.log(`   ❌ Failed to fetch records: ${recordsResponse.getResponseCode()}`);
+              continue;
+            }
+            
+            const data = JSON.parse(recordsResponse.getContentText());
+            const records = data.records || [];
+            
+            Logger.log(`   📄 Found ${records.length} records`);
+            
+            // Analyze each record
+            records.forEach(record => {
+              const attachments = record.fields[field.name];
+              const hasLink = record.fields[ConfigManager.getProperty('AIRTABLE_LINK_FIELD') || 'Box_Link'];
+              
+              if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+                tableStats.recordsWithAttachments++;
+                if (hasLink) tableStats.recordsWithLinks++;
+                
+                // Check record age
+                const recordDate = new Date(record.createdTime || '2000-01-01');
+                const isOld = recordDate < cutoffDate;
+                
+                attachments.forEach(att => {
+                  // Track by file type
+                  const ext = att.filename.split('.').pop().toLowerCase();
+                  const fileType = getFileCategory_(ext);
+                  
+                  if (!tableStats.byType[fileType]) {
+                    tableStats.byType[fileType] = { count: 0, bytes: 0 };
+                  }
+                  if (!analysis.byFileType[fileType]) {
+                    analysis.byFileType[fileType] = { count: 0, bytes: 0 };
+                  }
+                  
+                  tableStats.byType[fileType].count++;
+                  tableStats.byType[fileType].bytes += att.size || 0;
+                  analysis.byFileType[fileType].count++;
+                  analysis.byFileType[fileType].bytes += att.size || 0;
+                  
+                  // Track totals
+                  tableStats.totalFiles++;
+                  tableStats.totalBytes += att.size || 0;
+                  analysis.totalAttachments++;
+                  analysis.totalBytes += att.size || 0;
+                  
+                  // Track by age
+                  if (isOld && !hasLink) {
+                    tableStats.oldFiles++;
+                    tableStats.oldBytes += att.size || 0;
+                    analysis.oldAttachments++;
+                    analysis.oldBytes += att.size || 0;
+                  } else {
+                    tableStats.newFiles++;
+                    tableStats.newBytes += att.size || 0;
+                    analysis.newAttachments++;
+                    analysis.newBytes += att.size || 0;
+                  }
+                  
+                  // Track large files
+                  if (att.size > 5 * 1024 * 1024) { // Files over 5MB
+                    analysis.largestFiles.push({
+                      filename: att.filename,
+                      size: att.size,
+                      table: table.name,
+                      isOld: isOld,
+                      hasLink: !!hasLink,
+                      recordDate: recordDate.toLocaleDateString()
+                    });
+                  }
+                });
+              }
+            });
+            
+            // Sleep to avoid rate limits
+            Utilities.sleep(1000);
+            
+          } catch (error) {
+            Logger.log(`   ❌ Error analyzing field "${field.name}": ${error.toString()}`);
+          }
+        }
+        
+        // Log table summary
+        if (tableStats.totalFiles > 0) {
+          Logger.log(`\n   📊 Table Summary for "${table.name}":`);
+          Logger.log(`      Total files: ${tableStats.totalFiles} (${formatBytes(tableStats.totalBytes)})`);
+          Logger.log(`      Records with attachments: ${tableStats.recordsWithAttachments}`);
+          Logger.log(`      Records with Box links: ${tableStats.recordsWithLinks}`);
+          Logger.log(`      Old files (archivable): ${tableStats.oldFiles} (${formatBytes(tableStats.oldBytes)})`);
+          Logger.log(`      Recent files: ${tableStats.newFiles} (${formatBytes(tableStats.newBytes)})`);
+          
+          Logger.log(`      By type:`);
+          Object.entries(tableStats.byType).forEach(([type, stats]) => {
+            Logger.log(`        - ${type}: ${stats.count} files (${formatBytes(stats.bytes)})`);
+          });
+          
+          analysis.byTable[table.name] = tableStats;
+        }
+      }
+      
+      // Sort largest files
+      analysis.largestFiles.sort((a, b) => b.size - a.size);
+      
+      // Final summary
+      Logger.log('\n\n📊 === OVERALL SUMMARY ===');
+      Logger.log(`Base: ${baseName}`);
+      Logger.log(`Tables with attachments: ${analysis.tablesWithAttachments}`);
+      Logger.log(`\n📦 TOTAL STORAGE:`);
+      Logger.log(`  All files: ${analysis.totalAttachments} files (${formatBytes(analysis.totalBytes)})`);
+      Logger.log(`  Archivable (>${getArchiveAgeMonths()} months): ${analysis.oldAttachments} files (${formatBytes(analysis.oldBytes)}) - ${Math.round(analysis.oldBytes/analysis.totalBytes*100)}%`);
+      Logger.log(`  Recent (<${getArchiveAgeMonths()} months): ${analysis.newAttachments} files (${formatBytes(analysis.newBytes)}) - ${Math.round(analysis.newBytes/analysis.totalBytes*100)}%`);
+      
+      Logger.log(`\n📁 BY FILE TYPE:`);
+      Object.entries(analysis.byFileType)
+        .sort((a, b) => b[1].bytes - a[1].bytes)
+        .forEach(([type, stats]) => {
+          const pct = Math.round(stats.bytes/analysis.totalBytes*100);
+          Logger.log(`  ${type}: ${stats.count} files (${formatBytes(stats.bytes)}) - ${pct}%`);
+        });
+      
+      Logger.log(`\n🏆 LARGEST FILES (>5MB):`);
+      analysis.largestFiles.slice(0, 10).forEach((file, i) => {
+        const status = file.hasLink ? '✅ Archived' : (file.isOld ? '🕐 Archivable' : '🆕 Too new');
+        Logger.log(`  ${i+1}. ${file.filename} - ${formatBytes(file.size)} - ${file.table} - ${status}`);
+      });
+      
+      Logger.log(`\n💡 RECOMMENDATIONS:`);
+      if (analysis.oldAttachments === 0) {
+        Logger.log(`  ⚠️ No files older than ${getArchiveAgeMonths()} months found.`);
+        Logger.log(`  💡 Consider reducing ARCHIVE_AGE_MONTHS if you want to archive newer files.`);
+      } else {
+        Logger.log(`  🎯 Can recover ${formatBytes(analysis.oldBytes)} by archiving ${analysis.oldAttachments} old files`);
+      }
+      
+      // Check for non-image files
+      const nonImageBytes = Object.entries(analysis.byFileType)
+        .filter(([type]) => type !== 'Images')
+        .reduce((sum, [, stats]) => sum + stats.bytes, 0);
+      
+      if (nonImageBytes > analysis.totalBytes * 0.3) {
+        Logger.log(`  📎 ${Math.round(nonImageBytes/analysis.totalBytes*100)}% of storage is non-image files`);
+      }
+      
+      return analysis;
+      
+    } catch (error) {
+      Logger.log(`❌ Analysis failed: ${error.toString()}`);
+      ErrorHandler.reportError(error, 'analyzeAirtableStorage', { baseId });
+    }
+  };
+  
+  /**
    * Archive records from specific base/table
    * @param {object} config Configuration object for the archival task
    * @param {string} apiKey Airtable API Key
@@ -106,7 +337,8 @@ const AirtableManager = (function() {
       errors: 0,
       recordsTooNew: 0,
       bytesArchived: 0,
-      executionTimeMs: 0
+      executionTimeMs: 0,
+      largestFiles: [] // Track large files archived
     };
     
     // Track bytes if requested
@@ -171,7 +403,7 @@ const AirtableManager = (function() {
           linkFieldName: linkFieldName,
           tableId: tableId,
           trackStats: config.trackStats
-        }, targetFolderId, apiKey, boxToken);
+        }, targetFolderId, apiKey, boxToken, stats); // Pass stats to track large files
         
         if (result.success) {
           stats.recordsProcessed++;
@@ -201,6 +433,14 @@ const AirtableManager = (function() {
     Logger.log(`  Errors: ${stats.errors}`);
     Logger.log(`  Time: ${(stats.executionTimeMs/1000).toFixed(1)}s`);
     
+    // Log large files if any
+    if (stats.largestFiles.length > 0) {
+      Logger.log('\n🏆 Largest files archived:');
+      stats.largestFiles.slice(0, 5).forEach((f, i) => {
+        Logger.log(`  ${i+1}. ${f.filename} - ${formatBytes(f.size)}`);
+      });
+    }
+    
     saveStats_(stats);
     return { success: true, ...stats };
   };
@@ -229,135 +469,151 @@ const AirtableManager = (function() {
   };
   
   /**
- * Archive old attachments from an Airtable base
- * This is the main production function for weekly runs
- * @param {object} config Configuration object
- * @param {string} apiKey Airtable API Key  
- * @param {string} boxToken Valid Box access token
- */
-ns.archiveBase = function(config, apiKey, boxToken) {
-  const BATCH_SIZE = parseInt(ConfigManager.getProperty('AIRTABLE_PROCESSING_BATCH_SIZE')) || 50;
-  const RATE_LIMIT_MS = parseInt(ConfigManager.getProperty('AIRTABLE_SLEEP_DELAY_MS')) || 2000;
-  const startTime = Date.now();
-  const batchId = new Date().toISOString();
-  
-  if (!apiKey || !boxToken) {
-    return { success: false, error: 'Missing credentials' };
-  }
-  
-  const baseStats = {
-    baseId: config.baseId,
-    baseName: null,
-    tablesProcessed: 0,
-    tablesWithAttachments: 0,
-    totalRecordsProcessed: 0,
-    totalFilesArchived: 0,
-    totalBytesArchived: 0,
-    totalRecordsTooNew: 0,
-    totalErrors: 0,
-    executionTimeMs: 0,
-    tableResults: []
-  };
-  
-  try {
-    // Get base name
-    baseStats.baseName = getBaseName_(config.baseId, apiKey);
-    Logger.log(`📦 === Archiving Base: ${baseStats.baseName} ===`);
-    Logger.log(`🕐 Archiving attachments older than ${getArchiveAgeMonths()} months`);
+   * Archive old attachments from an Airtable base
+   * This is the main production function for weekly runs
+   * @param {object} config Configuration object
+   * @param {string} apiKey Airtable API Key  
+   * @param {string} boxToken Valid Box access token
+   */
+  ns.archiveBase = function(config, apiKey, boxToken) {
+    const BATCH_SIZE = parseInt(ConfigManager.getProperty('AIRTABLE_PROCESSING_BATCH_SIZE')) || 50;
+    const RATE_LIMIT_MS = parseInt(ConfigManager.getProperty('AIRTABLE_SLEEP_DELAY_MS')) || 2000;
+    const startTime = Date.now();
+    const batchId = new Date().toISOString();
     
-    // Get all tables in base
-    const tablesUrl = `https://api.airtable.com/v0/meta/bases/${config.baseId}/tables`;
-    const tablesResponse = UrlFetchApp.fetch(tablesUrl, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
-    
-    if (tablesResponse.getResponseCode() !== 200) {
-      throw new Error(`Failed to fetch tables: ${tablesResponse.getResponseCode()}`);
+    if (!apiKey || !boxToken) {
+      return { success: false, error: 'Missing credentials' };
     }
     
-    const tables = JSON.parse(tablesResponse.getContentText()).tables || [];
-    Logger.log(`📋 Found ${tables.length} tables`);
+    const baseStats = {
+      baseId: config.baseId,
+      baseName: null,
+      tablesProcessed: 0,
+      tablesWithAttachments: 0,
+      totalRecordsProcessed: 0,
+      totalFilesArchived: 0,
+      totalBytesArchived: 0,
+      totalRecordsTooNew: 0,
+      totalErrors: 0,
+      executionTimeMs: 0,
+      tableResults: [],
+      largestFiles: []
+    };
     
-    // Process each table
-    for (const table of tables) {
-      // Check if table has attachment fields
-      const attachmentFields = table.fields.filter(f => f.type === 'multipleAttachments');
+    try {
+      // Get base name
+      baseStats.baseName = getBaseName_(config.baseId, apiKey);
+      Logger.log(`📦 === Archiving Base: ${baseStats.baseName} ===`);
+      Logger.log(`🕐 Archiving attachments older than ${getArchiveAgeMonths()} months`);
       
-      if (attachmentFields.length === 0) {
-        continue; // Skip tables without attachments
+      // Get all tables in base
+      const tablesUrl = `https://api.airtable.com/v0/meta/bases/${config.baseId}/tables`;
+      const tablesResponse = UrlFetchApp.fetch(tablesUrl, {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      
+      if (tablesResponse.getResponseCode() !== 200) {
+        throw new Error(`Failed to fetch tables: ${tablesResponse.getResponseCode()}`);
       }
       
-      baseStats.tablesWithAttachments++;
+      const tables = JSON.parse(tablesResponse.getContentText()).tables || [];
+      Logger.log(`📋 Found ${tables.length} tables`);
       
-      // Process each attachment field in the table
-      for (const attachmentField of attachmentFields) {
-        const tableConfig = {
-          baseId: config.baseId,
-          tableName: table.id,
-          attachmentFieldName: attachmentField.name,
-          linkFieldName: ConfigManager.getProperty('AIRTABLE_LINK_FIELD') || 'Box_Link',
-          maxRecords: BATCH_SIZE
-        };
+      // Process each table
+      for (const table of tables) {
+        // Check if table has attachment fields
+        const attachmentFields = table.fields.filter(f => f.type === 'multipleAttachments');
         
-        // Archive this table/field combination
-// Archive this table/field combination
-const tableResult = ns.archiveTable(tableConfig, apiKey, boxToken);
+        if (attachmentFields.length === 0) {
+          continue; // Skip tables without attachments
+        }
+        
+        baseStats.tablesWithAttachments++;
+        
+        // Process each attachment field in the table
+        for (const attachmentField of attachmentFields) {
+          const tableConfig = {
+            baseId: config.baseId,
+            tableName: table.id,
+            attachmentFieldName: attachmentField.name,
+            linkFieldName: ConfigManager.getProperty('AIRTABLE_LINK_FIELD') || 'Box_Link',
+            maxRecords: BATCH_SIZE
+          };
+          
+          // Archive this table/field combination
+          const tableResult = ns.archiveTable(tableConfig, apiKey, boxToken);
 
-  if (tableResult.success) {
-    baseStats.totalRecordsProcessed += tableResult.recordsProcessed || 0;
-    baseStats.totalFilesArchived += tableResult.filesArchived || 0;
-    baseStats.totalBytesArchived += tableResult.bytesArchived || 0;
-    baseStats.totalRecordsTooNew += tableResult.recordsTooNew || 0;
-    baseStats.totalErrors += tableResult.errors || 0;
-    
-    if (tableResult.filesArchived > 0) {
-      Logger.log(`   ✅ Table "${table.name}" - ${tableResult.filesArchived} files, ${formatBytes(tableResult.bytesArchived || 0)} recovered`);
-      baseStats.tableResults.push({
-        tableName: table.name,
-        fieldName: attachmentField.name,
-        filesArchived: tableResult.filesArchived,
-        bytesArchived: tableResult.bytesArchived || 0
-      });
-    } else {
-      Logger.log(`   ⏭️ Table "${table.name}" - No files needed archiving`);
-    }
-  } else {
-    Logger.log(`   ❌ Table "${table.name}" - Failed to archive`);
-  }      
-}
+          if (tableResult.success) {
+            baseStats.totalRecordsProcessed += tableResult.recordsProcessed || 0;
+            baseStats.totalFilesArchived += tableResult.filesArchived || 0;
+            baseStats.totalBytesArchived += tableResult.bytesArchived || 0;
+            baseStats.totalRecordsTooNew += tableResult.recordsTooNew || 0;
+            baseStats.totalErrors += tableResult.errors || 0;
+            
+            // Collect large files
+            if (tableResult.largestFiles && tableResult.largestFiles.length > 0) {
+              baseStats.largestFiles.push(...tableResult.largestFiles);
+            }
+            
+            if (tableResult.filesArchived > 0) {
+              Logger.log(`   ✅ Table "${table.name}" - ${tableResult.filesArchived} files, ${formatBytes(tableResult.bytesArchived || 0)} recovered`);
+              baseStats.tableResults.push({
+                tableName: table.name,
+                fieldName: attachmentField.name,
+                filesArchived: tableResult.filesArchived,
+                bytesArchived: tableResult.bytesArchived || 0
+              });
+            } else {
+              Logger.log(`   ⏭️ Table "${table.name}" - No files needed archiving`);
+            }
+          } else {
+            Logger.log(`   ❌ Table "${table.name}" - Failed to archive`);
+          }      
+        }
+        
+        baseStats.tablesProcessed++;
+      }
       
-      baseStats.tablesProcessed++;
+    } catch (error) {
+      Logger.log(`❌ Error: ${error.toString()}`);
+      baseStats.error = error.toString();
     }
     
-  } catch (error) {
-    Logger.log(`❌ Error: ${error.toString()}`);
-    baseStats.error = error.toString();
-  }
-  
-  baseStats.executionTimeMs = Date.now() - startTime;
-  
-  // Log summary
-// Log summary
-Logger.log('\n📊 === Archival Summary ===');
-Logger.log(`Base: ${baseStats.baseName}`);
-Logger.log(`Tables: ${baseStats.tablesProcessed} processed, ${baseStats.tablesWithAttachments} had attachments`);
-Logger.log(`Files: ${baseStats.totalFilesArchived} archived`);
-Logger.log(`💾 Space recovered from Airtable: ${formatBytes(baseStats.totalBytesArchived)}`);
-Logger.log(`📦 Space added to Box: ${formatBytes(baseStats.totalBytesArchived)}`);
-Logger.log(`Records: ${baseStats.totalRecordsProcessed} processed, ${baseStats.totalRecordsTooNew} too recent`);
-Logger.log(`Time: ${(baseStats.executionTimeMs/1000).toFixed(1)}s`);  
-  saveStats_(baseStats);
-  return { success: true, ...baseStats };
-};
+    baseStats.executionTimeMs = Date.now() - startTime;
+    
+    // Sort largest files
+    baseStats.largestFiles.sort((a, b) => b.size - a.size);
+    
+    // Log summary
+    Logger.log('\n📊 === Archival Summary ===');
+    Logger.log(`Base: ${baseStats.baseName}`);
+    Logger.log(`Tables: ${baseStats.tablesProcessed} processed, ${baseStats.tablesWithAttachments} had attachments`);
+    Logger.log(`Files: ${baseStats.totalFilesArchived} archived`);
+    Logger.log(`💾 Space recovered from Airtable: ${formatBytes(baseStats.totalBytesArchived)}`);
+    Logger.log(`📦 Space added to Box: ${formatBytes(baseStats.totalBytesArchived)}`);
+    Logger.log(`Records: ${baseStats.totalRecordsProcessed} processed, ${baseStats.totalRecordsTooNew} too recent`);
+    Logger.log(`Time: ${(baseStats.executionTimeMs/1000).toFixed(1)}s`);  
+    
+    if (baseStats.totalBytesArchived > 0) {
+      // Calculate impact
+      const gbRecovered = (baseStats.totalBytesArchived / 1e9).toFixed(2);
+      
+      Logger.log(`\n🎉 === STORAGE IMPACT ===`);
+      Logger.log(`💾 Freed ${gbRecovered} GB from Airtable!`);
+      
+      // Show largest files archived
+      if (baseStats.largestFiles.length > 0) {
+        Logger.log(`\n🏆 Largest files archived:`);
+        baseStats.largestFiles.slice(0, 5).forEach((f, i) => {
+          Logger.log(`  ${i+1}. ${f.filename} - ${formatBytes(f.size)}`);
+        });
+      }
+    }
+    
+    saveStats_(baseStats);
+    return { success: true, ...baseStats };
+  };
 
-// Add helper function for bytes formatting
-function formatBytes(bytes) {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
   // Private helper functions
   
   function analyzeBase_(base, apiKey) {
@@ -727,7 +983,7 @@ function formatBytes(bytes) {
     throw new Error(`Failed to create folder "${name}": ${createResponse.getResponseCode()} - ${createResponse.getContentText()}`);
   }
   
-  function processRecord_(record, config, targetFolderId, apiKey, boxToken) {
+  function processRecord_(record, config, targetFolderId, apiKey, boxToken, tableStats) {
     const recordName = record.fields.Name || record.fields[Object.keys(record.fields)[0]] || record.id;
     
     // Check age again (in case of race conditions)
@@ -801,12 +1057,11 @@ function formatBytes(bytes) {
         retainOriginal: 'no'
       };
       
-      // Upload each attachment
+      // Upload each attachment - NO SIZE CHECK
       for (const att of attachments) {
-        // Check size
-        if (att.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-          Logger.log(`⚠️ Skipping large file: ${att.filename}`);
-          continue;
+        const sizeMB = att.size / (1024 * 1024);
+        if (sizeMB > 50) {
+          Logger.log(`📦 Processing large file (${Math.round(sizeMB)}MB): ${att.filename}`);
         }
         
         const uploadResult = uploadToBoxWithMetadata_(att, targetFolderId, boxToken, {
@@ -819,9 +1074,19 @@ function formatBytes(bytes) {
           uploadedFiles.push({
             filename: att.filename,
             boxLink: uploadResult.link,
-            boxFileId: uploadResult.fileId
+            boxFileId: uploadResult.fileId,
+            size: att.size
           });
           totalBytesArchived += (att.size || 0);
+          
+          // Track large files in stats
+          if (tableStats && sizeMB > 5) {
+            if (!tableStats.largestFiles) tableStats.largestFiles = [];
+            tableStats.largestFiles.push({
+              filename: att.filename,
+              size: att.size
+            });
+          }
         }
       }
       
@@ -853,20 +1118,46 @@ function formatBytes(bytes) {
       if (updateResponse.getResponseCode() === 200) {
         Logger.log(`✅ Archived: ${recordName} (${uploadedFiles.length} files)`);
         
-        // If any uploaded files are images, also process them for image metadata
+        // Process images for metadata
         uploadedFiles.forEach(file => {
           if (ConfigManager.isImageFile(file.filename)) {
-            try {
-              Logger.log(`  🖼️ Processing image metadata for ${file.filename}...`);
-              const fileDetails = {
-                id: file.boxFileId,
-                name: file.filename,
-                path_collection: { entries: [] }
-              };
-              const imageMetadata = MetadataExtraction.orchestrateFullExtraction(fileDetails, boxToken);
-              BoxFileOperations.applyMetadata(file.boxFileId, imageMetadata, boxToken);
-            } catch (e) {
-              Logger.log(`  ⚠️ Could not add image metadata: ${e.toString()}`);
+            const fileSizeMB = file.size / (1024 * 1024);
+            
+            if (fileSizeMB > 20) {
+              // Skip Vision API for large images
+              Logger.log(`  🖼️ Skipping Vision API for large image ${file.filename} (${Math.round(fileSizeMB)}MB)`);
+              
+              // Still apply basic metadata
+              try {
+                const basicMetadata = {
+                  originalFilename: file.filename,
+                  fileFormat: file.filename.split('.').pop().toUpperCase(),
+                  fileSizeMB: Math.round(fileSizeMB * 100) / 100,
+                  processingStage: ConfigManager.PROCESSING_STAGE_BASIC,
+                  processingVersion: ConfigManager.getCurrentVersion(),
+                  notes: `Large file - Vision API skipped (${Math.round(fileSizeMB)}MB)`,
+                  lastProcessedDate: new Date().toISOString()
+                };
+                
+                BoxFileOperations.applyMetadata(file.boxFileId, basicMetadata, boxToken);
+                Logger.log(`  ✅ Added basic metadata for large image`);
+              } catch (e) {
+                Logger.log(`  ⚠️ Could not add basic metadata: ${e.toString()}`);
+              }
+            } else {
+              // Normal processing for smaller images
+              try {
+                Logger.log(`  🖼️ Processing image metadata for ${file.filename}...`);
+                const fileDetails = {
+                  id: file.boxFileId,
+                  name: file.filename,
+                  path_collection: { entries: [] }
+                };
+                const imageMetadata = MetadataExtraction.orchestrateFullExtraction(fileDetails, boxToken);
+                BoxFileOperations.applyMetadata(file.boxFileId, imageMetadata, boxToken);
+              } catch (e) {
+                Logger.log(`  ⚠️ Could not add image metadata: ${e.toString()}`);
+              }
             }
           }
         });
@@ -887,59 +1178,97 @@ function formatBytes(bytes) {
   
   function uploadToBoxWithMetadata_(attachment, folderId, boxToken, metadata) {
     try {
-      // Download from Airtable
-      const response = UrlFetchApp.fetch(attachment.url, { muteHttpExceptions: true });
-      if (response.getResponseCode() !== 200) {
-        return { success: false };
-      }
+      const sizeMB = attachment.size / (1024 * 1024);
       
-      // Upload to Box
-      const uploadResponse = UrlFetchApp.fetch('https://upload.box.com/api/2.0/files/content', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${boxToken}` },
-        payload: {
-          attributes: JSON.stringify({
-            name: attachment.filename,
-            parent: { id: folderId }
-          }),
-          file: response.getBlob()
-        },
-        muteHttpExceptions: true
-      });
+      // For very large files, add retry logic
+      let retries = sizeMB > 100 ? 3 : 1;
+      let lastError = null;
       
-      if (uploadResponse.getResponseCode() === 201) {
-        const boxFile = JSON.parse(uploadResponse.getContentText()).entries[0];
-        
-        // Add metadata to the file
-        const metadataTemplateKey = 'boxerArchiveMetadata';
+      while (retries > 0) {
         try {
-          BoxFileOperations.applyMetadata(boxFile.id, metadata, boxToken, metadataTemplateKey);
-          Logger.log(`  📋 Added archive metadata to ${attachment.filename}`);
-        } catch (e) {
-          Logger.log(`  ⚠️ Could not add metadata to ${attachment.filename}: ${e.toString()}`);
-        }
-        
-        // Create shared link
-        const sharedLinkAccess = ConfigManager.getProperty('BOX_AIRTABLE_SHARED_LINK_ACCESS');
-        const linkResponse = UrlFetchApp.fetch(`${ConfigManager.BOX_API_BASE_URL}/files/${boxFile.id}`, {
-          method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${boxToken}`,
-            'Content-Type': 'application/json'
-          },
-          payload: JSON.stringify({
-            shared_link: { access: sharedLinkAccess }
-          }),
-          muteHttpExceptions: true
-        });
-        
-        if (linkResponse.getResponseCode() === 200) {
-          const link = JSON.parse(linkResponse.getContentText()).shared_link.url;
-          return { success: true, link, fileId: boxFile.id };
+          // Download from Airtable
+          if (sizeMB > 50) {
+            Logger.log(`  ⬇️ Downloading large file from Airtable (${Math.round(sizeMB)}MB)...`);
+          }
+          
+          const response = UrlFetchApp.fetch(attachment.url, { muteHttpExceptions: true });
+          if (response.getResponseCode() !== 200) {
+            throw new Error(`Download failed: ${response.getResponseCode()}`);
+          }
+          
+          // Upload to Box
+          if (sizeMB > 50) {
+            Logger.log(`  ⬆️ Uploading to Box...`);
+          }
+          
+          const uploadResponse = UrlFetchApp.fetch('https://upload.box.com/api/2.0/files/content', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${boxToken}` },
+            payload: {
+              attributes: JSON.stringify({
+                name: attachment.filename,
+                parent: { id: folderId }
+              }),
+              file: response.getBlob()
+            },
+            muteHttpExceptions: true
+          });
+          
+          if (uploadResponse.getResponseCode() === 201) {
+            // Success!
+            const boxFile = JSON.parse(uploadResponse.getContentText()).entries[0];
+            
+            // Add metadata to the file
+            const metadataTemplateKey = 'boxerArchiveMetadata';
+            try {
+              // Add note about file size to metadata
+              const enhancedMetadata = {
+                ...metadata,
+                notes: sizeMB > 50 ? `Large file: ${Math.round(sizeMB)}MB` : undefined
+              };
+              BoxFileOperations.applyMetadata(boxFile.id, enhancedMetadata, boxToken, metadataTemplateKey);
+              Logger.log(`  📋 Added archive metadata to ${attachment.filename}`);
+            } catch (e) {
+              Logger.log(`  ⚠️ Could not add metadata to ${attachment.filename}: ${e.toString()}`);
+            }
+            
+            // Create shared link
+            const sharedLinkAccess = ConfigManager.getProperty('BOX_AIRTABLE_SHARED_LINK_ACCESS');
+            const linkResponse = UrlFetchApp.fetch(`${ConfigManager.BOX_API_BASE_URL}/files/${boxFile.id}`, {
+              method: 'PUT',
+              headers: {
+                'Authorization': `Bearer ${boxToken}`,
+                'Content-Type': 'application/json'
+              },
+              payload: JSON.stringify({
+                shared_link: { access: sharedLinkAccess }
+              }),
+              muteHttpExceptions: true
+            });
+            
+            if (linkResponse.getResponseCode() === 200) {
+              const link = JSON.parse(linkResponse.getContentText()).shared_link.url;
+              if (sizeMB > 50) {
+                Logger.log(`  ✅ Large file archived successfully!`);
+              }
+              return { success: true, link, fileId: boxFile.id };
+            }
+          }
+          
+          throw new Error(`Upload failed: ${uploadResponse.getResponseCode()}`);
+          
+        } catch (error) {
+          lastError = error;
+          retries--;
+          if (retries > 0) {
+            Logger.log(`  ⚠️ Error uploading, retrying... (${retries} attempts left)`);
+            Utilities.sleep(5000); // Wait 5 seconds before retry
+          }
         }
       }
       
-      return { success: false };
+      // All retries failed
+      throw lastError;
       
     } catch (error) {
       Logger.log(`  ❌ Upload error: ${error.toString()}`);
@@ -979,6 +1308,40 @@ function formatBytes(bytes) {
     } catch (error) {
       Logger.log(`Error saving stats: ${error.toString()}`);
     }
+  }
+  
+  // Helper function to categorize file types
+  function getFileCategory_(extension) {
+    const ext = extension.toLowerCase();
+    
+    const categories = {
+      'Images': ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp', 'heic', 'heif', 'svg'],
+      'Documents': ['pdf', 'doc', 'docx', 'txt', 'rtf', 'odt'],
+      'Spreadsheets': ['xls', 'xlsx', 'csv', 'ods'],
+      'Videos': ['mp4', 'mov', 'avi', 'wmv', 'flv', 'mkv', 'webm'],
+      'Audio': ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a'],
+      'Archives': ['zip', 'rar', '7z', 'tar', 'gz'],
+      'Design': ['psd', 'ai', 'sketch', 'fig', 'xd', 'indd'],
+      'CAD': ['dwg', 'dxf', 'step', 'stp', 'iges', 'stl'],
+      'Other': []
+    };
+    
+    for (const [category, extensions] of Object.entries(categories)) {
+      if (extensions.includes(ext)) {
+        return category;
+      }
+    }
+    
+    return 'Other';
+  }
+  
+  // Add helper function for bytes formatting
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
   
   return ns;
@@ -1061,4 +1424,10 @@ function testAirtableArchiveWithMetadata() {
     Logger.log('\n⚠️ No files archived - all records are less than 6 months old');
     Logger.log('💡 Try with an older base or reduce ARCHIVE_AGE_MONTHS in the code');
   }
+}
+
+// Quick access function for analysis
+function analyzeMyAirtableBase() {
+  const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
+  AirtableManager.analyzeStorage('appZDxOsDW7BzOJRg', apiKey);
 }

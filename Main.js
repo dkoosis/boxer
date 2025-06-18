@@ -57,27 +57,27 @@ const BoxerApp = {
       Logger.log(`📦 Processing ${baseIds.length} configured base(s)`);
       
       // Archive each configured base
-// Archive each configured base
-for (let i = 0; i < baseIds.length; i++) {
-  const baseId = baseIds[i];
-  const config = { baseId };
-  Logger.log(`\n🔄 [${i + 1}/${baseIds.length}] Processing base: ${baseId}`);
-  
-  const result = AirtableManager.archiveBase(config, apiKey, boxToken);
-  results.push(result);
-  
-  // Log space recovered for this base
-  if (result.success && result.totalFilesArchived > 0) {
-    Logger.log(`\n✅ BASE COMPLETE: ${result.baseName || baseId}`);
-    Logger.log(`   📦 Files archived: ${result.totalFilesArchived}`);
-    Logger.log(`   💾 Space recovered: ${formatBytes(result.totalBytesArchived)}`);
-    Logger.log(`   ⏱️ Time taken: ${(result.executionTimeMs/1000).toFixed(1)}s`);
-  } else if (result.success) {
-    Logger.log(`\n✅ BASE COMPLETE: ${result.baseName || baseId} - No files needed archiving`);
-  } else {
-    Logger.log(`\n❌ BASE FAILED: ${result.baseName || baseId} - ${result.error || 'Unknown error'}`);
-  }
-}      
+      for (let i = 0; i < baseIds.length; i++) {
+        const baseId = baseIds[i];
+        const config = { baseId };
+        Logger.log(`\n🔄 [${i + 1}/${baseIds.length}] Processing base: ${baseId}`);
+        
+        const result = AirtableManager.archiveBase(config, apiKey, boxToken);
+        results.push(result);
+        
+        // Log space recovered for this base
+        if (result.success && result.totalFilesArchived > 0) {
+          Logger.log(`\n✅ BASE COMPLETE: ${result.baseName || baseId}`);
+          Logger.log(`   📦 Files archived: ${result.totalFilesArchived}`);
+          Logger.log(`   💾 Space recovered: ${formatBytes(result.totalBytesArchived)}`);
+          Logger.log(`   ⏱️ Time taken: ${(result.executionTimeMs/1000).toFixed(1)}s`);
+        } else if (result.success) {
+          Logger.log(`\n✅ BASE COMPLETE: ${result.baseName || baseId} - No files needed archiving`);
+        } else {
+          Logger.log(`\n❌ BASE FAILED: ${result.baseName || baseId} - ${result.error || 'Unknown error'}`);
+        }
+      }
+      
       // Summary
       const totalFiles = results.reduce((sum, r) => sum + (r.totalFilesArchived || 0), 0);
       const totalBytes = results.reduce((sum, r) => sum + (r.totalBytesArchived || 0), 0);
@@ -379,6 +379,19 @@ for (let i = 0; i < baseIds.length; i++) {
   analyzeAirtable() {
     const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
     return AirtableManager.analyzeWorkspace(apiKey);
+  },
+  
+  /**
+   * Analyze specific Airtable base storage
+   * @param {string} baseId Base ID to analyze
+   */
+  analyzeAirtableBase(baseId) {
+    const apiKey = ConfigManager.getProperty('AIRTABLE_API_KEY');
+    if (!apiKey) {
+      Logger.log('❌ No Airtable API key configured');
+      return;
+    }
+    return AirtableManager.analyzeStorage(baseId, apiKey);
   },
   
   /**
@@ -697,6 +710,13 @@ function testArchiveCPCRM() {
   
   // Then run the archival
   return BoxerApp.archiveAirtable();
+}
+
+/**
+ * Analyze CP CRM storage
+ */
+function analyzeCPCRM() {
+  return BoxerApp.analyzeAirtableBase('appZDxOsDW7BzOJRg');
 }
 
 /**
