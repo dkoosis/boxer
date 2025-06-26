@@ -663,102 +663,140 @@ const AirtableManager = (function() {
 
   // Private helper functions
 
-  function _formatHtmlReport(bases) {
-    let html = `
-    <html>
-      <head>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; color: #333; }
-          h1, h2 { color: #111; border-bottom: 1px solid #ddd; padding-bottom: 5px;}
-          h1 { font-size: 24px; }
-          h2 { font-size: 20px; margin-top: 30px; }
-          table { border-collapse: collapse; width: 100%; margin-top: 15px; }
-          th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; }
-          .summary { background-color: #f9f9f9; padding: 15px; border: 1px solid #eee; border-radius: 5px; margin-bottom: 15px; }
-          .flag { font-weight: bold; }
-          .flag.warn { color: orange; }
-          .flag.danger { color: red; }
-          .total-row { font-weight: bold; background-color: #f5f5f5; }
-        </style>
-      </head>
-      <body>
-        <h1>Airtable Usage Report - ${new Date().toLocaleDateString()}</h1>
-    `;
-
-    let workspaceTotalRecords = 0;
-    let workspaceTotalBytes = 0;
-
-    bases.forEach(base => {
-      workspaceTotalRecords += base.totalRecords;
-      workspaceTotalBytes += base.totalAttachmentSize;
+function _formatHtmlReport(bases) {
+  // Get current configuration for the footer
+  const archiveAge = ConfigManager.getProperty('ARCHIVE_AGE_MONTHS') || '6';
+  const basesToArchive = ConfigManager.getProperty('AIRTABLE_BASES_TO_ARCHIVE');
+  const archiveCount = basesToArchive ? basesToArchive.split(',').length : 0;
+  
+  let html = `
+  <html>
+    <head>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 20px; color: #333; }
+        h1, h2 { color: #111; border-bottom: 1px solid #ddd; padding-bottom: 5px;}
+        h1 { font-size: 24px; }
+        h2 { font-size: 20px; margin-top: 30px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .summary { background-color: #f9f9f9; padding: 15px; border: 1px solid #eee; border-radius: 5px; margin-bottom: 15px; }
+        .intro { background-color: #e8f4f8; padding: 20px; border: 1px solid #b8e0e8; border-radius: 5px; margin-bottom: 25px; }
+        .footer { margin-top: 40px; padding: 20px; background-color: #f5f5f5; border-top: 2px solid #ddd; font-size: 14px; color: #666; }
+        .flag { font-weight: bold; }
+        .flag.warn { color: orange; }
+        .flag.danger { color: red; }
+        .total-row { font-weight: bold; background-color: #f5f5f5; }
+      </style>
+    </head>
+    <body>
+      <h1>Airtable Usage Report - ${new Date().toLocaleDateString()}</h1>
       
-      const recordPercent = Math.round((base.totalRecords / TEAM_PLAN_RECORD_LIMIT) * 100);
-      const attachmentPercent = Math.round((base.totalAttachmentSize / (TEAM_PLAN_ATTACHMENT_LIMIT_GB * 1e9)) * 100);
+      <div class="intro">
+        <h3>About This Report</h3>
+        <p>This automated report provides a comprehensive overview of your Airtable workspace storage usage. 
+        It monitors all bases (databases) in your workspace and tracks:</p>
+        <ul>
+          <li><strong>Record counts</strong> against the Team Plan limit of 50,000 records per base</li>
+          <li><strong>Attachment storage</strong> against the Team Plan limit of 20 GB per base</li>
+          <li><strong>Potential issues</strong> highlighted in <span style="color: orange;">orange (>75% usage)</span> 
+          or <span style="color: red;">red (>90% usage)</span></li>
+        </ul>
+        <p>The report is generated after weekly archival processes that move attachments older than ${archiveAge} months to Box, 
+        helping maintain storage capacity and performance.</p>
+      </div>
+  `;
 
-      const recordFlag = recordPercent > 90 ? 'danger' : (recordPercent > 75 ? 'warn' : '');
-      const attachmentFlag = attachmentPercent > 90 ? 'danger' : (attachmentPercent > 75 ? 'warn' : '');
+  let workspaceTotalRecords = 0;
+  let workspaceTotalBytes = 0;
 
-      html += `
-        <h2>${base.name}</h2>
-        <div class="summary">
-          <strong>Total Records:</strong> <span class="flag ${recordFlag}">${base.totalRecords.toLocaleString()} / ${TEAM_PLAN_RECORD_LIMIT.toLocaleString()} (${recordPercent}%)</span><br>
-          <strong>Total Attachments:</strong> <span class="flag ${attachmentFlag}">${formatBytes(base.totalAttachmentSize)} / ${TEAM_PLAN_ATTACHMENT_LIMIT_GB} GB (${attachmentPercent}%)</span>
-        </div>
-      `;
-      
-      if (base.tables && base.tables.length > 0) {
-        html += `
-        <table>
-          <thead>
-            <tr>
-              <th>Table Name</th>
-              <th>Record Count</th>
-              <th>Attachment Size</th>
-              <th>Last Record Added</th>
-            </tr>
-          </thead>
-          <tbody>
-        `;
-        
-        // Sort tables by record count descending
-        base.tables.sort((a,b) => b.recordCount - a.recordCount);
-
-        base.tables.forEach(table => {
-          html += `
-            <tr>
-              <td>${table.name}</td>
-              <td>${table.recordCount.toLocaleString()}</td>
-              <td>${formatBytes(table.attachmentSize)}</td>
-              <td>${table.lastModified ? new Date(table.lastModified).toLocaleDateString() : 'N/A'}</td>
-            </tr>
-          `;
-        });
-        
-        html += `
-          </tbody>
-        </table>
-        `;
-      }
-    });
-
-    // Add workspace totals
-    const workspaceRecordPercent = Math.round((workspaceTotalRecords / TEAM_PLAN_RECORD_LIMIT) * 100);
-    const workspaceAttachmentPercent = Math.round((workspaceTotalBytes / (TEAM_PLAN_ATTACHMENT_LIMIT_GB * 1e9)) * 100);
+  bases.forEach(base => {
+    workspaceTotalRecords += base.totalRecords;
+    workspaceTotalBytes += base.totalAttachmentSize;
     
+    const recordPercent = Math.round((base.totalRecords / TEAM_PLAN_RECORD_LIMIT) * 100);
+    const attachmentPercent = Math.round((base.totalAttachmentSize / (TEAM_PLAN_ATTACHMENT_LIMIT_GB * 1e9)) * 100);
+
+    const recordFlag = recordPercent > 90 ? 'danger' : (recordPercent > 75 ? 'warn' : '');
+    const attachmentFlag = attachmentPercent > 90 ? 'danger' : (attachmentPercent > 75 ? 'warn' : '');
+
     html += `
-      <h2>Workspace Totals</h2>
+      <h2>${base.name}</h2>
       <div class="summary">
-        <strong>All Bases Combined:</strong><br>
-        Records: ${workspaceTotalRecords.toLocaleString()} / ${TEAM_PLAN_RECORD_LIMIT.toLocaleString()} (${workspaceRecordPercent}%)<br>
-        Attachments: ${formatBytes(workspaceTotalBytes)} / ${TEAM_PLAN_ATTACHMENT_LIMIT_GB} GB (${workspaceAttachmentPercent}%)
+        <strong>Base ID:</strong> ${base.id}<br>
+        <strong>Total Records:</strong> <span class="flag ${recordFlag}">${base.totalRecords.toLocaleString()} / ${TEAM_PLAN_RECORD_LIMIT.toLocaleString()} (${recordPercent}%)</span><br>
+        <strong>Total Attachments:</strong> <span class="flag ${attachmentFlag}">${formatBytes(base.totalAttachmentSize)} / ${TEAM_PLAN_ATTACHMENT_LIMIT_GB} GB (${attachmentPercent}%)</span>
       </div>
     `;
+    
+    if (base.tables && base.tables.length > 0) {
+      html += `
+      <table>
+        <thead>
+          <tr>
+            <th>Table Name</th>
+            <th>Record Count</th>
+            <th>Attachment Size</th>
+            <th>Last Record Added</th>
+          </tr>
+        </thead>
+        <tbody>
+      `;
+      
+      // Sort tables by record count descending
+      base.tables.sort((a,b) => b.recordCount - a.recordCount);
 
-    html += `</body></html>`;
-    return html;
-  }
+      base.tables.forEach(table => {
+        html += `
+          <tr>
+            <td>${table.name}</td>
+            <td>${table.recordCount.toLocaleString()}</td>
+            <td>${formatBytes(table.attachmentSize)}</td>
+            <td>${table.lastModified ? new Date(table.lastModified).toLocaleDateString() : 'N/A'}</td>
+          </tr>
+        `;
+      });
+      
+      html += `
+        </tbody>
+      </table>
+      `;
+    }
+  });
 
+  // Add workspace totals
+  const workspaceRecordPercent = Math.round((workspaceTotalRecords / TEAM_PLAN_RECORD_LIMIT) * 100);
+  const workspaceAttachmentPercent = Math.round((workspaceTotalBytes / (TEAM_PLAN_ATTACHMENT_LIMIT_GB * 1e9)) * 100);
+  
+  html += `
+    <h2>Workspace Totals</h2>
+    <div class="summary">
+      <strong>All Bases Combined:</strong><br>
+      Records: ${workspaceTotalRecords.toLocaleString()} / ${TEAM_PLAN_RECORD_LIMIT.toLocaleString()} (${workspaceRecordPercent}% average per base)<br>
+      Attachments: ${formatBytes(workspaceTotalBytes)} / ${TEAM_PLAN_ATTACHMENT_LIMIT_GB} GB (${workspaceAttachmentPercent}% average per base)<br>
+      <br>
+      <em>Note: Limits apply per base, not to the workspace total.</em>
+    </div>
+  `;
+
+  // Add footer with system information
+  html += `
+    <div class="footer">
+      <strong>About This Automated Report</strong><br>
+      <p>
+        Generated by: <strong>Boxer for Airtable</strong> - Powerhouse Tech Services<br>
+        Script Location: Google Apps Script (Project: Boxer)<br>
+        Schedule: Runs weekly after archival process (${archiveCount} bases configured for archival)<br>
+        <br>
+        This report can also be generated on-demand or scheduled separately.<br>
+        For questions or modifications, contact Powerhouse Tech Services.
+      </p>
+    </div>
+  `;
+
+  html += `</body></html>`;
+  return html;
+}
   function _getTableStats(baseId, table, apiKey) {
     let recordCount = 0;
     let totalAttachmentSize = 0;
