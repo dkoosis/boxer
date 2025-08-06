@@ -1,6 +1,6 @@
 // File: ConfigManager.js
 // Unified configuration management for Boxer
-// Clean version without legacy migration code
+// Updated with Airtable governance features and large file support
 
 const ConfigManager = (function() {
   'use strict';
@@ -19,7 +19,7 @@ const ConfigManager = (function() {
   // Internal constants
   ns.ERROR_LOG_SHEET_NAME = 'Error_Log';
   ns.PROCESSING_STATS_SHEET_NAME = 'Processing_Stats';
-  ns.SCRIPT_VERSION = '3.1';
+  ns.SCRIPT_VERSION = '3.0';
   
   // Processing constants
   ns.IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.heic', '.heif'];
@@ -65,6 +65,38 @@ const ConfigManager = (function() {
         return cacheFolder.getId();
       }
     },
+
+    AIRTABLE_BASES_TO_ARCHIVE: {
+      required: false,
+      category: 'airtable',
+      description: 'Comma-separated list of Airtable base IDs to archive weekly',
+      default: '',
+      validate: val => true
+    },
+    
+    ARCHIVE_AGE_MONTHS: {
+      required: false,
+      category: 'airtable',
+      description: 'Archive attachments older than this many months',
+      default: '6',
+      validate: val => !val || (!isNaN(parseInt(val)) && parseInt(val) > 0)
+    },
+    
+    AIRTABLE_MAX_FILE_SIZE_MB: {
+      required: false,
+      category: 'airtable',
+      description: 'Maximum file size in MB to archive from Airtable (0 = no limit)',
+      default: '0',
+      validate: val => !val || (!isNaN(parseInt(val)) && parseInt(val) >= 0)
+    },
+    
+    BOX_ARCHIVE_METADATA_ID: {
+      required: false,
+      category: 'box_config',
+      description: 'Box metadata template key for archived files',
+      default: 'boxerArchiveMetadata',
+      validate: val => !val || val.length > 0
+    },
     
     BOXER_TRACKING_SHEET: {
       required: true,
@@ -80,6 +112,14 @@ const ConfigManager = (function() {
         }
       },
       autoCreate: () => createTrackingSheet()
+    },
+    
+    PRIORITY_FOLDER_TREE: {
+      required: false,
+      category: 'box_config',
+      description: 'Folder path substring for priority processing',
+      default: '0_SHARED RESOURCES',
+      validate: val => !val || val.length > 0
     },
 
     // Box Authentication
@@ -153,14 +193,6 @@ const ConfigManager = (function() {
       validate: () => true
     },
     
-    PRIORITY_FOLDER_TREE: {
-      required: false,
-      category: 'box_config',
-      description: 'Folder path substring for priority processing',
-      default: '0_SHARED RESOURCES',
-      validate: val => !val || val.length > 0
-    },
-    
     // External APIs
     GOOGLE_VISION_API_KEY: {
       required: false,
@@ -195,6 +227,22 @@ const ConfigManager = (function() {
     },
     
     // Airtable Configuration
+    AIRTABLE_GOVERNANCE_BASE_ID: {
+      required: false,
+      category: 'airtable',
+      description: 'The Base ID for the Airtable Governance base itself.',
+      default: '',
+      validate: val => !val || val.startsWith('app')
+    },
+
+    AIRTABLE_GOVERNANCE_TABLE_NAME: {
+      required: false,
+      category: 'airtable',
+      description: 'The Table Name in the Governance base where base metadata is stored.',
+      default: 'Bases',
+      validate: () => true
+    },
+    
     AIRTABLE_BASE_ID: {
       required: false,
       category: 'airtable',
@@ -227,38 +275,6 @@ const ConfigManager = (function() {
       validate: () => true
     },
 
-    AIRTABLE_BASES_TO_ARCHIVE: {
-      required: false,
-      category: 'airtable',
-      description: 'Comma-separated list of Airtable base IDs to archive weekly',
-      default: '',
-      validate: val => true
-    },
-    
-    ARCHIVE_AGE_MONTHS: {
-      required: false,
-      category: 'airtable',
-      description: 'Archive attachments older than this many months',
-      default: '6',
-      validate: val => !val || (!isNaN(parseInt(val)) && parseInt(val) > 0)
-    },
-    
-    AIRTABLE_MAX_FILE_SIZE_MB: {
-      required: false,
-      category: 'airtable',
-      description: 'Maximum file size in MB to archive from Airtable (0 = no limit)',
-      default: '0',
-      validate: val => !val || (!isNaN(parseInt(val)) && parseInt(val) >= 0)
-    },
-    
-    AIRTABLE_REPORT_RECIPIENT: {
-      required: false,
-      category: 'airtable',
-      description: 'Email address to receive Airtable usage reports',
-      default: 'archie@powerhousearts.org',
-      validate: val => !val || val.includes('@')
-    },
-
     BOX_AIRTABLE_ARCHIVE_FOLDER: {
       required: false,
       category: 'airtable',
@@ -274,56 +290,55 @@ const ConfigManager = (function() {
       default: 'company',
       validate: val => ['open', 'company', 'collaborators'].includes(val)
     },
-    
-    BOX_ARCHIVE_METADATA_ID: {
-      required: false,
-      category: 'box_config',
-      description: 'Box metadata template key for archived files',
-      default: 'boxerArchiveMetadata',
-      validate: val => !val || val.length > 0
-    },
 
     // Throttling Controls
     AIRTABLE_PROCESSING_BATCH_SIZE: {
-      required: false, 
-      category: 'throttling', 
-      description: 'Number of Airtable records to process per run.',
-      default: 5, 
-      validate: val => !isNaN(parseInt(val))
+      required: false, category: 'throttling', description: 'Number of Airtable records to process per run.',
+      default: 5, validate: val => !isNaN(parseInt(val))
     },
-    
     AIRTABLE_SLEEP_DELAY_MS: {
-      required: false, 
-      category: 'throttling', 
-      description: 'Delay between processing Airtable records in ms.',
-      default: 2000, 
-      validate: val => !isNaN(parseInt(val))
+      required: false, category: 'throttling', description: 'Delay between processing Airtable records in ms.',
+      default: 2000, validate: val => !isNaN(parseInt(val))
     },
-    
     METADATA_ATTACH_BATCH_SIZE: {
-      required: false, 
-      category: 'throttling', 
-      description: 'Number of files to attach metadata templates to in a batch.',
-      default: 50, 
-      validate: val => !isNaN(parseInt(val))
+      required: false, category: 'throttling', description: 'Number of files to attach metadata templates to in a batch.',
+      default: 50, validate: val => !isNaN(parseInt(val))
     },
-    
     METADATA_ATTACH_FILE_DELAY_MS: {
-      required: false, 
-      category: 'throttling', 
-      description: 'Delay between individual file template attachments in ms.',
-      default: 100, 
-      validate: val => !isNaN(parseInt(val))
+        required: false, category: 'throttling', description: 'Delay between individual file template attachments in ms.',
+        default: 100, validate: val => !isNaN(parseInt(val))
     },
-    
     METADATA_ATTACH_BATCH_DELAY_MS: {
-      required: false, 
-      category: 'throttling', 
-      description: 'Delay between batches of template attachments in ms.',
-      default: 2000, 
-      validate: val => !isNaN(parseInt(val))
+        required: false, category: 'throttling', description: 'Delay between batches of template attachments in ms.',
+        default: 2000, validate: val => !isNaN(parseInt(val))
     }
   };
+  
+  // Migration map from old to new property names
+  const MIGRATION_MAP = {
+    'DRIVE_CACHE_FOLDER_ID': 'BOXER_CACHE_FOLDER',
+    'TRACKING_SHEET_ID': 'BOXER_TRACKING_SHEET',
+    'BOX_OAUTH_CLIENT_ID': 'BOX_CLIENT_ID',
+    'BOX_OAUTH_CLIENT_SECRET': 'BOX_CLIENT_SECRET',
+    'BOX_METADATA_SCOPE': 'BOX_ENTERPRISE_ID',
+    'BOX_METADATA_TEMPLATE_KEY': 'BOX_IMAGE_METADATA_ID',
+    'IMAGE_METADATA_TEMPLATE_KEY': 'BOX_IMAGE_METADATA_ID',
+    'LEGAL_METADATA_TEMPLATE_KEY': 'BOX_LEGAL_METADATA_ID',
+    'BOX_REPORTS_FOLDER_ID': 'BOX_REPORTS_FOLDER',
+    'ACTIVE_TEST_FOLDER_ID': 'BOX_PRIORITY_FOLDER',
+    'VISION_API_KEY': 'GOOGLE_VISION_API_KEY',
+    'GEOCODE_API_KEY': 'GOOGLE_GEOCODE_API_KEY',
+    'AIRTABLE_DEFAULT_BASE_ID': 'AIRTABLE_BASE_ID',
+    'AIRTABLE_DEFAULT_TABLE_NAME': 'AIRTABLE_TABLE_NAME',
+    'AIRTABLE_ROOT_FOLDER_ID': 'BOX_AIRTABLE_ARCHIVE_FOLDER'
+  };
+  
+  // Properties to remove
+  const DEPRECATED_PROPERTIES = [
+    'BUILD_NUMBER', 'BOXER_REPORT_CHECKPOINT', 'BOXER_REPORT_STATS',
+    'BOXER_AIRTABLE_STATS', 'BOXER_AIRTABLE_ERRORS', 
+    'ERROR_LOG_SHEET_NAME', 'TRACKING_SHEET_NAME'
+  ];
   
   // Helper functions
   function getOrCreateBoxerFolder() {
@@ -349,7 +364,6 @@ const ConfigManager = (function() {
     const boxerFolder = getOrCreateBoxerFolder();
     const sheet = SpreadsheetApp.create('Boxer_Analytics');
     
-    // Set up error log sheet
     const errorSheet = sheet.getActiveSheet();
     errorSheet.setName(ns.ERROR_LOG_SHEET_NAME);
     errorSheet.getRange(1, 1, 1, 5).setValues([[
@@ -357,7 +371,6 @@ const ConfigManager = (function() {
     ]]);
     errorSheet.setFrozenRows(1);
     
-    // Set up stats sheet
     const statsSheet = sheet.insertSheet(ns.PROCESSING_STATS_SHEET_NAME);
     statsSheet.getRange(1, 1, 1, 7).setValues([[
       'Timestamp', 'Run Type', 'Files Found', 'Files Processed', 'Files Skipped', 
@@ -365,7 +378,6 @@ const ConfigManager = (function() {
     ]]);
     statsSheet.setFrozenRows(1);
     
-    // Move to Boxer folder
     DriveApp.getFileById(sheet.getId()).moveTo(boxerFolder);
     
     return sheet.getId();
@@ -389,9 +401,6 @@ const ConfigManager = (function() {
   
   // Public API
   
-  /**
-   * Get a property value with validation
-   */
   ns.getProperty = function(key) {
     const def = PROPERTY_DEFINITIONS[key];
     if (!def) {
@@ -412,9 +421,6 @@ const ConfigManager = (function() {
     return value;
   };
   
-  /**
-   * Set a property value
-   */
   ns.setProperty = function(key, value) {
     const def = PROPERTY_DEFINITIONS[key];
     if (!def) {
@@ -430,17 +436,11 @@ const ConfigManager = (function() {
     return true;
   };
   
-  /**
-   * Get Box metadata scope
-   */
   ns.getBoxMetadataScope = function() {
     const enterpriseId = ns.getProperty('BOX_ENTERPRISE_ID');
     return enterpriseId ? `enterprise_${enterpriseId}` : 'enterprise';
   };
   
-  /**
-   * Validate all configuration
-   */
   ns.validate = function(autoFix = false) {
     const results = {
       valid: true,
@@ -490,9 +490,69 @@ const ConfigManager = (function() {
     return results;
   };
   
-  /**
-   * Get configuration status
-   */
+  ns.migrate = function() {
+    const results = {
+      migrated: [],
+      removed: [],
+      special: []
+    };
+    
+    Object.keys(MIGRATION_MAP).forEach(oldKey => {
+      const oldValue = ns.SCRIPT_PROPERTIES.getProperty(oldKey);
+      if (oldValue) {
+        const newKey = MIGRATION_MAP[oldKey];
+        
+        if (oldKey === 'BOX_METADATA_SCOPE') {
+          const match = oldValue.match(/enterprise_(\d+)/);
+          if (match) {
+            ns.setProperty('BOX_ENTERPRISE_ID', match[1]);
+            results.special.push('Extracted enterprise ID from ' + oldKey);
+          }
+        } else {
+          ns.setProperty(newKey, oldValue);
+        }
+        
+        ns.SCRIPT_PROPERTIES.deleteProperty(oldKey);
+        results.migrated.push(`${oldKey} → ${newKey}`);
+      }
+    });
+    
+    DEPRECATED_PROPERTIES.forEach(key => {
+      if (ns.SCRIPT_PROPERTIES.getProperty(key)) {
+        ns.SCRIPT_PROPERTIES.deleteProperty(key);
+        results.removed.push(key);
+      }
+    });
+    
+    return results;
+  };
+  
+  ns.repair = function() {
+    Logger.log('🛠️ === Repairing Configuration ===');
+    
+    const issues = [];
+    
+    Object.keys(PROPERTY_DEFINITIONS).forEach(key => {
+      const value = ns.SCRIPT_PROPERTIES.getProperty(key);
+      const def = PROPERTY_DEFINITIONS[key];
+      
+      if (value && def.validate && !def.validate(value)) {
+        issues.push(key);
+        ns.SCRIPT_PROPERTIES.deleteProperty(key);
+        Logger.log(`🗑️ Cleared invalid ${key}`);
+      }
+    });
+    
+    if (issues.length > 0) {
+      Logger.log(`✅ Cleared ${issues.length} invalid properties`);
+      Logger.log('💡 Run BoxerApp.setup() to recreate');
+    } else {
+      Logger.log('✅ No invalid properties found');
+    }
+    
+    return issues;
+  };
+  
   ns.getStatus = function() {
     const status = {
       categories: {},
@@ -544,29 +604,17 @@ const ConfigManager = (function() {
     return status;
   };
   
-  /**
-   * Store runtime state
-   */
   ns.setState = function(key, value, expirationInSeconds = 21600) {
     ns.CACHE_SERVICE.put(key, JSON.stringify(value), expirationInSeconds);
   };
   
-  /**
-   * Get runtime state
-   */
   ns.getState = function(key) {
     const value = ns.CACHE_SERVICE.get(key);
     return value ? JSON.parse(value) : null;
   };
   
-  /**
-   * Get current script version
-   */
   ns.getCurrentVersion = () => ns.SCRIPT_VERSION;
   
-  /**
-   * Check if file is an image
-   */
   ns.isImageFile = function(filename) {
     if (!filename) return false;
     const lower = filename.toLowerCase();
